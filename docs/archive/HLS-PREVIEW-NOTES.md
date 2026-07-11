@@ -20,7 +20,7 @@ data\hls
 可用环境变量覆盖：
 
 ```text
-HLS_DIR=D:\gallery-hls
+HLS_DIR=<your-hls-folder>
 ```
 
 服务端会静态提供：
@@ -35,7 +35,7 @@ HLS_DIR=D:\gallery-hls
 示例：
 
 ```powershell
-.\make-hls.ps1 -VideoPath "E:\A_秀人\某模特\某作品\video.mp4"
+.\make-hls.ps1 -VideoPath "<your-media-folder>\model\album\video.mp4"
 ```
 
 如果没有设置 `FFMPEG_PATH`，脚本会尝试使用系统 PATH 里的 `ffmpeg`。

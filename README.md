@@ -53,7 +53,7 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 └─ .env.example                  # 环境变量格式示例
 ```
 
-`README-SERVER-WINDOWS.md`、`HLS-PREVIEW-NOTES.md`、`SQLITE-INDEX-NOTES.md` 和 `ROADMAP-GALLERY-UPGRADE.md` 是继承的专项或历史说明。当前运行事实以本 README、`网页.md` 和 `docs/` 为准；是否删除或归档历史文档必须经过清理审计。
+继承的旧 Windows 部署、HLS 预研、SQLite 迁移和升级路线说明已归档到 `docs/archive/`。它们只用于历史追溯，不能作为当前运行依据。
 
 ## 环境要求
 
@@ -151,5 +151,7 @@ start-server-48101.cmd
 - `网页.md`：页面、路由、按钮、API、数据库和交接索引
 - `AGENTS.md`：未来 Codex 和维护者必须遵守的规则
 - `docs/DEVELOPMENT.md`：开发、验证和提交工作流
+- `docs/CLEANUP_REPORT.md`：V1.2 文件、脚本和代码候选审计
 - `docs/MIGRATION_SOURCE.md`：迁移来源、验证与冻结记录
 - `docs/MIGRATION_MANIFEST.md`：迁移文件映射和 Git 审计
+- `docs/archive/`：已被当前文档替代但仍有追溯价值的历史说明

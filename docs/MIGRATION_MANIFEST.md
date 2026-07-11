@@ -14,10 +14,10 @@
 | `fix-network-access-48101.cmd` | same | B | migrated | no | Windows 网络配置入口 |
 | `fix-network-access-48101.ps1` | same | B | migrated | no | Windows 防火墙配置 |
 | `make-hls.ps1` | same | B | migrated | no | HLS 生成工具 |
-| `HLS-PREVIEW-NOTES.md` | same | B | migrated | no | HLS 说明 |
-| `README-SERVER-WINDOWS.md` | same | B | migrated | no | 历史部署参考，可能过时 |
-| `ROADMAP-GALLERY-UPGRADE.md` | same | C | migrated | no | 历史规划参考，不作为运行依据 |
-| `SQLITE-INDEX-NOTES.md` | same | B | migrated | no | SQLite 迁移说明 |
+| `HLS-PREVIEW-NOTES.md` | `docs/archive/HLS-PREVIEW-NOTES.md` | B | archived in V1.2 | yes | 保留 HLS 设计历史，旧路径示例不再作为当前说明 |
+| `README-SERVER-WINDOWS.md` | `docs/archive/README-SERVER-WINDOWS.md` | B | archived in V1.2 | yes | 旧部署说明已被 README 替代且包含过期事实 |
+| `ROADMAP-GALLERY-UPGRADE.md` | `docs/archive/ROADMAP-GALLERY-UPGRADE.md` | B | archived in V1.2 | yes | 大量路线已实现，仅保留历史规划价值 |
+| `SQLITE-INDEX-NOTES.md` | `docs/archive/SQLITE-INDEX-NOTES.md` | B | archived in V1.2 | yes | 旧 SQLite 过渡说明包含已失效兼容信息 |
 | root `网页.md` | `网页.md` | A | migrated | yes | 保留旧审计并增加新项目基线说明 |
 | source `.gitignore` | `.gitignore` | A | replaced | yes | 加强生产数据和缓存排除 |
 | source `.git` | none | D | excluded | n/a | 不继承旧仓库历史 |
