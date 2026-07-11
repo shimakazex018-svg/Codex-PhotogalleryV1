@@ -37,3 +37,12 @@
 - `docs/MIGRATION_SOURCE.md`
 - `docs/MIGRATION_MANIFEST.md`
 - empty `data/.gitkeep` and `photos/.gitkeep`
+
+## V1.0.1 freeze audit
+
+- 核心运行文件保持功能镜像提交内容不变。
+- `data` 和 `photos` 只跟踪 `.gitkeep`。
+- Git 不跟踪数据库、日志、缓存、缩略图、HLS、测试运行目录或用户媒体。
+- `.env.example` 只记录非敏感示例，不会被应用自动加载。
+- README、AGENTS、网页和本迁移记录共同定义迁移冻结基线。
+- `v1.0-migration` 标签在 V1.0.1 文档提交后创建。
