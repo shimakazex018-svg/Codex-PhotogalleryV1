@@ -152,6 +152,7 @@ start-server-48101.cmd
 - `AGENTS.md`：未来 Codex 和维护者必须遵守的规则
 - `docs/DEVELOPMENT.md`：开发、验证和提交工作流
 - `docs/CLEANUP_REPORT.md`：V1.2 文件、脚本和代码候选审计
+- `docs/CODE_CLEANUP_REPORT.md`：V1.2.5 死代码证据与验证结果
 - `docs/MIGRATION_SOURCE.md`：迁移来源、验证与冻结记录
 - `docs/MIGRATION_MANIFEST.md`：迁移文件映射和 Git 审计
 - `docs/archive/`：已被当前文档替代但仍有追溯价值的历史说明

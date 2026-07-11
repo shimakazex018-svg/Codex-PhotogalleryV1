@@ -186,11 +186,6 @@ function toUrl(filePath) {
   return `/photos/${relative}`;
 }
 
-function toRootUrl(filePath) {
-  const relative = path.relative(rootDir, filePath).split(path.sep).map(encodeURIComponent).join("/");
-  return `/${relative}`;
-}
-
 function toHighlightUrl(filePath) {
   const relative = path.relative(highlightDir, filePath).split(path.sep).map(encodeURIComponent).join("/");
   return `/highlight-carousel/${relative}`;
@@ -449,27 +444,6 @@ function mediaSrcToFilePath(src) {
     return isInsideDir(photosDir, filePath) ? filePath : "";
   } catch (error) {
     return "";
-  }
-}
-
-function registerKnownMediaUrls(items = []) {
-  for (const item of items) {
-    const sourcePath = mediaSrcToFilePath(item.src || "");
-    if (!sourcePath) continue;
-    for (const thumbUrl of [item.thumb, item.previewThumb, item.detailThumb, item.carouselThumb]) {
-      const match = String(thumbUrl || "").match(/^\/image-thumbnails\/(480|720|960)\/([a-f0-9]+)\.jpg$/);
-      if (match) imageThumbnailSources.set(`${match[1]}/${match[2]}`, sourcePath);
-    }
-    const posterMatch = String(item.poster || "").match(/^\/video-posters\/([a-f0-9]+)\.jpg$/);
-    if (posterMatch) videoPosterSources.set(posterMatch[1], sourcePath);
-  }
-}
-
-function registerKnownMediaUrlsFromCollections(collections = []) {
-  for (const collection of collections) {
-    registerKnownMediaUrls(collection.images || []);
-    registerKnownMediaUrls(collection.videos || []);
-    registerKnownMediaUrlsFromCollections(collection.children || []);
   }
 }
 
@@ -782,44 +756,6 @@ function hashForParts(parts) {
   return `#/${parts.map(encodeURIComponent).join("/")}`;
 }
 
-function collectHighlightCandidatesFromWork(model, work, candidates) {
-  const parts = work.id.split("/");
-  const href = hashForParts(parts);
-  for (const image of work.images || []) {
-    candidates.push({
-      source: image.src,
-      carouselThumb: image.carouselThumb,
-      href,
-      title: work.title,
-      model: model.name,
-    });
-  }
-
-  for (const childWork of work.works || []) {
-    collectHighlightCandidatesFromWork(model, childWork, candidates);
-  }
-}
-
-function collectHighlightCandidates(gallery) {
-  const candidates = [];
-  for (const model of gallery.models || []) {
-    for (const image of model.images || []) {
-      candidates.push({
-        source: image.src,
-        carouselThumb: image.carouselThumb,
-        href: hashForParts([model.id]),
-        title: model.name,
-        model: model.name,
-      });
-    }
-
-    for (const work of model.works || []) {
-      collectHighlightCandidatesFromWork(model, work, candidates);
-    }
-  }
-  return candidates;
-}
-
 function shuffleItems(items) {
   const shuffled = [...items];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -893,45 +829,6 @@ function clearHighlightFolder() {
     if (!entry.isFile()) continue;
     fs.rmSync(path.join(highlightDir, entry.name), { force: true });
   }
-}
-
-function ensureHighlightCarousel(gallery) {
-  const hourKey = startOfHour();
-  const storedItems = readStoredHighlights(hourKey);
-  if (storedItems) return storedItems;
-
-  clearHighlightFolder();
-  const selected = shuffleItems(bestHighlightGroup(collectHighlightCandidates(gallery))).slice(0, 20);
-  const items = [];
-
-  const filePrefix = fileSafeHourKey(hourKey);
-  selected.forEach((candidate, index) => {
-    const sourcePath = candidate.sourcePath || photoUrlToPath(candidate.source);
-    if (!sourcePath || !fs.existsSync(sourcePath)) return;
-
-    const thumbId = path.basename(candidate.carouselThumb || "", ".jpg");
-    const thumbPath = thumbId ? path.join(imageThumbnailsDir, "960", `${thumbId}.jpg`) : "";
-    const copyPath =
-      thumbPath && isInsideDir(imageThumbnailsDir, thumbPath) && generateImageThumbnail(sourcePath, thumbPath, 960)
-        ? thumbPath
-        : sourcePath;
-
-    const extension = path.extname(copyPath).toLowerCase() || ".jpg";
-    const fileName = `${filePrefix}-${String(index + 1).padStart(2, "0")}${extension}`;
-    const targetPath = path.join(highlightDir, fileName);
-    fs.copyFileSync(copyPath, targetPath);
-    items.push({
-      src: toHighlightUrl(targetPath),
-      href: candidate.href,
-      title: candidate.title,
-      model: candidate.model,
-      width: candidate.width,
-      height: candidate.height,
-    });
-  });
-
-  fs.writeFileSync(highlightFile, JSON.stringify({ generatedAt: new Date().toISOString(), hourKey, version: highlightSelectionVersion, items }, null, 2), "utf8");
-  return items;
 }
 
 function collectHighlightCandidatesFromDb() {

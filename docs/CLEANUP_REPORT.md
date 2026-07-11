@@ -48,9 +48,9 @@
 
 | 文件/目录 | 类型 | 判断依据 | 操作 | 风险 |
 |---|---|---|---|---|
-| `server.js: toRootUrl()` | C：疑似死代码 | 静态词法计数仅出现于函数声明 | 保留，未来结合运行覆盖确认 | 静态分析不能排除隐藏/动态依赖 |
-| `server.js: ensureHighlightCarousel()` | C：疑似死代码 | 静态词法计数仅出现于函数声明 | 保留，未来结合轮播回归确认 | 涉及轮播缓存生成，误删可能影响首页 |
-| `server.js: registerKnownMediaUrlsFromCollections()` | C：疑似死代码 | 只发现声明和函数自身递归，没有外部调用 | 保留；与已知 poster 映射问题一起审计 | 可能是未接通但计划用于恢复映射的兼容逻辑 |
+| `server.js: toRootUrl()` | A：确认死代码 | V1.2.5 确认只有声明，无导出、路由或动态调用 | 已在 V1.2.5 删除 | 无当前调用者 |
+| `server.js: ensureHighlightCarousel()` | A：确认旧轮播死代码 | 当前 API 和定时任务均调用 SQLite 版本 `ensureHighlightCarouselFromDb()` | 已在 V1.2.5 连同两个专用候选收集函数删除 | SQLite 轮播链路保持不变 |
+| `server.js: registerKnownMediaUrlsFromCollections()` | A：确认死代码 | 只有声明和自身递归，扫描/SQLite/视频链路均无入口 | 已在 V1.2.5 连同唯一专用辅助函数删除 | 未修复也未扩大既有 poster 映射问题 |
 | `server.js: /api/gallery`、`/api/refresh` 410 分支 | C：兼容拒绝接口 | 路由明确注册，用于告知旧客户端迁移到 SQLite API | 保留 | 删除会把明确 410 变为普通 404，改变 API 行为 |
 | `server.js` 日志输出 | C：运维日志 | 用于启动、扫描子进程、轮播刷新和错误诊断 | 保留 | 删除会降低故障可观察性 |
 | `app.js` 函数集合 | C：当前前端逻辑 | 函数声明均至少有一处调用/绑定；包含路由、设置、查重和灯箱 | 全部保留 | 静态事件绑定和 hash 路由不适合激进删除 |
