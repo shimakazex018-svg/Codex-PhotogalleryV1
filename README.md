@@ -1,63 +1,101 @@
 # Codex Photogallery V1
 
-本项目是从 `D:\A8 Codex\Codex-Photogallery\photo-gallery-site` 选择性迁移的功能等价镜像。它使用原生 HTML/CSS/JavaScript、Node.js 原生 HTTP 服务和 Node 内置 SQLite，为本机、局域网或受控虚拟网络提供图片与视频目录浏览。
+## 项目介绍
 
-## 功能
+Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网写真图库。项目将外部图片和视频目录索引到 SQLite，通过浏览器提供多级目录浏览、媒体预览、搜索、收藏、最近浏览和维护工具。
+
+当前阶段保留原站技术栈、API、页面行为和部署方式，不包含生产数据库或用户媒体。
+
+## 核心功能
 
 - 多级目录与图集浏览
-- 图片灯箱、缩放和键盘导航
+- 图片灯箱、缩放、拖动和键盘导航
+- 图片缩略图与懒加载
 - 视频 poster、按需加载和 HTTP Range
-- SQLite 媒体索引、搜索、收藏、最近浏览
-- 首页轮播、缩略图、访问日志
-- 后台目录扫描和图片查重
-- HLS 静态输出与播放
+- SQLite 媒体索引与后台目录扫描
+- 搜索、排序、媒体筛选
+- 收藏与最近浏览
+- 首页轮播
+- 图片查重与回收站移动
+- 访问日志
+- HLS 生成与静态访问
 
-项目没有账号、登录、上传或管理员角色系统。任何网络暴露都应由防火墙、反向代理或其他访问控制保护。
+项目没有账号、登录、上传或管理员角色系统。对局域网或虚拟网络开放时，必须在项目外配置适当的网络访问控制。
+
+## 技术栈
+
+- 前端：原生 HTML、CSS、JavaScript
+- 后端：Node.js 原生 `http`
+- 数据库：Node.js 内置 `node:sqlite`
+- 媒体工具：FFmpeg、FFprobe
+- 部署：Windows 命令行、批处理或 PowerShell
+- 依赖管理：无第三方 npm 运行依赖
+
+## 项目结构
+
+```text
+.
+├─ index.html                    # 前端 HTML 入口
+├─ app.js                        # 前端路由、渲染和交互
+├─ styles.css                    # 页面样式
+├─ server.js                     # HTTP 服务、API 和媒体处理
+├─ gallery-db.js                 # SQLite schema 与数据访问
+├─ duplicates-worker.js          # 图片查重后台任务
+├─ start-server-48101.cmd        # Windows 主要启动脚本
+├─ start-site.cmd/.ps1           # 简化启动入口
+├─ fix-network-access-48101.*    # Windows 防火墙辅助脚本
+├─ make-hls.ps1                  # 手工 HLS 生成工具
+├─ data/                         # 运行数据占位；内容不进入 Git
+├─ photos/                       # 本地媒体占位；内容不进入 Git
+├─ docs/                         # 迁移与开发维护文档
+├─ 网页.md                       # 功能、页面、API 和交接索引
+├─ AGENTS.md                     # Codex/维护者规则
+└─ .env.example                  # 环境变量格式示例
+```
+
+`README-SERVER-WINDOWS.md`、`HLS-PREVIEW-NOTES.md`、`SQLITE-INDEX-NOTES.md` 和 `ROADMAP-GALLERY-UPGRADE.md` 是继承的专项或历史说明。当前运行事实以本 README、`网页.md` 和 `docs/` 为准；是否删除或归档历史文档必须经过清理审计。
 
 ## 环境要求
 
-- Node.js 24 或兼容 `node:sqlite` 的版本
-- FFmpeg/FFprobe：视频 poster、元数据和 HLS 功能需要
-- Windows 启动脚本为当前已验证部署方式
+- Node.js 24，或其他明确支持 `node:sqlite` 的兼容版本
+- FFmpeg/FFprobe：仅视频 poster、元数据和 HLS 功能需要
+- Windows：当前启动和网络辅助脚本的已继承运行环境
 
-项目没有 npm 依赖，无需执行 `npm install`。
+项目没有 `package.json`，无需执行 `npm install`，也没有构建步骤。
 
-## 配置
+## 环境变量说明
 
-`server.js` 直接读取进程环境变量，不会自动加载 `.env`。可参考 `.env.example`：
+`server.js` 直接读取进程环境变量，不会自动加载 `.env`。`.env.example` 只提供变量名称、说明和格式；请通过启动终端、任务计划程序、服务管理器或部署环境注入实际值。
 
-- `PORT`：默认 `48101`
-- `HOST`：默认 `0.0.0.0`
-- `PHOTOS_DIR`：媒体源目录，默认 `./photos`
-- `DATA_DIR`：SQLite、缓存和日志目录，默认 `./data`
-- `THUMBNAILS_DIR`、`HLS_DIR`、`TRASH_DIR`
-- `FFMPEG_PATH`、`FFPROBE_PATH`
-- `DUPLICATE_BATCH_SIZE`
-- `ALLOW_REMOTE_DELETE`：默认应为 `0`
+| 变量 | 用途 | 必需 | 默认值/示例格式 |
+|---|---|---|---|
+| `PORT` | HTTP 端口 | 否 | `48101` |
+| `HOST` | 监听地址 | 否 | `0.0.0.0` |
+| `PHOTOS_DIR` | 原始媒体目录 | 否 | `<your-media-folder>` |
+| `DATA_DIR` | SQLite、日志和生成缓存目录 | 否 | `<your-runtime-data-folder>` |
+| `THUMBNAILS_DIR` | 视频 poster 目录覆盖 | 否 | `<your-thumbnail-folder>` |
+| `HLS_DIR` | HLS 输出目录覆盖 | 否 | `<your-hls-folder>` |
+| `TRASH_DIR` | 重复媒体回收目标 | 否 | `<your-recycle-folder>` |
+| `FFMPEG_PATH` | FFmpeg 可执行文件 | 否 | `ffmpeg` 或 `<path-to-ffmpeg>` |
+| `FFPROBE_PATH` | FFprobe 可执行文件 | 否 | `ffprobe` 或 `<path-to-ffprobe>` |
+| `DUPLICATE_BATCH_SIZE` | 查重批次大小 | 否 | `100` |
+| `ALLOW_REMOTE_DELETE` | 是否允许远程删除类操作 | 否 | `0` |
 
-真实媒体、生产数据库、日志、缩略图和 HLS 输出不得提交 Git。
+不要把真实路径、密码、Token、Cookie、密钥或生产配置提交到 Git。
 
-`.env.example` 只是变量清单，复制为 `.env` 也不会自动生效。请通过当前终端、启动脚本、任务计划程序或服务管理器注入环境变量。不要把真实路径、凭据或生产配置写回 `.env.example`。
+## 数据目录说明
 
-目录约束：
+- `PHOTOS_DIR` 保存用户原始图片和视频，应独立备份，不得纳入 Git。
+- `DATA_DIR` 会写入 `gallery.db`、日志、缩略图、轮播缓存和媒体元数据缓存。
+- `THUMBNAILS_DIR` 和 `HLS_DIR` 会持续产生文件，应配置磁盘容量监控和清理策略。
+- `TRASH_DIR` 是文件移动目标。跨盘移动可能失败，只能先用可丢弃文件验证。
+- 仓库内的 `data/.gitkeep`、`photos/.gitkeep` 只是空目录占位文件。
 
-- `PHOTOS_DIR` 指向原始图片和视频，只应由明确的媒体管理操作修改。
-- `DATA_DIR` 会写入 SQLite、日志、轮播缓存、缩略图和元数据缓存，运行账户必须有读写权限。
-- `THUMBNAILS_DIR` 和 `HLS_DIR` 可以放在独立磁盘，但应设置容量监控和备份策略。
-- `TRASH_DIR` 是重复图片回收目标；跨盘移动可能失败，生产使用前必须验证。
-- `ALLOW_REMOTE_DELETE=1` 会放宽重复图片删除接口限制，未配置额外访问控制时不得启用。
+备份应至少覆盖原始媒体和 SQLite。备份或恢复前，应先停止扫描、查重和文件移动任务。
 
-## 启动
+## 启动方式说明
 
-启动前确认：
-
-1. 当前目录是 `D:\A8 Codex\Codex-PhotogalleryV1`。
-2. Node.js 支持 `node:sqlite`。
-3. `PHOTOS_DIR`、`DATA_DIR` 指向预期位置，且不在 Git 跟踪范围内。
-4. 端口未被其他进程占用。
-5. 如果需要视频 poster、元数据或 HLS，FFmpeg/FFprobe 可执行。
-
-开发或本机运行：
+启动前确认 Node.js、外部数据目录权限和所需环境变量。然后在项目根目录运行：
 
 ```powershell
 node server.js
@@ -69,61 +107,49 @@ Windows 也可以运行：
 start-server-48101.cmd
 ```
 
-然后访问 `http://127.0.0.1:48101/#/`。
+默认本机入口为 `http://127.0.0.1:48101/#/`。
 
-当前脚本不会安装 Windows 服务，也不会设置开机自启。关闭运行 `node server.js` 的终端或正常终止对应 Node 进程即可停止服务。不要使用强制结束方式打断正在执行的扫描、查重或文件移动任务。
+关闭运行服务的终端或正常终止对应 Node 进程即可停止。不要强制中断正在执行的扫描、查重或媒体移动任务。
 
-## Windows 部署边界
+## Windows 部署说明
 
-- 当前已继承的部署方式是直接运行 `node server.js` 或 `start-server-48101.cmd`。
-- `fix-network-access-48101.cmd`/`.ps1` 会修改 Windows 防火墙或网络配置，必须由管理员明确执行，不属于普通启动流程。
-- 项目没有内置 HTTPS、反向代理、身份认证或进程守护。对局域网或虚拟网络开放前，应在项目外配置访问控制。
-- 若使用任务计划程序或服务管理器，应把工作目录设为项目根目录，并通过该托管环境注入变量。
-- 本阶段不改变现有端口、`PHOTOS_DIR`、`DATA_DIR` 或部署架构。
+- 当前部署方式是直接运行 Node 服务；项目不会自动安装 Windows Service。
+- 使用任务计划程序或服务管理器时，工作目录必须设为项目根目录，并在托管环境中注入变量。
+- `fix-network-access-48101.cmd`/`.ps1` 会修改系统网络或防火墙配置，只能由管理员明确执行。
+- 项目没有内置 HTTPS、反向代理、身份认证或进程守护。
+- 不要把真实生产配置写入仓库中的启动脚本。
 
-## 验证
+更完整的维护流程见 `docs/DEVELOPMENT.md`。
 
-语法检查：
+## Git 维护说明
 
-```powershell
-node --check server.js
-node --check app.js
-node --check gallery-db.js
-node --check duplicates-worker.js
-```
+- Git 根目录必须是当前项目根目录。
+- 只提交源码、脚本、文档和非敏感配置模板。
+- 禁止提交 `data`、`photos`、数据库、日志、缓存、缩略图、HLS、回收站或用户媒体。
+- 修改前阅读 `README.md`、`网页.md` 和 `AGENTS.md`。
+- 修改后查看完整 diff、检查语法、更新文档并创建职责清晰的 commit。
+- 禁止强制推送或覆盖远程历史。
 
-最小冒烟接口：
+当前基线标签：
 
-- `/api/config`
-- `/api/index/stats`
-- `/api/collections/root`
-- `/api/highlights`
-- `/api/search?q=test&limit=5`
-- `/api/scan/status`
-- `/api/duplicates/status`
+- `migration-functional-baseline`
+- `v1.0-migration`
+- `v1.1-standardized`（完成 V1.1 后创建）
 
-扫描、查重、回收站和打开文件路径会产生副作用。只能使用隔离测试目录验证，不能对生产媒体执行自动化删除测试。
+## 已知限制
 
-## 数据和备份
+- 没有登录、角色权限或应用层访问控制。
+- 没有 npm 构建、lint、typecheck 或自动化测试体系。
+- SQLite schema 由运行时代码保证，没有独立迁移版本系统。
+- 启动扫描、查重和媒体处理会消耗 CPU、内存和磁盘 I/O。
+- 缩略图、日志和其他生成文件需要外部容量管理。
+- SQLite 媒体返回的视频 poster URL 在新进程未恢复源路径映射时可能 404；视频本体 Range 和 HLS 不受影响。
+- 历史专项文档可能包含旧时点说明，使用前需与当前代码和本 README 核对。
 
-- 备份 `DATA_DIR/gallery.db` 和必要配置。
-- 缩略图、poster、轮播和 HLS 通常可重新生成。
-- 原始媒体由 `PHOTOS_DIR` 管理，必须单独备份。
-- 恢复时先挂载媒体和数据目录，再启动服务并检查索引统计。
+## 文档索引
 
-不要只备份缩略图或旧 `gallery.json`。SQLite 和原始媒体是主要恢复对象；日志和生成缓存是否备份可按运维需求决定。备份/恢复操作应在后台扫描、查重和文件移动停止后执行。
-
-## 当前冻结基线
-
-- 功能镜像提交：`acf83e61afbade5ede48e2b7dd29e04531554f04`
-- 功能镜像标签：`migration-functional-baseline`
-- 迁移冻结标签：`v1.0-migration`（V1.0.1 完成时创建）
-- V1.0.1 只补强文档和 Git 安全检查，不启动网站、不修改业务源码或运行参数。
-
-## 文档
-
-- `网页.md`：继承交接和功能索引
-- `AGENTS.md`：Codex/维护者工作规则
-- `docs/MIGRATION_SOURCE.md`：迁移来源与基线
-- `docs/MIGRATION_MANIFEST.md`：文件迁移清单
-- `README-SERVER-WINDOWS.md`：旧 Windows 部署说明，部分内容可能过时
+- `网页.md`：页面、路由、按钮、API、数据库和交接索引
+- `AGENTS.md`：未来 Codex 和维护者必须遵守的规则
+- `docs/DEVELOPMENT.md`：开发、验证和提交工作流
+- `docs/MIGRATION_SOURCE.md`：迁移来源、验证与冻结记录
+- `docs/MIGRATION_MANIFEST.md`：迁移文件映射和 Git 审计

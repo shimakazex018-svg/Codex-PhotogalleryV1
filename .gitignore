@@ -7,6 +7,14 @@ photos/*
 # Generated media and local test artifacts
 runtime-data/
 test-runtime/
+runtime/
+logs/
+cache/
+thumbnails/
+video-thumbnails/
+highlight-carousel/
+hls/
+回收站/
 *.db
 *.db-*
 *.sqlite
@@ -35,6 +43,8 @@ temp/
 # Editors and operating systems
 .vscode/
 .idea/
+.agents/
+.codex/
 .DS_Store
 Thumbs.db
 desktop.ini
