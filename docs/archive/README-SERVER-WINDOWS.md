@@ -5,7 +5,7 @@
 把整个 `photo-gallery-site` 文件夹复制到服务器指定目录，例如：
 
 ```text
-D:\sites\photo-gallery-site
+<deployment-root>
 ```
 
 不要只复制网页文件，必须保留这些内容：
@@ -41,7 +41,7 @@ photo-gallery-site\photos
 如果你要把图片放在别的磁盘，例如：
 
 ```text
-E:\gallery-photos
+<media-root>
 ```
 
 打开 `start-server-48101.cmd`，修改这一行：
@@ -53,13 +53,13 @@ set "PHOTOS_DIR=%~dp0photos"
 改成：
 
 ```cmd
-set "PHOTOS_DIR=E:\gallery-photos"
+set "PHOTOS_DIR=<media-root>"
 ```
 
 图片目录结构仍然保持：
 
 ```text
-E:\gallery-photos
+<media-root>
 └─ 模特名
    ├─ cover.jpg
    └─ 作品标题
@@ -111,7 +111,7 @@ start-server-48101.cmd
 7. 起始于填写网站目录，例如：
 
 ```text
-D:\sites\photo-gallery-site
+<deployment-root>
 ```
 
 保存后，服务器开机或登录时会自动启动网站。

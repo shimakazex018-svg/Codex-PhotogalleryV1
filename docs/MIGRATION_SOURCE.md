@@ -4,12 +4,12 @@
 
 | Item | Value |
 |---|---|
-| Source root | `D:\A8 Codex\Codex-Photogallery\photo-gallery-site` |
+| Source root | `<legacy-project-root>` |
 | Source role | 唯一功能镜像来源，只读参考 |
 | Source branch | `feature/sqlite-index-api` |
 | Source HEAD | `6e3b275b2598fc19751116af71983b43e83bf960` |
 | Migration date | 2026-07-11 |
-| Destination | `D:\A8 Codex\Codex-PhotogalleryV1` |
+| Destination | `<project-root>` |
 | Migration operator | Codex |
 | Source clean | 否 |
 
@@ -72,7 +72,7 @@
 
 | Item | Value |
 |---|---|
-| Git root | `D:\A8 Codex\Codex-PhotogalleryV1` |
+| Git root | `<project-root>` |
 | Branch | `main` |
 | Initial mirror commit | `acf83e61afbade5ede48e2b7dd29e04531554f04` |
 | Initial mirror tag | `migration-functional-baseline` |

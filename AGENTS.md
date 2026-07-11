@@ -11,6 +11,10 @@
 
 - `migration-functional-baseline`：首次功能镜像。
 - `v1.0-migration`：迁移冻结基线。
+- `v1.1-standardized`：GitHub 工程标准化基线。
+- `v1.2-clean`：文件和历史文档安全清理基线。
+- `v1.2.5-code-clean`：轻度死代码清理基线。
+- `v1.3-release`：GitHub 发布准备基线。
 - 未经用户明确进入下一阶段，不得提前执行工程标准化、代码清理、性能优化或 UI 优化。
 - 文档与仓库审计任务不得启动网站；需要运行验证时必须由任务明确授权。
 

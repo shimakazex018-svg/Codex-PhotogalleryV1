@@ -134,7 +134,10 @@ start-server-48101.cmd
 
 - `migration-functional-baseline`
 - `v1.0-migration`
-- `v1.1-standardized`（完成 V1.1 后创建）
+- `v1.1-standardized`
+- `v1.2-clean`
+- `v1.2.5-code-clean`
+- `v1.3-release`（完成 GitHub 发布准备后创建）
 
 ## 已知限制
 
@@ -153,6 +156,8 @@ start-server-48101.cmd
 - `docs/DEVELOPMENT.md`：开发、验证和提交工作流
 - `docs/CLEANUP_REPORT.md`：V1.2 文件、脚本和代码候选审计
 - `docs/CODE_CLEANUP_REPORT.md`：V1.2.5 死代码证据与验证结果
+- `docs/PROJECT_STATUS.md`：当前发布版本、结构、规模、问题和后续计划
 - `docs/MIGRATION_SOURCE.md`：迁移来源、验证与冻结记录
 - `docs/MIGRATION_MANIFEST.md`：迁移文件映射和 Git 审计
 - `docs/archive/`：已被当前文档替代但仍有追溯价值的历史说明
+- `CHANGELOG.md`：版本阶段和发布变更记录
