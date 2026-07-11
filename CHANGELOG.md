@@ -2,6 +2,38 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-11 - Initialize Codex long-term context documentation
+
+### Added
+
+- Added `PROJECT_CONTEXT.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `TODO.md`, `TESTING.md`, and `HANDOFF.md` as stable context entry points.
+
+### Changed
+
+- Reorganized `AGENTS.md` around mandatory reading order, fixed validation workflow, documentation lifecycle, Git rules, and runtime-data protection.
+- Appended this documentation initialization record to `CHANGELOG.md`.
+
+### Files
+
+- `AGENTS.md`
+- `PROJECT_CONTEXT.md`
+- `ARCHITECTURE.md`
+- `DECISIONS.md`
+- `TODO.md`
+- `TESTING.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+
+### Validation
+
+- Audited repository files, entry points, routes, SQLite schema, startup scripts, `.gitignore`, Git state, and current validation methods.
+- Confirmed no business code, startup logic, database, UI, API, or runtime data changed.
+
+### Notes
+
+- Current code still defaults to port `48101`; the V1.4 target `48102` and independent runtime are decisions pending implementation.
+- New Codex sessions must follow the reading order in `AGENTS.md`.
+
 ## v1.3-release - 2026-07-11
 
 - Added the release-ready project status document.

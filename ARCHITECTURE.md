@@ -1,0 +1,174 @@
+# ARCHITECTURE.md
+
+本文件只描述当前架构、模块关系和数据流。当前事实摘要见 `PROJECT_CONTEXT.md`。
+
+## System overview
+
+```text
+Browser SPA
+  ├─ static: index.html / app.js / styles.css
+  └─ HTTP API
+       └─ server.js
+            ├─ gallery-db.js -> SQLite gallery.db
+            ├─ filesystem -> PHOTOS_DIR
+            ├─ generated files -> DATA_DIR
+            ├─ duplicates-worker.js -> SQLite + PHOTOS_DIR
+            └─ FFmpeg / FFprobe
+```
+
+项目是单进程 Node HTTP 服务加一个按需子进程 worker，没有前后端构建步骤、框架路由器、ORM 或包管理依赖。
+
+## Source modules
+
+| 文件 | 当前职责 |
+|---|---|
+| `index.html` | 静态 HTML shell、顶部工具栏、状态区和灯箱结构 |
+| `app.js` | hash 路由、页面渲染、客户端状态、API 请求、灯箱、视频按需加载和设置页 |
+| `styles.css` | 全部当前页面、响应式和状态样式 |
+| `server.js` | HTTP 服务、静态资源、API 路由、扫描任务、媒体/缩略图/HLS、日志和文件操作 |
+| `gallery-db.js` | SQLite schema、索引、查询、用户标记和查重数据访问 |
+| `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
+| `make-hls.ps1` | 手工 HLS 生成工具 |
+| `start-*.cmd/.ps1` | 当前 Windows 启动入口；V1.4 参数化入口尚未实现 |
+| `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
+
+## Frontend architecture
+
+- 单页应用由 `location.hash` 驱动。
+- `#/`：首页。
+- `#/<path...>`：任意 collection/图集路径。
+- `#/__settings`：显示设置。
+- `#/__settings/duplicates`：图片查重。
+- `#/__settings/access-log`：访问日志。
+- `#/__duplicates`：旧查重兼容入口。
+- 灯箱不是独立路由，由 overlay 和内存状态控制。
+
+前端直接使用原生 DOM、事件监听、`fetch` 和 `localStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
+
+## Backend architecture
+
+`server.js` 使用 Node `http.createServer(handleRequest)`。主要职责：
+
+1. 解析环境变量和运行目录。
+2. 创建所需 runtime 目录。
+3. 提供静态前端文件。
+4. 提供图片、视频 Range、缩略图、poster、轮播和 HLS 静态响应。
+5. 路由 SQLite 查询 API。
+6. 启动扫描子进程和查重 worker。
+7. 写入应用日志和访问日志。
+8. 限制路径逃逸，并对部分破坏性接口实施本机/配置检查。
+
+`RUN_SCAN_ONCE=1` 时，`server.js` 作为一次性扫描子进程运行；否则启动 HTTP 服务和小时轮播刷新调度。
+
+## Main APIs
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/config` | 数据源配置 |
+| GET | `/api/index/stats` | SQLite 索引统计 |
+| GET | `/api/collections/root` | 首页 collection |
+| GET | `/api/collections/:id` | collection 详情 |
+| GET | `/api/media` | collection 媒体分页 |
+| GET | `/api/search` | SQLite 搜索 |
+| GET | `/api/highlights` | 首页轮播 |
+| GET/POST/DELETE | `/api/recent` | 最近观看标记 |
+| GET/POST/DELETE | `/api/favorites` | 收藏标记 |
+| GET/POST/DELETE | `/api/duplicate-delete-marks` | 查重待删除标记 |
+| POST / GET | `/api/scan`、`/api/scan/status` | 后台扫描任务与状态 |
+| POST / GET | `/api/duplicates/scan`、`/api/duplicates/status` | 查重任务与状态 |
+| POST | `/api/duplicates/stop` | 停止查重 |
+| GET | `/api/duplicates` | 重复组分页 |
+| POST | `/api/duplicates/recycle` | 回收选中重复媒体 |
+| POST | `/api/duplicates/recycle-auto` | 自动选择并回收重复媒体 |
+| GET/POST | `/api/access-log` | 访问日志 |
+| POST | `/api/open-photo-path` | 打开媒体路径 |
+| GET | `/api/refresh-index` | 后端索引刷新入口 |
+| GET | `/api/index/changes` | 目录变化摘要 |
+| GET | `/api/index/changed-directories` | 变化目录列表 |
+| GET | `/api/gallery`、`/api/refresh` | 已禁用旧 API，返回 410 |
+
+所有 API 当前没有账号/Session/Token 鉴权。删除重复媒体接口有本机/`ALLOW_REMOTE_DELETE` 控制，但这不等价于完整认证系统。
+
+## Database architecture
+
+`gallery-db.js` 使用 `DatabaseSync` 直接访问 SQLite。
+
+| 表 | 作用 |
+|---|---|
+| `collections` | collection 树、封面、计数和排序 |
+| `media` | 图片/视频、URL、缩略图、元数据和排序 |
+| `covers` | collection 封面缓存 |
+| `scan_state` | 全局和目录扫描签名 |
+| `user_marks` | 收藏、最近和查重标记 |
+| `media_hashes` | 图片哈希及查重元数据 |
+
+数据库打开时启用 WAL 并保证表/index 存在。数据库属于运行数据，不进入 Git。
+
+## Media and thumbnail architecture
+
+- `/photos/...` 映射到 `PHOTOS_DIR`，路径必须保持在媒体根内。
+- 图片缩略图 URL：`/image-thumbnails/{480|720|960}/<hash>.jpg`。
+- 图片缩略图文件：`DATA_DIR/thumbnails/<width>/`。
+- 视频 poster URL：`/video-posters/<hash>.jpg`。
+- 视频 poster 文件：`THUMBNAILS_DIR`，默认 `DATA_DIR/video-thumbnails`。
+- HLS URL：`/hls/...`；文件来自 `HLS_DIR`。
+- 轮播 URL：`/highlight-carousel/...`；文件来自 `DATA_DIR/highlight-carousel`。
+- FFprobe 元数据缓存：`DATA_DIR/video-metadata.json`。
+
+图片缩略图和 poster 按需生成。HLS 由脚本手工生成，不应在启动或列表加载时全量转码。
+
+## Duplicate-detection flow
+
+```text
+Browser duplicate page
+  -> POST /api/duplicates/scan
+  -> server.js spawns duplicates-worker.js
+  -> worker reads candidate images from gallery.db
+  -> worker reads PHOTOS_DIR files and computes SHA-256
+  -> media_hashes updated in gallery.db
+  -> browser polls /api/duplicates/status and /api/duplicates
+```
+
+回收操作会移动真实文件并删除/更新数据库记录，必须使用隔离数据验证。
+
+## Startup flow
+
+当前启动流程：
+
+```text
+launcher or shell
+  -> inject process environment
+  -> node server.js
+  -> resolve paths
+  -> ensure runtime directories
+  -> open SQLite on first query/operation
+  -> schedule hourly highlight refresh
+  -> listen on HOST:PORT
+```
+
+应用不会自动加载 `.env`。V1.4 参数化 env 启动器仅完成设计，尚未实现。
+
+## Runtime versus source
+
+源代码/Git：
+
+- `.js`、`.html`、`.css`；
+- 脚本；
+- `.env.example` 等非敏感模板；
+- 文档。
+
+运行数据/不进入 Git：
+
+- `gallery.db`、SQLite side files 和备份；
+- 原始照片/视频；
+- 图片缩略图、视频 poster、轮播和 HLS；
+- 日志、cache、临时测试文件；
+- 真实 `.env` 和机器专属路径。
+
+## Authentication and permissions
+
+- 登录模块：不存在。
+- 用户/管理员角色：不存在。
+- HTTP API 鉴权：不存在。
+- 文件系统权限、网络边界和破坏性接口的本机检查是当前主要保护。
+- 面向非可信网络部署前必须新增独立访问控制评审。
