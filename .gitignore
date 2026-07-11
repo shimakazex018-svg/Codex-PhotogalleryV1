@@ -1,0 +1,40 @@
+# Runtime data and user media
+data/*
+!data/.gitkeep
+photos/*
+!photos/.gitkeep
+
+# Generated media and local test artifacts
+runtime-data/
+test-runtime/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.m3u8
+*.ts
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies, caches and build output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

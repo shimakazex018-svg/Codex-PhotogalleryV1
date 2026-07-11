@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>&#20889;&#30495;&#22270;&#38598;</title>
+    <link rel="stylesheet" href="./styles.css?v=70" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#/">&#20889;&#30495;&#22270;&#38598;</a>
+      <a class="mobile-home" href="#/">&#39318;&#39029;</a>
+      <div class="toolbar">
+        <label class="search-control" aria-label="&#25628;&#32034;">
+          <span>&#25628;&#32034;</span>
+          <input id="searchBox" type="search" placeholder="&#25628;&#32034;&#27169;&#29305;&#25110;&#20316;&#21697;" autocomplete="off" />
+        </label>
+        <div class="toolbar-settings" id="toolbarSettings">
+        <div class="density" aria-label="&#27599;&#34892;&#22270;&#29255;&#25968;&#37327;">
+          <span>&#27599;&#34892;</span>
+          <button data-columns="1">1</button>
+          <button data-columns="2">2</button>
+          <button data-columns="3">3</button>
+          <button data-columns="4">4</button>
+          <button data-columns="5">5</button>
+        </div>
+        <div class="fit-toggle" aria-label="cover &#26174;&#31034;&#26041;&#24335;">
+          <span>Cover</span>
+          <button id="coverFitToggle" type="button"></button>
+        </div>
+        <div class="lazy-toggle" aria-label="&#25042;&#21152;&#36733;">
+          <span>&#25042;&#21152;&#36733;</span>
+          <button id="lazyLoadingToggle" type="button"></button>
+        </div>
+        <div class="theme-toggle" aria-label="&#26126;&#26263;&#27169;&#24335;">
+          <span>&#30333;/&#40657;</span>
+          <button id="themeToggle" type="button"></button>
+        </div>
+        <div class="sort-toggle" aria-label="&#25490;&#24207;">
+          <span>&#25490;&#24207;</span>
+          <button id="sortToggle" type="button"></button>
+        </div>
+        <button class="top-button" id="topButton" type="button">&#32622;&#39030;</button>
+        <button class="refresh-button" id="refreshButton" type="button">&#21047;&#26032;&#22270;&#29255;&#30446;&#24405;</button>
+        </div>
+        <a class="settings-button" id="settingsButton" href="#/__settings">&#35774;&#32622;</a>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="status" id="status"></section>
+      <nav class="crumbs page-crumbs" id="crumbs"></nav>
+      <section id="view"></section>
+      <footer class="version-footer" id="versionFooter"></footer>
+    </main>
+
+    <div class="lightbox" id="lightbox" aria-hidden="true">
+      <button class="lightbox-close" id="closeLightbox" type="button" aria-label="&#20851;&#38381;">&times;</button>
+      <button class="lightbox-nav lightbox-prev" id="prevImage" type="button" aria-label="&#19978;&#19968;&#24352;">&lsaquo;</button>
+      <img id="lightboxImage" alt="" />
+      <button class="lightbox-nav lightbox-next" id="nextImage" type="button" aria-label="&#19979;&#19968;&#24352;">&rsaquo;</button>
+      <div class="lightbox-zoom" id="lightboxZoomControls" aria-label="&#22270;&#29255;&#32553;&#25918;">
+        <button id="zoomOutImage" type="button" aria-label="&#32553;&#23567;">-</button>
+        <button id="zoomResetImage" type="button" aria-label="&#22797;&#20301;">1:1</button>
+        <button id="zoomInImage" type="button" aria-label="&#25918;&#22823;">+</button>
+        <button id="openImagePath" type="button" aria-label="&#25171;&#24320;&#22270;&#29255;&#23384;&#25918;&#36335;&#24452;">&#36335;&#24452;</button>
+      </div>
+    </div>
+
+    <script src="./app.js?v=70"></script>
+  </body>
+</html>
+
+
