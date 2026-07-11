@@ -4,16 +4,6 @@
 
 ## High Priority
 
-- [ ] 实施 V1.4 参数化 runtime 启动器
-  - 说明：按 `docs/V1.4.1_RUNTIME_IMPLEMENTATION_PLAN.md` 实现安全 env 解析、`-PreflightOnly`、Node/FFmpeg/目录/端口校验。
-  - 影响范围：启动脚本、`.env.example`、运行文档。
-  - 状态：已设计，待用户授权实施。
-
-- [ ] 创建独立 runtime 并迁移数据库副本
-  - 说明：在 Git 外创建 runtime，停旧服务后复制/校验 `gallery.db`；不迁移缩略图、poster、HLS 和日志。
-  - 影响范围：外部 runtime、数据库副本、回滚备份。
-  - 状态：待确认真实路径、Node 和实施窗口；不得在普通代码任务中执行。
-
 - [ ] 完成 V1 runtime 首次只读验收
   - 说明：使用目标端口 `48102` 验证配置、统计、目录、搜索、图片和视频 Range，不触发扫描、查重或删除。
   - 影响范围：运行环境，不修改业务代码。
@@ -60,6 +50,7 @@
 - [x] V1.3 GitHub 发布和发布报告。
 - [x] V1.4 运行环境只读审计和迁移计划。
 - [x] V1.4.1 runtime 目录/env/启动器实施设计。
+- [x] V1.4.2 独立 runtime、数据库哈希迁移和 PowerShell 运维脚本实施。
 - [x] 建立 Codex 长期上下文管理文档体系。
 
 ## Deferred

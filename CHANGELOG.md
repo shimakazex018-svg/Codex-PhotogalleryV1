@@ -2,6 +2,24 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Implement V1.4.2 independent runtime
+
+### Added
+
+- Added safe PowerShell environment parsing, preflight, start, stop, and TCP 48102 firewall scripts under `scripts/`.
+- Added `docs/V1.4.2_RUNTIME_IMPLEMENTATION.md` with directory, database hash, configuration, startup, rollback, and risk records.
+- Created the external `D:\GalleryRuntime` structure and a SHA256-verified `gallery.db` copy outside Git.
+
+### Changed
+
+- Updated current context, architecture, decisions, TODO, testing, and handoff documentation to reflect the implemented-but-not-started runtime.
+
+### Validation
+
+- Source-before, source-after, and target database SHA256 values matched.
+- No website, SQLite connection, firewall rule, scan, thumbnail, poster, HLS, or media mutation was started.
+- Business JavaScript, HTML, CSS, API behavior, database schema, and legacy project were not modified.
+
 ## 2026-07-11 - Initialize Codex long-term context documentation
 
 ### Added

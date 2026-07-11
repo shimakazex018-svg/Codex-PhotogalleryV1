@@ -29,7 +29,10 @@ Browser SPA
 | `gallery-db.js` | SQLite schema、索引、查询、用户标记和查重数据访问 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
 | `make-hls.ps1` | 手工 HLS 生成工具 |
-| `start-*.cmd/.ps1` | 当前 Windows 启动入口；V1.4 参数化入口尚未实现 |
+| `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |
+| `scripts/check-environment.ps1` | V1.4.2 只读环境预检，不启动网站 |
+| `scripts/start-gallery.ps1`、`scripts/stop-gallery.ps1` | 独立 runtime 的启动和 PID 隔离停止入口 |
+| `start-*.cmd/.ps1` | 旧的 Windows 启动入口；不作为 V1.4 runtime 入口 |
 | `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
 
 ## Frontend architecture
@@ -146,7 +149,9 @@ launcher or shell
   -> listen on HOST:PORT
 ```
 
-应用不会自动加载 `.env`。V1.4 参数化 env 启动器仅完成设计，尚未实现。
+应用不会自动加载 `.env`。V1.4.2 PowerShell 启动器安全解析外部 `gallery.env`，并把 `POSTER_DIR` 映射为当前服务端使用的 `THUMBNAILS_DIR` 后启动子进程。
+
+V1.4.2 runtime 的图片缩略图和日志分别使用 `data/thumbnails`、`data/logs` directory junction 指向 runtime 顶层目录；这保持现有服务端派生路径不变。HLS、poster 和 trash 直接通过现有环境变量指向 runtime 顶层目录。
 
 ## Runtime versus source
 

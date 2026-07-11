@@ -8,8 +8,8 @@
 - FFmpeg 和 FFprobe：视频 poster、元数据和 HLS 验证需要。
 - PowerShell / Windows：当前脚本环境。
 - 运行验证必须使用独立 `PHOTOS_DIR`、`DATA_DIR` 和可丢弃媒体，除非用户明确授权生产验证。
-- 正式 Node 可执行路径：待确认。
-- V1.4 参数化启动器：待实施。
+- 正式 Node 托管方式：待确认；V1.4.2 脚本接受 `-NodePath` 或启动器进程的 `NODE_EXE`。
+- V1.4.2 参数化启动器已实现，网站尚未首次启动验收。
 
 Node 预检：
 
@@ -68,8 +68,18 @@ start-site.ps1
 
 - 当前代码默认端口为 `48101`。
 - `start-server-48101.cmd` 会固定端口并覆盖 `DATA_DIR`。
-- V1.4 目标端口 `48102` 和参数化启动器尚未实施。
+- V1.4.2 runtime 配置端口为 `48102`；无配置运行代码时仍默认 `48101`。
 - 正式 runtime 恢复前，不应使用空项目 `data`/`photos` 冒充生产环境。
+
+V1.4.2 只执行环境预检、不启动网站：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-environment.ps1 `
+  -EnvFile D:\GalleryRuntime\config\gallery.env `
+  -NodePath <node-exe>
+```
+
+只有任务明确授权启动时，才使用 `scripts/start-gallery.ps1`。停止必须使用 `scripts/stop-gallery.ps1`，它会核对 JSON PID 元数据，避免按端口或进程名误停旧项目。
 
 ## Isolated smoke environment
 
@@ -167,7 +177,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\make-hls.ps1 `
 
 | 现象 | 常见原因 |
 |---|---|
-| `node` 找不到 | Node 未加入 PATH；V1.4 launcher 尚未实现 `NODE_EXE` |
+| `node` 找不到 | 使用 `-NodePath` 或为启动器进程设置 `NODE_EXE` |
 | `node:sqlite` 不可用 | Node 版本不兼容 |
 | `EADDRINUSE` | 测试/正式端口被占用 |
 | 首页为空 | `PHOTOS_DIR`/`DATA_DIR` 指向空目录或尚未迁移数据库 |

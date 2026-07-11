@@ -15,8 +15,8 @@
 - 当前业务代码已经完成旧项目功能镜像、工程标准化和轻度死代码清理。
 - GitHub 仓库已经发布 `main` 和既有版本标签。
 - 当前本地分支包含 V1.4 与 V1.4.1 两个尚未推送的纯文档提交。
-- V1 正式运行环境尚未恢复，当前仓库未连接生产数据库或真实媒体。
-- 当前网站未作为 V1 正式服务运行。
+- V1.4.2 已在仓库外创建独立 runtime，并迁移经过 SHA256 校验的数据库副本。
+- runtime 已配置现有媒体路径，但当前网站尚未以 V1 runtime 启动或打开目标数据库。
 
 ## Current runtime behavior
 
@@ -25,8 +25,8 @@
 - 当前代码通过进程环境变量读取配置，不自动加载 `.env`。
 - 当前启动入口：`node server.js`、`start-server-48101.cmd`、`start-site.cmd`、`start-site.ps1`。
 - `start-server-48101.cmd` 会固定设置端口并把 `DATA_DIR` 指向项目内 `data`。
-- 已决定但尚未实施的 V1.4 目标端口：`48102`。
-- 已决定但尚未实施的正式 runtime：代码仓库外的独立 runtime 目录。
+- V1.4 runtime 目标端口已配置为 `48102`，但尚未启动监听。
+- 正式 runtime 已建立在代码仓库外，并通过新 PowerShell 脚本管理。
 
 ## Core features
 
@@ -81,10 +81,9 @@
 - 视频 poster 源路径映射在新进程中可能未恢复，poster 请求可能返回 404；视频 Range/HLS 不受此限制。
 - 没有登录、角色权限或应用层访问控制。
 - 没有 npm 依赖、构建、lint、typecheck 或自动化测试体系。
-- 正式 Node 24.x 可执行路径和托管方式：待确认。
-- V1.4 独立 runtime 尚未创建：待确认。
-- 生产数据库尚未迁移到 V1 runtime：待确认。
-- 参数化 env 加载启动器尚未实现：待确认。
+- 正式 Node 24.x 托管方式：待确认；脚本支持 `-NodePath` 或启动器进程的 `NODE_EXE`。
+- V1.4 独立 runtime 和数据库副本已创建，但首次运行验收尚未执行。
+- 参数化 env 加载、预检、启动、停止和 48102 防火墙脚本已经实现。
 - 缩略图、poster、HLS 和日志需要容量统计与清理策略。
 
 ## Protected facts
