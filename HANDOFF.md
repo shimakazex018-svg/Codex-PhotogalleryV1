@@ -4,16 +4,16 @@
 
 ## Last Completed Task
 
-执行 V1.4.3 首次真实启动验收。启动器创建 PID 后因含空格的 `server.js` 路径参数被截断而立即失败；按要求只记录问题并停止，没有修改脚本。
+修复 `start-gallery.ps1` 的 Windows 空格路径参数并完成 V1.4.3 全套真实只读验收；首页、API、图片、缩略图和视频 Range 通过，poster 404 被记录，服务已停止。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次验收报告提交后，本地 `main` 预计比 `origin/main` 领先 5 个提交；均未 push。
+- 本次修复提交后，本地 `main` 预计比 `origin/main` 领先 6 个提交；均未 push。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
-- 网站未成功启动；48102 未监听。启动脚本空格路径缺陷修复前不能继续真实验收。
+- V1 已在 48102 成功完成一次真实只读运行验收；当前服务已停止，48102 未监听。
 
 ## Recently Changed Files
 
@@ -47,8 +47,8 @@
 - 项目没有登录、角色权限或 API 鉴权。
 - 项目没有自动化测试、lint、typecheck 或 build pipeline。
 - 正式 Node 24.x 托管方式：待确认；预检支持显式 Node 路径。
-- V1.4.3 启动在 Node 加载入口前失败；API、数据库和媒体验收均未执行。
-- `start-gallery.ps1` 未把含空格的入口路径安全传给 Node，错误为 `Cannot find module 'D:\A8'`。
+- V1.4.3 首页、四个指定 API、目录、图片、缩略图和视频 Range 已通过。
+- poster 抽样仍返回 404，是当前主要功能已知问题。
 
 ## Risks
 
@@ -59,7 +59,7 @@
 
 ## Recommended Next Task
 
-先在单独任务中只修复 `scripts/start-gallery.ps1` 的空格路径参数传递并进行非服务型验证。修复完成并获授权后，重新执行 V1.4.3 全部只读验收。
+建立 Runtime 数据库离线备份和恢复演练，再进入稳定观察或 poster 404 的独立修复阶段。不要提前删除旧项目。
 
 ## Notes for Next Codex Session
 
@@ -67,5 +67,5 @@
 2. 继续阅读 `docs/V1.4_RUNTIME_MIGRATION_PLAN.md` 和 `docs/V1.4.1_RUNTIME_IMPLEMENTATION_PLAN.md`。
 3. 区分代码默认端口 `48101` 与新启动器注入端口 `48102`。
 4. V1 runtime 已有独立数据库副本；不要再指向或覆盖旧项目 `DATA_DIR`。
-5. 未修复启动参数前不要重复启动；未获授权不要打开目标数据库或执行写入型验证。
+5. V1.4.3 只读验收已通过；扫描、查重、删除和 HLS 仍需单独授权。
 6. 不要 push 当前本地文档提交，除非用户明确授权。

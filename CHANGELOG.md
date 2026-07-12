@@ -2,6 +2,23 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Fix launcher path handling and pass V1.4.3 validation
+
+### Fixed
+
+- Fixed `scripts/start-gallery.ps1` so a `server.js` path containing spaces is passed to Node as one argument while preserving Node selection, environment injection, logs, and PID metadata.
+
+### Validation
+
+- Passed a non-service `node --check` boundary test using the real spaced project path.
+- Started PID `57900` on port 48102 and passed homepage, config, SQLite stats, root collections, highlights, original image, one thumbnail, and video Range checks.
+- Recorded the existing poster HTTP 404 without fixing it.
+- Stopped the service, removed PID metadata, and confirmed 48102 was no longer listening.
+
+### Scope
+
+- No business code, API, database schema, port, data path, Runtime structure, media, scanning, duplicate processing, deletion, or HLS behavior changed.
+
 ## 2026-07-12 - Record failed V1.4.3 first-start validation
 
 ### Added

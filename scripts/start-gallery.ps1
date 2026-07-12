@@ -23,12 +23,14 @@ if (Test-Path -LiteralPath $pidFile) {
   Remove-Item -LiteralPath $pidFile -Force
 }
 
-$process = Start-Process -FilePath $result.NodePath -ArgumentList (Join-Path $projectRoot "server.js") `
+$serverPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "server.js"))
+$quotedServerPath = '"' + $serverPath.Replace('"', '\"') + '"'
+$process = Start-Process -FilePath $result.NodePath -ArgumentList $quotedServerPath `
   -WorkingDirectory $projectRoot -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
 $processMetadata = [ordered]@{
   ProcessId = $process.Id
   NodePath = [System.IO.Path]::GetFullPath($result.NodePath)
-  ServerPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "server.js"))
+  ServerPath = $serverPath
   StartTimeUtc = $process.StartTime.ToUniversalTime().ToString("o")
 }
 $processMetadata | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding utf8
