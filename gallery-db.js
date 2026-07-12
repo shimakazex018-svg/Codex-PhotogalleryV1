@@ -458,6 +458,21 @@ function getImageSourceByThumbnail(dbFile, thumbUrl) {
   });
 }
 
+function getVideoSourceByPoster(dbFile, posterUrl) {
+  const url = String(posterUrl || "").trim();
+  if (!url) return null;
+  return withDatabase(dbFile, (db) => {
+    const row = db
+      .prepare(
+        `SELECT src FROM media
+         WHERE type = 'video' AND poster = ?
+         LIMIT 1`
+      )
+      .get(url);
+    return row ? row.src : null;
+  });
+}
+
 function search(dbFile, query, limitValue = 50) {
   const q = String(query || "").trim();
   const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 200);
@@ -850,6 +865,7 @@ module.exports = {
   getCollection,
   getMedia,
   getImageSourceByThumbnail,
+  getVideoSourceByPoster,
   search,
   getHighlightCandidates,
   getUserMarks,

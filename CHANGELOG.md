@@ -2,6 +2,25 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Establish V1.4.4 Runtime cache generation
+
+### Fixed
+
+- Restored video poster sources from Runtime SQLite when the in-process mapping is empty, removing the new-process poster 404 without using legacy cache paths.
+- Required `make-hls.ps1` to use configured `HLS_DIR` or an explicit output root instead of a repository-local default.
+
+### Added
+
+- Added bounded image/poster cache generation with Runtime state, pause marker, resume behavior, and append-only logs.
+- Added `docs/V1.4.4_CACHE_REBUILD_PLAN.md` with cache logic, sample evidence, full-rebuild gates, risks, and rollback.
+
+### Validation
+
+- Generated 20 image thumbnail samples and 3 video poster samples with zero failures; no HLS was generated.
+- Verified pause rejection and zero-item resume behavior.
+- Confirmed poster direct access works after process restart, stderr is empty, media is unchanged, and the Runtime database SHA256 matches the migration baseline.
+- Stopped PID `37356`; port 48102 is no longer listening.
+
 ## 2026-07-12 - Fix launcher path handling and pass V1.4.3 validation
 
 ### Fixed

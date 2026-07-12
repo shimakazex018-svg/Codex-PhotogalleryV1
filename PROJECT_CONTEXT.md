@@ -78,7 +78,7 @@
 
 ## Current known limitations
 
-- 视频 poster 源路径映射在新进程中可能未恢复，poster 请求可能返回 404；视频 Range/HLS 不受此限制。
+- V1.4.4已修复新进程poster源路径恢复：内存未命中时从Runtime SQLite只读回查媒体源，并写入Runtime poster目录。
 - 没有登录、角色权限或应用层访问控制。
 - 没有 npm 依赖、构建、lint、typecheck 或自动化测试体系。
 - 正式 Node 24.x 托管方式：待确认；脚本支持 `-NodePath` 或启动器进程的 `NODE_EXE`。
@@ -86,6 +86,7 @@
 - 参数化 env 加载、预检、启动、停止和 48102 防火墙脚本已经实现。
 - `start-gallery.ps1` 已支持含空格的项目路径，并通过实际启动验收。
 - 缩略图、poster、HLS 和日志需要容量统计与清理策略。
+- 小批量缓存任务已有状态、暂停标记和日志；47万图片全量调度仍未实现且禁止运行。
 
 ## Protected facts
 

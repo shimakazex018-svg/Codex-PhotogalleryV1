@@ -466,6 +466,24 @@ function resolveImageThumbnailSource(width, id) {
   return "";
 }
 
+function resolveVideoPosterSource(id) {
+  const cached = videoPosterSources.get(id);
+  if (cached) return cached;
+
+  try {
+    const sourceUrl = galleryDb.getVideoSourceByPoster(galleryDbFile, `/video-posters/${id}.jpg`);
+    const sourcePath = mediaSrcToFilePath(sourceUrl || "");
+    if (sourcePath && fs.existsSync(sourcePath)) {
+      videoPosterSources.set(id, sourcePath);
+      return sourcePath;
+    }
+  } catch (error) {
+    logEvent("poster_source_lookup_failed", { id, error: error.message });
+  }
+
+  return "";
+}
+
 function decorateImage(media, filePath) {
   return {
     ...media,
@@ -1878,7 +1896,7 @@ function handleRequest(request, response) {
 
   if (decodedPath.startsWith("/video-posters/")) {
     const posterId = path.basename(decodedPath, ".jpg");
-    const sourcePath = videoPosterSources.get(posterId);
+    const sourcePath = resolveVideoPosterSource(posterId);
     const posterPath = path.join(thumbnailsDir, `${posterId}.jpg`);
 
     if (!sourcePath || !isInsideDir(thumbnailsDir, posterPath)) {

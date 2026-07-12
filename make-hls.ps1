@@ -2,12 +2,15 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$VideoPath,
 
-  [string]$OutputRoot = "$PSScriptRoot\data\hls",
+  [string]$OutputRoot = $env:HLS_DIR,
   [string]$FfmpegPath = $env:FFMPEG_PATH
 )
 
 if (-not $FfmpegPath) {
   $FfmpegPath = "ffmpeg"
+}
+if (-not $OutputRoot) {
+  throw "HLS output is not configured. Set HLS_DIR or pass -OutputRoot explicitly."
 }
 
 $resolvedVideo = Resolve-Path -LiteralPath $VideoPath -ErrorAction Stop

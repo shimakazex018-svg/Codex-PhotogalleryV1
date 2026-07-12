@@ -160,7 +160,8 @@ curl.exe -s -D - -o NUL -H "Range: bytes=0-1023" "$baseUrl/photos/<test-video>"
 poster 检查：
 
 - 请求媒体返回的 poster URL。
-- 当前新进程映射可能导致 404，这是已知问题，不应误报为迁移数据丢失。
+- 必须在新进程中不预热媒体API，直接请求已知poster URL；V1.4.4预期从SQLite恢复源路径并返回HTTP 200。
+- 确认文件只写入配置的Runtime poster目录。
 
 HLS 检查只使用测试视频：
 
@@ -183,7 +184,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\make-hls.ps1 `
 | `Cannot find module 'D:\A8'` | 使用修复后的 `start-gallery.ps1`；入口路径必须作为带引号的单一参数传递 |
 | 首页为空 | `PHOTOS_DIR`/`DATA_DIR` 指向空目录或尚未迁移数据库 |
 | SQLite 打开失败 | 权限、文件损坏、错误 data 路径 |
-| poster 404 | 已知 poster 源路径映射问题 |
+| poster 404 | 检查Runtime数据库中的`media.poster/src`、媒体文件存在性、FFmpeg路径和Runtime poster目录权限 |
 | HLS 404 | HLS 未生成或 `HLS_DIR` 不一致 |
 | 回收失败 | 远程删除关闭、跨盘 rename 或权限不足 |
 | 缩略图增长过快 | 大量页面访问触发按需生成，缺少容量清理 |

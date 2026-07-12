@@ -4,16 +4,16 @@
 
 ## Last Completed Task
 
-修复 `start-gallery.ps1` 的 Windows 空格路径参数并完成 V1.4.3 全套真实只读验收；首页、API、图片、缩略图和视频 Range 通过，poster 404 被记录，服务已停止。
+完成V1.4.4：从Runtime SQLite恢复poster源路径，建立可暂停/恢复/记录日志的小批量缓存工具，并验证20张图片和3个视频poster；服务已停止。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次修复提交后，本地 `main` 预计比 `origin/main` 领先 6 个提交；均未 push。
+- 本次V1.4.4提交后，本地 `main` 预计比 `origin/main` 领先 7 个提交；均未push。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
-- V1 已在 48102 成功完成一次真实只读运行验收；当前服务已停止，48102 未监听。
+- V1 Runtime缓存路径已独立；poster重启后直接访问已通过。当前服务已停止，48102未监听。
 
 ## Recently Changed Files
 
@@ -31,6 +31,10 @@
 - `scripts/configure-firewall-48102.ps1`
 - `docs/V1.4.2_RUNTIME_IMPLEMENTATION.md`
 - `docs/V1.4.3_RUNTIME_VALIDATION_REPORT.md`
+- `docs/V1.4.4_CACHE_REBUILD_PLAN.md`
+- `scripts/rebuild-gallery-cache.ps1`
+- `scripts/pause-cache-rebuild.ps1`
+- `server.js`、`gallery-db.js`、`make-hls.ps1`
 
 ## Validation
 
@@ -43,12 +47,12 @@
 
 ## Known Issues
 
-- 新进程可能无法恢复视频 poster 源路径映射，poster 请求可能 404。
 - 项目没有登录、角色权限或 API 鉴权。
 - 项目没有自动化测试、lint、typecheck 或 build pipeline。
 - 正式 Node 24.x 托管方式：待确认；预检支持显式 Node 路径。
 - V1.4.3 首页、四个指定 API、目录、图片、缩略图和视频 Range 已通过。
-- poster 抽样仍返回 404，是当前主要功能已知问题。
+- poster新进程SQLite回查和3个生成样本已通过。
+- 当前小批量脚本不是47万图片的全量调度器。
 
 ## Risks
 
@@ -59,7 +63,7 @@
 
 ## Recommended Next Task
 
-建立 Runtime 数据库离线备份和恢复演练，再进入稳定观察或 poster 404 的独立修复阶段。不要提前删除旧项目。
+建立Runtime数据库离线备份和恢复演练。全量缓存前必须先设计分页清单、磁盘门限和失败重试策略；不得直接扩大当前样本任务。
 
 ## Notes for Next Codex Session
 
@@ -67,5 +71,5 @@
 2. 继续阅读 `docs/V1.4_RUNTIME_MIGRATION_PLAN.md` 和 `docs/V1.4.1_RUNTIME_IMPLEMENTATION_PLAN.md`。
 3. 区分代码默认端口 `48101` 与新启动器注入端口 `48102`。
 4. V1 runtime 已有独立数据库副本；不要再指向或覆盖旧项目 `DATA_DIR`。
-5. V1.4.3 只读验收已通过；扫描、查重、删除和 HLS 仍需单独授权。
+5. V1.4.4只完成20图片/3poster；全量缓存、扫描、查重、删除和HLS仍需单独授权。
 6. 不要 push 当前本地文档提交，除非用户明确授权。

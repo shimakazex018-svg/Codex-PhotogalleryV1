@@ -114,11 +114,14 @@ Browser SPA
 - 图片缩略图文件：`DATA_DIR/thumbnails/<width>/`。
 - 视频 poster URL：`/video-posters/<hash>.jpg`。
 - 视频 poster 文件：`THUMBNAILS_DIR`，默认 `DATA_DIR/video-thumbnails`。
+- poster进程内映射未命中时，服务端按poster URL从SQLite只读回查`src`并验证媒体根路径。
 - HLS URL：`/hls/...`；文件来自 `HLS_DIR`。
 - 轮播 URL：`/highlight-carousel/...`；文件来自 `DATA_DIR/highlight-carousel`。
 - FFprobe 元数据缓存：`DATA_DIR/video-metadata.json`。
 
 图片缩略图和 poster 按需生成。HLS 由脚本手工生成，不应在启动或列表加载时全量转码。
+
+V1.4.4小批量缓存工具把状态、暂停标记和逐项日志写入Runtime `logs`，不修改数据库或媒体。它不是全量调度器。
 
 ## Duplicate-detection flow
 
