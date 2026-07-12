@@ -4,16 +4,16 @@
 
 ## Last Completed Task
 
-实施 V1.4.2：创建独立 runtime、迁移并三方哈希校验 `gallery.db`、新增安全 PowerShell 预检/启动/停止/防火墙脚本，并保持网站未启动。
+执行 V1.4.3 首次真实启动验收。启动器创建 PID 后因含空格的 `server.js` 路径参数被截断而立即失败；按要求只记录问题并停止，没有修改脚本。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 当前本地 `main` 比 `origin/main` 领先 3 个既有提交；V1.4.2 变更尚未提交。
+- 本次验收报告提交后，本地 `main` 预计比 `origin/main` 领先 5 个提交；均未 push。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
-- 网站未以新 runtime 启动；代码无配置时仍默认 `48101`，新启动器将注入 `48102`。
+- 网站未成功启动；48102 未监听。启动脚本空格路径缺陷修复前不能继续真实验收。
 
 ## Recently Changed Files
 
@@ -30,6 +30,7 @@
 - `scripts/stop-gallery.ps1`
 - `scripts/configure-firewall-48102.ps1`
 - `docs/V1.4.2_RUNTIME_IMPLEMENTATION.md`
+- `docs/V1.4.3_RUNTIME_VALIDATION_REPORT.md`
 
 ## Validation
 
@@ -46,7 +47,8 @@
 - 项目没有登录、角色权限或 API 鉴权。
 - 项目没有自动化测试、lint、typecheck 或 build pipeline。
 - 正式 Node 24.x 托管方式：待确认；预检支持显式 Node 路径。
-- V1.4.2 runtime 已实施但未启动验收。
+- V1.4.3 启动在 Node 加载入口前失败；API、数据库和媒体验收均未执行。
+- `start-gallery.ps1` 未把含空格的入口路径安全传给 Node，错误为 `Cannot find module 'D:\A8'`。
 
 ## Risks
 
@@ -57,7 +59,7 @@
 
 ## Recommended Next Task
 
-在用户明确授权后进入 V1.4.3 首次只读启动验收：先运行环境预检，再启动 48102，只检查首页、配置、统计、目录、搜索、图片和视频 Range；不得触发扫描、查重、删除或 HLS。
+先在单独任务中只修复 `scripts/start-gallery.ps1` 的空格路径参数传递并进行非服务型验证。修复完成并获授权后，重新执行 V1.4.3 全部只读验收。
 
 ## Notes for Next Codex Session
 
@@ -65,5 +67,5 @@
 2. 继续阅读 `docs/V1.4_RUNTIME_MIGRATION_PLAN.md` 和 `docs/V1.4.1_RUNTIME_IMPLEMENTATION_PLAN.md`。
 3. 区分代码默认端口 `48101` 与新启动器注入端口 `48102`。
 4. V1 runtime 已有独立数据库副本；不要再指向或覆盖旧项目 `DATA_DIR`。
-5. 未获授权不要启动网站、打开目标数据库或执行写入型验证。
+5. 未修复启动参数前不要重复启动；未获授权不要打开目标数据库或执行写入型验证。
 6. 不要 push 当前本地文档提交，除非用户明确授权。

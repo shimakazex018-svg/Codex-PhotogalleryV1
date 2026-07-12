@@ -2,6 +2,22 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Record failed V1.4.3 first-start validation
+
+### Added
+
+- Added `docs/V1.4.3_RUNTIME_VALIDATION_REPORT.md` with the attempted PID, startup parameters, log evidence, validation matrix, stop result, and next gate.
+
+### Result
+
+- The launcher created PID `55336`, but Node exited before listening because the project entry path containing spaces was split at `D:\A8`.
+- No API, database, media, thumbnail, video, poster, HLS, scan, duplicate, or delete validation ran.
+- The stop script removed the stale PID record and port 48102 was confirmed not listening.
+
+### Scope
+
+- The failure was recorded without repairing scripts or modifying business code, database content, media, configuration, or firewall state.
+
 ## 2026-07-12 - Implement V1.4.2 independent runtime
 
 ### Added

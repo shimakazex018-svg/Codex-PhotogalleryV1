@@ -180,6 +180,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\make-hls.ps1 `
 | `node` 找不到 | 使用 `-NodePath` 或为启动器进程设置 `NODE_EXE` |
 | `node:sqlite` 不可用 | Node 版本不兼容 |
 | `EADDRINUSE` | 测试/正式端口被占用 |
+| `Cannot find module 'D:\A8'` | V1.4.2 启动器未把含空格的 `server.js` 路径作为单一参数；修复前不要重复启动 |
 | 首页为空 | `PHOTOS_DIR`/`DATA_DIR` 指向空目录或尚未迁移数据库 |
 | SQLite 打开失败 | 权限、文件损坏、错误 data 路径 |
 | poster 404 | 已知 poster 源路径映射问题 |
