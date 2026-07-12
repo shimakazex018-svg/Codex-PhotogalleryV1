@@ -119,7 +119,7 @@ Browser SPA
 - 轮播 URL：`/highlight-carousel/...`；文件来自 `DATA_DIR/highlight-carousel`。
 - FFprobe 元数据缓存：`DATA_DIR/video-metadata.json`。
 
-图片缩略图和 poster 按需生成。HLS 由脚本手工生成，不应在启动或列表加载时全量转码。
+V1.4.5 Runtime关闭新的图片缩略图生成：已有文件继续兼容提供，缺失时thumbnail URL直接返回原图。poster继续按需生成。HLS由脚本手工生成，不应在启动或列表加载时全量转码。
 
 V1.4.4小批量缓存工具把状态、暂停标记和逐项日志写入Runtime `logs`，不修改数据库或媒体。它不是全量调度器。
 

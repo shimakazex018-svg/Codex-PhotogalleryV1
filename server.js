@@ -29,6 +29,7 @@ const host = process.env.HOST || "0.0.0.0";
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
 const ffprobePath = process.env.FFPROBE_PATH || (path.basename(ffmpegPath).toLowerCase().startsWith("ffmpeg") ? path.join(path.dirname(ffmpegPath), process.platform === "win32" ? "ffprobe.exe" : "ffprobe") : "ffprobe");
 const allowRemoteDelete = process.env.ALLOW_REMOTE_DELETE === "1" || process.env.ALLOW_REMOTE_DELETE === "true";
+const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
 const duplicateRecycleLimit = 50000;
 const videoPosterSources = new Map();
 const imageThumbnailSources = new Map();
@@ -1606,6 +1607,7 @@ function generateVideoPoster(sourcePath, posterPath) {
 
 function generateImageThumbnail(sourcePath, thumbPath, width) {
   if (fs.existsSync(thumbPath)) return true;
+  if (!enableImageThumbnailGeneration) return false;
   fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
 
   const result = spawnSync(

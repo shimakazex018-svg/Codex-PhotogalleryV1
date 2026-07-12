@@ -4,16 +4,17 @@
 
 ## Last Completed Task
 
-完成V1.4.4：从Runtime SQLite恢复poster源路径，建立可暂停/恢复/记录日志的小批量缓存工具，并验证20张图片和3个视频poster；服务已停止。
+完成V1.4.5最终整理：关闭新图片缩略图生成、保留原图回退和poster按需生成，建立HLS生命周期设计及Runtime容量/环境检查；服务已停止。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次V1.4.4提交后，本地 `main` 预计比 `origin/main` 领先 7 个提交；均未push。
+- 本次V1.4.5提交后，本地 `main` 预计比 `origin/main` 领先 8 个提交；均未push。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
 - V1 Runtime缓存路径已独立；poster重启后直接访问已通过。当前服务已停止，48102未监听。
+- 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
 
@@ -35,6 +36,8 @@
 - `scripts/rebuild-gallery-cache.ps1`
 - `scripts/pause-cache-rebuild.ps1`
 - `server.js`、`gallery-db.js`、`make-hls.ps1`
+- `scripts/check-runtime-capacity.ps1`
+- `docs/V1.4.5_RUNTIME_FINAL_CHECK.md`
 
 ## Validation
 
@@ -53,6 +56,7 @@
 - V1.4.3 首页、四个指定 API、目录、图片、缩略图和视频 Range 已通过。
 - poster新进程SQLite回查和3个生成样本已通过。
 - 当前小批量脚本不是47万图片的全量调度器。
+- HLS按需后台生成、访问manifest和定时dry-run清理尚未实现。
 
 ## Risks
 
@@ -63,7 +67,7 @@
 
 ## Recommended Next Task
 
-建立Runtime数据库离线备份和恢复演练。全量缓存前必须先设计分页清单、磁盘门限和失败重试策略；不得直接扩大当前样本任务。
+建立Runtime数据库离线备份和恢复演练。V1.5如实施HLS，必须先完成异步任务、播放器兼容、访问manifest和dry-run清理评审。
 
 ## Notes for Next Codex Session
 
@@ -71,5 +75,5 @@
 2. 继续阅读 `docs/V1.4_RUNTIME_MIGRATION_PLAN.md` 和 `docs/V1.4.1_RUNTIME_IMPLEMENTATION_PLAN.md`。
 3. 区分代码默认端口 `48101` 与新启动器注入端口 `48102`。
 4. V1 runtime 已有独立数据库副本；不要再指向或覆盖旧项目 `DATA_DIR`。
-5. V1.4.4只完成20图片/3poster；全量缓存、扫描、查重、删除和HLS仍需单独授权。
+5. 正式Runtime不生成新图片thumbnail；全量缓存、扫描、查重、删除和HLS自动化仍需单独授权。
 6. 不要 push 当前本地文档提交，除非用户明确授权。

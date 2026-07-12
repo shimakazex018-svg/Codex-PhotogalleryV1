@@ -6,7 +6,8 @@ function Read-GalleryEnvironment {
   $resolvedEnv = (Resolve-Path -LiteralPath $EnvFile).Path
   $allowedKeys = @(
     "PORT", "DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR",
-    "HLS_DIR", "TRASH_DIR", "FFMPEG_PATH", "FFPROBE_PATH", "ALLOW_REMOTE_DELETE"
+    "HLS_DIR", "TRASH_DIR", "FFMPEG_PATH", "FFPROBE_PATH", "ALLOW_REMOTE_DELETE",
+    "ENABLE_IMAGE_THUMBNAIL_GENERATION", "HLS_CACHE_EXPIRE_DAYS"
   )
   $values = @{}
 
@@ -53,6 +54,13 @@ function Test-GalleryEnvironment {
   if ($Config.PORT -ne "48102") { throw "V1.4.2 requires PORT=48102." }
   if ($Config.ALLOW_REMOTE_DELETE -notin @("0", "false")) {
     throw "V1.4.2 requires ALLOW_REMOTE_DELETE=0."
+  }
+  if ($Config.ENABLE_IMAGE_THUMBNAIL_GENERATION -notin @("0", "false")) {
+    throw "V1.4.5 requires ENABLE_IMAGE_THUMBNAIL_GENERATION=0."
+  }
+  $hlsExpireDays = 0
+  if (-not [int]::TryParse($Config.HLS_CACHE_EXPIRE_DAYS, [ref]$hlsExpireDays) -or $hlsExpireDays -lt 1) {
+    throw "HLS_CACHE_EXPIRE_DAYS must be a positive integer."
   }
 
   $project = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
@@ -102,4 +110,6 @@ function Set-GalleryProcessEnvironment {
   $env:FFMPEG_PATH = $Config.FFMPEG_PATH
   $env:FFPROBE_PATH = $Config.FFPROBE_PATH
   $env:ALLOW_REMOTE_DELETE = $Config.ALLOW_REMOTE_DELETE
+  $env:ENABLE_IMAGE_THUMBNAIL_GENERATION = $Config.ENABLE_IMAGE_THUMBNAIL_GENERATION
+  $env:HLS_CACHE_EXPIRE_DAYS = $Config.HLS_CACHE_EXPIRE_DAYS
 }

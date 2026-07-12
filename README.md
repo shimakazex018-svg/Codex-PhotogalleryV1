@@ -75,6 +75,8 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 | `DATA_DIR` | SQLite、日志和生成缓存目录 | 否 | `<your-runtime-data-folder>` |
 | `THUMBNAILS_DIR` | 视频 poster 目录覆盖 | 否 | `<your-thumbnail-folder>` |
 | `HLS_DIR` | HLS 输出目录覆盖 | 否 | `<your-hls-folder>` |
+| `ENABLE_IMAGE_THUMBNAIL_GENERATION` | 是否允许缺失时生成图片缩略图 | 否 | `0` |
+| `HLS_CACHE_EXPIRE_DAYS` | HLS生命周期策略天数；需配合独立清理器 | 否 | `7` |
 | `TRASH_DIR` | 重复媒体回收目标 | 否 | `<your-recycle-folder>` |
 | `FFMPEG_PATH` | FFmpeg 可执行文件 | 否 | `ffmpeg` 或 `<path-to-ffmpeg>` |
 | `FFPROBE_PATH` | FFprobe 可执行文件 | 否 | `ffprobe` 或 `<path-to-ffprobe>` |
@@ -88,6 +90,8 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 - `PHOTOS_DIR` 保存用户原始图片和视频，应独立备份，不得纳入 Git。
 - `DATA_DIR` 会写入 `gallery.db`、日志、缩略图、轮播缓存和媒体元数据缓存。
 - `THUMBNAILS_DIR` 和 `HLS_DIR` 会持续产生文件，应配置磁盘容量监控和清理策略。
+- 当前正式Runtime设置`ENABLE_IMAGE_THUMBNAIL_GENERATION=0`：已有缩略图保留，缺失时直接提供原图。
+- `HLS_CACHE_EXPIRE_DAYS`目前只记录生命周期策略，不会自动删除文件。
 - `TRASH_DIR` 是文件移动目标。跨盘移动可能失败，只能先用可丢弃文件验证。
 - 仓库内的 `data/.gitkeep`、`photos/.gitkeep` 只是空目录占位文件。
 

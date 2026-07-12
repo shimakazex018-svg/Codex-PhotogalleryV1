@@ -139,7 +139,14 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 ## Thumbnail checks
 
-在隔离数据中：
+V1.4.5正式Runtime策略：
+
+1. 选择一个Runtime中不存在的thumbnail URL。
+2. 分别请求对应原图URL和thumbnail兼容URL。
+3. 两个响应内容SHA256必须一致。
+4. 请求前后Runtime thumbnail文件数必须不变。
+
+未来重新启用生成时，只能在隔离数据中：
 
 1. 请求一个 `/image-thumbnails/480/...jpg`。
 2. 确认 HTTP 200、文件写入隔离 `DATA_DIR/thumbnails/480`。

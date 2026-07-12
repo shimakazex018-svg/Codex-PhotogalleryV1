@@ -2,6 +2,25 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Finalize V1.4.5 Runtime cache policy
+
+### Changed
+
+- Disabled new image thumbnail generation in the formal Runtime while preserving existing test files and thumbnail URL compatibility; cache misses now serve the original image.
+- Changed the bounded cache tool's image default to zero and added an explicit image-request confirmation gate.
+- Added Runtime configuration for a seven-day HLS lifecycle policy without enabling deletion.
+
+### Added
+
+- Added a read-only Runtime capacity script and expanded environment checks for tools, cache policy, and free disk space.
+- Added `docs/V1.4.5_RUNTIME_FINAL_CHECK.md` with final image, poster, HLS, lifecycle, capacity, environment, and V1.5 guidance.
+
+### Validation
+
+- Verified an uncached thumbnail URL returned byte-identical original image content without increasing the 40-file thumbnail cache.
+- Verified poster HTTP 200, database SHA256 unchanged, HLS remains empty, and the service stopped cleanly.
+- No cache deletion, full generation, scan, duplicate task, schema change, UI optimization, or performance work ran.
+
 ## 2026-07-12 - Establish V1.4.4 Runtime cache generation
 
 ### Fixed

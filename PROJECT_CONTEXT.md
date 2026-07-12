@@ -79,6 +79,7 @@
 ## Current known limitations
 
 - V1.4.4已修复新进程poster源路径恢复：内存未命中时从Runtime SQLite只读回查媒体源，并写入Runtime poster目录。
+- V1.4.5正式Runtime禁用新的图片缩略图生成；缺失thumbnail时返回原图，已有少量缓存保留。
 - 没有登录、角色权限或应用层访问控制。
 - 没有 npm 依赖、构建、lint、typecheck 或自动化测试体系。
 - 正式 Node 24.x 托管方式：待确认；脚本支持 `-NodePath` 或启动器进程的 `NODE_EXE`。
@@ -87,6 +88,7 @@
 - `start-gallery.ps1` 已支持含空格的项目路径，并通过实际启动验收。
 - 缩略图、poster、HLS 和日志需要容量统计与清理策略。
 - 小批量缓存任务已有状态、暂停标记和日志；47万图片全量调度仍未实现且禁止运行。
+- HLS保持按需设计，当前实际播放仍使用原视频Range；7天生命周期已配置但尚未实现自动清理。
 
 ## Protected facts
 

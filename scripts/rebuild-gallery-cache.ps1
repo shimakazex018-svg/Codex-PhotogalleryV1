@@ -1,8 +1,9 @@
 param(
   [string]$BaseUrl = "http://127.0.0.1:48102",
   [string]$RuntimeRoot = "D:\GalleryRuntime",
-  [ValidateRange(0, 500)][int]$ImageLimit = 20,
+  [ValidateRange(0, 500)][int]$ImageLimit = 0,
   [ValidateRange(0, 50)][int]$VideoPosterLimit = 3,
+  [switch]$EnableImageThumbnailRequests,
   [switch]$Resume
 )
 
@@ -11,6 +12,10 @@ $logDir = Join-Path $RuntimeRoot "logs"
 $stateFile = Join-Path $logDir "cache-rebuild-state.json"
 $stopFile = Join-Path $logDir "cache-rebuild.stop"
 $logFile = Join-Path $logDir "cache-rebuild.log"
+
+if ($ImageLimit -gt 0 -and -not $EnableImageThumbnailRequests) {
+  throw "Image thumbnail requests are disabled by the V1.4.5 policy. Use -EnableImageThumbnailRequests only after the Runtime generation policy is explicitly changed."
+}
 
 function Write-RebuildLog {
   param([string]$Message)

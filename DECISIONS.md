@@ -199,3 +199,21 @@ V1 不直接挂载旧项目 `DATA_DIR`；数据库先复制、校验并提升到
 ### Status
 
 有效；V1.4.4小批量工具已验证，全量任务未授权
+
+## DEC-012：短期使用原图并延后HLS自动化
+
+### Decision
+
+短期不主动生成图片缩略图，缺失缓存时直接返回原图；poster保持按需生成。HLS自动生成和清理只形成设计，现有视频继续使用Range播放。
+
+### Reason
+
+照片仍在整理，提前生成47万图片缩略图浪费CPU、I/O和空间；同步HLS生成会阻塞播放且浏览器兼容性未评审。
+
+### Impact
+
+Runtime设置`ENABLE_IMAGE_THUMBNAIL_GENERATION=0`和`HLS_CACHE_EXPIRE_DAYS=7`。HLS删除必须等待显式访问manifest和dry-run定时任务。
+
+### Status
+
+有效，V1.4.5图片策略已实施；HLS自动化待V1.5以后单独授权
