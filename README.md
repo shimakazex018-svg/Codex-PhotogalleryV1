@@ -45,6 +45,7 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 ├─ start-site.cmd/.ps1           # 简化启动入口
 ├─ fix-network-access-48101.*    # Windows 防火墙辅助脚本
 ├─ make-hls.ps1                  # 手工 HLS 生成工具
+├─ scripts/                      # 正式Runtime启动、停止、状态与维护脚本
 ├─ data/                         # 运行数据占位；内容不进入 Git
 ├─ photos/                       # 本地媒体占位；内容不进入 Git
 ├─ docs/                         # 迁移与开发维护文档
@@ -96,6 +97,8 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 - 仓库内的 `data/.gitkeep`、`photos/.gitkeep` 只是空目录占位文件。
 
 备份应至少覆盖原始媒体和 SQLite。备份或恢复前，应先停止扫描、查重和文件移动任务。
+
+正式Runtime日常操作见`docs/V1.5_OPERATION_MANUAL.md`；自动启动仅有设计方案，当前未注册Windows计划任务。
 
 ## 启动方式说明
 

@@ -2,6 +2,24 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Begin V1.5.0 daily runtime takeover
+
+### Added
+
+- Added `scripts/status-gallery.ps1` with PID, TCP port, Node, Runtime, env, and log reporting without requiring CIM listener access.
+- Added the Windows Task Scheduler design, operation manual, and explicit V1.5 acceptance report.
+
+### Validation
+
+- Started the formal Runtime as PID `56500`; status reports running on 48102 and stderr is empty.
+- Verified homepage through localhost, LAN, and ZeroTier addresses from the host, plus core APIs, search, original image, video Range, settings shell, and temporary favorite/recent create-read-delete flows.
+- Recorded that controlled PC browser automation was blocked by Windows permissions and physical mobile access remains an honest manual gate.
+- Attempted the existing firewall script; it safely refused without an administrator token and made no system change.
+
+### Scope
+
+- No UI, performance, database optimization, scan, full cache generation, HLS generation, or autostart task registration was performed.
+
 ## 2026-07-12 - Finalize V1.4.5 Runtime cache policy
 
 ### Changed

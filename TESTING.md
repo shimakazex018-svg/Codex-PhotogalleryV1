@@ -56,6 +56,14 @@ git diff
 node server.js
 ```
 
+正式Runtime状态检查：
+
+```powershell
+.\scripts\status-gallery.ps1
+```
+
+通过标准：`Status=running`、PID存在、`Port=48102`、`Listening=True`、`NodeRunning=True`，Runtime和日志路径正确。
+
 当前继承脚本：
 
 ```text

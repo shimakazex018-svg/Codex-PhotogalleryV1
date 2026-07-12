@@ -32,6 +32,7 @@ Browser SPA
 | `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |
 | `scripts/check-environment.ps1` | V1.4.2 只读环境预检，不启动网站 |
 | `scripts/start-gallery.ps1`、`scripts/stop-gallery.ps1` | 独立 runtime 的启动和 PID 隔离停止入口 |
+| `scripts/status-gallery.ps1` | 通过PID元数据和本机TCP连接显示运行状态、端口、Node、Runtime和日志 |
 | `start-*.cmd/.ps1` | 旧的 Windows 启动入口；不作为 V1.4 runtime 入口 |
 | `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
 
