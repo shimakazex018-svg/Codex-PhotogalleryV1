@@ -64,6 +64,24 @@ node server.js
 
 通过标准：`Status=running`、PID存在、`Port=48102`、`Listening=True`、`NodeRunning=True`，Runtime和日志路径正确。
 
+Windows双击入口验证顺序：
+
+1. `Stop Gallery.cmd`后状态为stopped、PID文件不存在、48102不监听；
+2. `Start Gallery.cmd`后首页HTTP 200，CMD退出后Node仍运行；
+3. 再次启动必须显示already running且PID不变；
+4. `Gallery Status.cmd`必须显示PID、Node、端口、Runtime、配置、日志和访问地址；
+5. `Stop Gallery.cmd`只能停止PID元数据对应进程；
+6. 最后再次启动并保持运行。
+
+自动启动任务验证：
+
+```powershell
+Get-ScheduledTask -TaskName Codex-PhotogalleryV1-Autostart
+Get-ScheduledTaskInfo -TaskName Codex-PhotogalleryV1-Autostart
+```
+
+Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝对路径的`start-gallery.ps1`，工作目录为项目根，权限为Limited，重复实例策略为IgnoreNew。
+
 当前继承脚本：
 
 ```text

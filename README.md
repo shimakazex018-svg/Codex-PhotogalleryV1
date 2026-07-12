@@ -98,7 +98,14 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 
 备份应至少覆盖原始媒体和 SQLite。备份或恢复前，应先停止扫描、查重和文件移动任务。
 
-正式Runtime日常操作见`docs/V1.5_OPERATION_MANUAL.md`；自动启动仅有设计方案，当前未注册Windows计划任务。
+正式Runtime日常操作见`docs/V1.5_OPERATION_MANUAL.md`；当前已安装Windows当前用户登录自动启动任务。
+
+Windows服务器可直接双击项目根目录中的：
+
+- `Start Gallery.cmd`：启动并打开本机网站；
+- `Stop Gallery.cmd`：只停止当前项目记录的Node进程；
+- `Gallery Status.cmd`：查看PID、端口、Runtime、日志和访问地址；
+- `Install Autostart.cmd` / `Uninstall Autostart.cmd`：安装或删除当前用户登录自动启动任务。
 
 ## 启动方式说明
 

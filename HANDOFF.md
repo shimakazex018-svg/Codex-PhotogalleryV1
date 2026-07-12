@@ -4,16 +4,16 @@
 
 ## Last Completed Task
 
-暂停版本计划并完成本机浏览器访问诊断：确认故障时服务实际已停止，重新启动为PID `60468`，页面、静态资源、API和代理审计均正常。
+完成Windows服务器双击运行管理和当前用户登录自动启动：CMD入口复用现有PowerShell核心，任务定义与重复触发均已验证，网站最终保持运行。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次诊断提交后，本地 `main` 预计比 `origin/main` 领先 10个提交；均未push。
+- 本次运行管理提交后，本地 `main` 预计比 `origin/main` 领先1个提交；是否push由用户另行决定。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
-- V1 Runtime缓存路径已独立；当前PID `60468`监听IPv4 `0.0.0.0:48102`，stdout正常、stderr为空。
+- V1 Runtime缓存路径已独立；网站当前由正式入口运行，监听IPv4 `0.0.0.0:48102`，stdout/stderr位于Runtime日志目录。
 - 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
@@ -43,6 +43,9 @@
 - `docs/V1.5_OPERATION_MANUAL.md`
 - `docs/V1.5_ACCEPTANCE_REPORT.md`
 - `docs/V1.5_BROWSER_ACCESS_DIAGNOSIS.md`
+- `Start Gallery.cmd`、`Stop Gallery.cmd`、`Gallery Status.cmd`
+- `Install Autostart.cmd`、`Uninstall Autostart.cmd`
+- `scripts/install-gallery-autostart.ps1`、`scripts/uninstall-gallery-autostart.ps1`
 
 ## Validation
 
@@ -64,7 +67,6 @@
 - HLS按需后台生成、访问manifest和定时dry-run清理尚未实现。
 - PC受控浏览器权限阻断；实体手机未由Codex实际操作。
 - 48102防火墙规则尚未创建，管理员脚本因当前令牌不足安全退出。
-- 旧PID `56500`没有退出错误日志；若新进程再次自行停止，需要调查进程/会话生命周期。
 
 ## Risks
 
@@ -75,7 +77,7 @@
 
 ## Recommended Next Task
 
-用户先按诊断文档用三个明确HTTP URL完成本机浏览器手工验证并报告具体错误；在本机问题确认前不处理其他计划。
+日常使用双击Start/Stop/Status入口；若不再需要登录启动，双击Uninstall Autostart只删除任务，不影响运行数据。
 
 ## Notes for Next Codex Session
 

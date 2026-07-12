@@ -41,6 +41,14 @@ function Resolve-GalleryNode {
   }
   $command = Get-Command node -ErrorAction SilentlyContinue
   if ($command) { return $command.Source }
+  $wingetRoot = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+  if (Test-Path -LiteralPath $wingetRoot -PathType Container) {
+    $candidate = Get-ChildItem -LiteralPath $wingetRoot -Directory -Filter "OpenJS.NodeJS.LTS_*" -ErrorAction SilentlyContinue |
+      ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -File -Filter "node.exe" -Recurse -ErrorAction SilentlyContinue } |
+      Sort-Object FullName -Descending |
+      Select-Object -First 1
+    if ($candidate) { return $candidate.FullName }
+  }
   throw "Node.js not found. Pass -NodePath or set NODE_EXE for the launcher process."
 }
 

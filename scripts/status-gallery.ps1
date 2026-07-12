@@ -37,6 +37,16 @@ if ($process -and $metadata.NodePath) {
   $nodeMatchesMetadata = [System.IO.Path]::GetFullPath($process.Path) -eq [System.IO.Path]::GetFullPath($metadata.NodePath)
 }
 
+$accessUrls = [Collections.Generic.List[string]]::new()
+$accessUrls.Add("http://127.0.0.1:$Port/")
+try {
+  [System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
+    Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and -not [System.Net.IPAddress]::IsLoopback($_) } |
+    ForEach-Object { $accessUrls.Add("http://$($_.IPAddressToString):$Port/") }
+} catch {
+  # Local access remains available even when LAN address discovery fails.
+}
+
 [pscustomobject]@{
   Status = if ($process -and $listening -and $nodeMatchesMetadata) { "running" } elseif ($process) { "degraded" } else { "stopped" }
   PID = if ($process) { $process.Id } else { $null }
@@ -48,4 +58,5 @@ if ($process -and $metadata.NodePath) {
   EnvFile = $envFile
   StdoutLog = $stdoutLog
   StderrLog = $stderrLog
+  AccessUrls = @($accessUrls | Select-Object -Unique)
 }

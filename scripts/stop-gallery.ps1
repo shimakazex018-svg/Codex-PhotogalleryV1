@@ -3,7 +3,7 @@ param([string]$RuntimeRoot = "D:\GalleryRuntime")
 $ErrorActionPreference = "Stop"
 $pidFile = Join-Path $RuntimeRoot "logs\gallery.pid"
 if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) {
-  Write-Host "No V1.4.2 PID file found; nothing was stopped."
+  Write-Host "Gallery is not running."
   exit 0
 }
 
@@ -15,7 +15,7 @@ $galleryPid = [int]$metadata.ProcessId
 $process = Get-Process -Id $galleryPid -ErrorAction SilentlyContinue
 if (-not $process) {
   Remove-Item -LiteralPath $pidFile -Force
-  Write-Host "Stale PID file removed; process was not running."
+  Write-Host "Gallery is not running. Stale PID metadata was removed."
   exit 0
 }
 
@@ -29,4 +29,4 @@ if ($metadata.ServerPath -ne $expectedServer -or $actualNode -ne $expectedNode -
 }
 Stop-Process -Id $galleryPid
 Remove-Item -LiteralPath $pidFile -Force
-Write-Host "Gallery process $galleryPid stopped." -ForegroundColor Green
+Write-Host "Gallery stopped. PID: $galleryPid" -ForegroundColor Green

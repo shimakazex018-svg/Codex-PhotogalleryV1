@@ -2,6 +2,13 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Add Windows one-click runtime management
+
+- Added double-click CMD wrappers for start, stop, status, autostart install, and autostart uninstall; all wrappers locate the project through `%~dp0` and reuse existing PowerShell logic.
+- Added safe current-user Scheduled Task installation and removal for `Codex-PhotogalleryV1-Autostart` with a 30-second logon delay, Limited privileges, and IgnoreNew instance policy.
+- Improved start handling for an already-running gallery and user-profile WinGet Node discovery; kept shared JSON PID metadata across start/stop/status.
+- Verified stop, first start, duplicate start, status, isolated stop, final start, task definition, and manual task trigger without modifying business code or Runtime data.
+
 ## 2026-07-12 - Diagnose local browser access
 
 - Confirmed the previous gallery PID was stale and port 48102 had no listener when the browser failure was investigated.
