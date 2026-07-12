@@ -235,3 +235,21 @@ Node位于用户目录，SYSTEM上下文和系统启动阶段可能无法访问N
 ### Status
 
 有效，当前用户登录任务已安装并完成手工触发验证
+
+## DEC-014：任务计划程序是Windows唯一运行宿主
+
+### Decision
+
+手工CMD和登录启动都只触发`Codex-PhotogalleryV1-Autostart`；任务执行`run-gallery-host.ps1`并在Node存活期间保持Running。
+
+### Reason
+
+临时CMD/PowerShell派生Node缺少稳定生命周期边界，关闭控制台或用户会话清理可能导致网站退出。
+
+### Impact
+
+stop/status必须同时核对任务、host和Node PID；任务ExecutionTimeLimit为0，重复实例策略为IgnoreNew。
+
+### Status
+
+有效，30秒CMD关闭和重复启动验收已通过

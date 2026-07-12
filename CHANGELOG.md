@@ -2,6 +2,14 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Detach Windows runtime and prepare secure LAN access
+
+- Replaced orphan-style Node launching with a Scheduled Task host that remains Running for the website lifetime and records host/Node PID plus exit data.
+- Unified manual and logon startup through the same task; start/stop/status now report and manage task, parent PID, listener, and HTTP health.
+- Passed the required 30-second closed-CMD validation with the same Node PID, Running task, TCP listener, HTTP 200, and empty stderr; duplicate start kept the same PID.
+- Added a LAN-only firewall script and UAC CMD entry using TCP 48102, LAN local address, Private/LocalSubnet scope, and no ZeroTier changes.
+- Recorded that UAC was canceled in the automation session, so the firewall rule and physical remote-device test remain pending.
+
 ## 2026-07-12 - Add Windows one-click runtime management
 
 - Added double-click CMD wrappers for start, stop, status, autostart install, and autostart uninstall; all wrappers locate the project through `%~dp0` and reuse existing PowerShell logic.

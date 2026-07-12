@@ -35,6 +35,7 @@ Browser SPA
 | `scripts/status-gallery.ps1` | 通过PID元数据和本机TCP连接显示运行状态、端口、Node、Runtime和日志 |
 | 根目录`* Gallery.cmd` | 只负责双击入口和结果展示，全部复用`scripts/` PowerShell核心 |
 | `scripts/install/uninstall-gallery-autostart.ps1` | 管理唯一的当前用户登录任务`Codex-PhotogalleryV1-Autostart` |
+| `scripts/run-gallery-host.ps1` | 任务计划程序的长期宿主；注入环境、记录PID并等待Node退出，使任务保持Running |
 | `start-*.cmd/.ps1` | 旧的 Windows 启动入口；不作为 V1.4 runtime 入口 |
 | `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
 
@@ -154,6 +155,8 @@ launcher or shell
   -> schedule hourly highlight refresh
   -> listen on HOST:PORT
 ```
+
+Windows正式运行外层由任务计划程序托管`run-gallery-host.ps1`；CMD只触发任务，不直接派生Node。
 
 应用不会自动加载 `.env`。V1.4.2 PowerShell 启动器安全解析外部 `gallery.env`，并把 `POSTER_DIR` 映射为当前服务端使用的 `THUMBNAILS_DIR` 后启动子进程。
 

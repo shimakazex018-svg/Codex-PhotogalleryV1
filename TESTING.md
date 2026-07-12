@@ -80,7 +80,9 @@ Get-ScheduledTask -TaskName Codex-PhotogalleryV1-Autostart
 Get-ScheduledTaskInfo -TaskName Codex-PhotogalleryV1-Autostart
 ```
 
-Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝对路径的`start-gallery.ps1`，工作目录为项目根，权限为Limited，重复实例策略为IgnoreNew。
+Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝对路径的`run-gallery-host.ps1`，工作目录为项目根，权限为Limited，重复实例策略为IgnoreNew，且`ExecutionTimeLimit=PT0S`。关闭启动CMD后必须等待至少30秒，要求Node PID不变、任务仍Running、48102监听、首页HTTP 200、stderr为空。
+
+LAN防火墙验收：规则`Codex-PhotogalleryV1-48102-LAN`必须只允许TCP 48102。Private LAN使用LocalAddress=`192.168.31.153`、RemoteAddress=`LocalSubnet`；服务器本机LAN URL 200不等于实体设备通过。
 
 当前继承脚本：
 

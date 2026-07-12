@@ -94,8 +94,14 @@ function Test-GalleryEnvironment {
   if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
     throw "Runtime database does not exist."
   }
-  if (Get-NetTCPConnection -LocalPort 48102 -State Listen -ErrorAction SilentlyContinue) {
-    throw "Port 48102 is already in use."
+  $portClient = [System.Net.Sockets.TcpClient]::new()
+  try {
+    $portConnection = $portClient.ConnectAsync("127.0.0.1", 48102)
+    if ($portConnection.Wait(1000) -and $portClient.Connected) {
+      throw "Port 48102 is already in use."
+    }
+  } finally {
+    $portClient.Dispose()
   }
 
   $node = Resolve-GalleryNode -NodePath $NodePath

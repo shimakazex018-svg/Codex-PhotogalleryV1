@@ -1,51 +1,44 @@
 param(
   [string]$EnvFile = "D:\GalleryRuntime\config\gallery.env",
-  [string]$NodePath
+  [int]$TimeoutSeconds = 15
 )
 
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $PSScriptRoot "gallery-runtime-common.ps1")
+$TaskName = "Codex-PhotogalleryV1-Autostart"
+$RuntimeRoot = Split-Path -Parent (Split-Path -Parent $EnvFile)
+$statusScript = Join-Path $PSScriptRoot "status-gallery.ps1"
 
-$config = Read-GalleryEnvironment -EnvFile $EnvFile
-$logDir = Join-Path (Split-Path -Parent $config.DATA_DIR) "logs"
-$pidFile = Join-Path $logDir "gallery.pid"
-$stdoutLog = Join-Path $logDir "gallery.stdout.log"
-$stderrLog = Join-Path $logDir "gallery.stderr.log"
-
-$currentStatus = & (Join-Path $PSScriptRoot "status-gallery.ps1") -RuntimeRoot (Split-Path -Parent $config.DATA_DIR) -Port ([int]$config.PORT)
-if ($currentStatus.Status -eq "running") {
+$status = & $statusScript -RuntimeRoot $RuntimeRoot -Port 48102
+if ($status.Status -eq "running") {
   Write-Host "Gallery is already running." -ForegroundColor Yellow
-  Write-Host "PID: $($currentStatus.PID)"
-  Write-Host "URL: http://127.0.0.1:$($config.PORT)/"
+  Write-Host "PID: $($status.PID)"
+  Write-Host "URL: http://127.0.0.1:48102/"
   exit 0
 }
-if ($currentStatus.NodeRunning) {
-  throw "Gallery PID exists but its listener or metadata is degraded. Refusing to start a second process."
+if ($status.NodeRunning) {
+  throw "Gallery PID exists but health checks are degraded. Refusing to start a second process."
 }
 
-$result = Test-GalleryEnvironment -Config $config -ProjectRoot $projectRoot -NodePath $NodePath
-Set-GalleryProcessEnvironment -Config $config
+$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if (-not $task) {
+  throw "Autostart task is not installed. Run Install Autostart.cmd first."
+}
+if ($task.State -ne "Running") {
+  Start-ScheduledTask -TaskName $TaskName
+}
 
-if (Test-Path -LiteralPath $pidFile) {
-  $existing = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json
-  if ($existing.ProcessId -and (Get-Process -Id $existing.ProcessId -ErrorAction SilentlyContinue)) {
-    throw "Gallery process $($existing.ProcessId) is already running."
+$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+do {
+  Start-Sleep -Milliseconds 500
+  $status = & $statusScript -RuntimeRoot $RuntimeRoot -Port 48102
+  if ($status.Status -eq "running") {
+    Write-Host "Gallery started successfully." -ForegroundColor Green
+    Write-Host "PID: $($status.PID)"
+    Write-Host "Port: 48102"
+    Write-Host "URL: http://127.0.0.1:48102/"
+    exit 0
   }
-  Remove-Item -LiteralPath $pidFile -Force
-}
+} while ((Get-Date) -lt $deadline)
 
-$serverPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "server.js"))
-$quotedServerPath = '"' + $serverPath.Replace('"', '\"') + '"'
-$process = Start-Process -FilePath $result.NodePath -ArgumentList $quotedServerPath `
-  -WorkingDirectory $projectRoot -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
-$processMetadata = [ordered]@{
-  ProcessId = $process.Id
-  NodePath = [System.IO.Path]::GetFullPath($result.NodePath)
-  ServerPath = $serverPath
-  StartTimeUtc = $process.StartTime.ToUniversalTime().ToString("o")
-}
-$processMetadata | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding utf8
-Write-Host "Gallery started on port 48102. PID: $($process.Id)" -ForegroundColor Green
-Write-Host "URL: http://127.0.0.1:48102/"
-Write-Host "Logs: $logDir"
+$taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+throw "Gallery did not become healthy within $TimeoutSeconds seconds. Task result: $($taskInfo.LastTaskResult). Logs: D:\GalleryRuntime\logs\gallery.stdout.log and gallery.stderr.log"

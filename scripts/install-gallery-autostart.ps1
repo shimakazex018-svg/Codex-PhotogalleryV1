@@ -3,21 +3,21 @@ param([string]$EnvFile = "D:\GalleryRuntime\config\gallery.env")
 $ErrorActionPreference = "Stop"
 $TaskName = "Codex-PhotogalleryV1-Autostart"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$startScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "start-gallery.ps1"))
+$hostScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "run-gallery-host.ps1"))
 $powershellExe = Join-Path $PSHOME "powershell.exe"
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $currentUserShort = ($currentUser -split '\\')[-1]
 $acceptedUserIds = @($currentUser, $currentUserShort)
-$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -EnvFile `"$EnvFile`""
+$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hostScript`" -EnvFile `"$EnvFile`""
 
-if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) { throw "Start script not found: $startScript" }
+if (-not (Test-Path -LiteralPath $hostScript -PathType Leaf)) { throw "Host script not found: $hostScript" }
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw "Runtime env file not found: $EnvFile" }
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $trigger.Delay = "PT30S"
 $action = New-ScheduledTaskAction -Execute $powershellExe -Argument $arguments -WorkingDirectory $projectRoot
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable
+$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
 $definition = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -32,7 +32,8 @@ if ($existing) {
     $existingTrigger.Delay -eq "PT30S" -and
     $existingTrigger.UserId -in $acceptedUserIds -and
     $existing.Principal.UserId -in $acceptedUserIds -and
-    $existing.Settings.MultipleInstances -eq "IgnoreNew"
+    $existing.Settings.MultipleInstances -eq "IgnoreNew" -and
+    $existing.Settings.ExecutionTimeLimit -eq "PT0S"
 }
 
 if ($isCorrect) {
@@ -54,7 +55,8 @@ if ($verifiedAction.Execute -ne $powershellExe -or
     $verifiedAction.WorkingDirectory -ne $projectRoot -or
     $verifiedTrigger.Delay -ne "PT30S" -or
     $verifiedTrigger.UserId -notin $acceptedUserIds -or
-    $verified.Principal.UserId -notin $acceptedUserIds) {
+    $verified.Principal.UserId -notin $acceptedUserIds -or
+    $verified.Settings.ExecutionTimeLimit -ne "PT0S") {
   throw "Autostart task verification failed."
 }
 
@@ -67,5 +69,6 @@ if ($verifiedAction.Execute -ne $powershellExe -or
   Arguments = $verifiedAction.Arguments
   WorkingDirectory = $verifiedAction.WorkingDirectory
   MultipleInstances = $verified.Settings.MultipleInstances
+  ExecutionTimeLimit = $verified.Settings.ExecutionTimeLimit
 }
 Write-Host "Uninstall with: Uninstall Autostart.cmd"

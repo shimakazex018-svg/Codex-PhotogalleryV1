@@ -106,6 +106,9 @@ Windows服务器可直接双击项目根目录中的：
 - `Stop Gallery.cmd`：只停止当前项目记录的Node进程；
 - `Gallery Status.cmd`：查看PID、端口、Runtime、日志和访问地址；
 - `Install Autostart.cmd` / `Uninstall Autostart.cmd`：安装或删除当前用户登录自动启动任务。
+- `Configure LAN Access.cmd`：仅为LAN TCP 48102规则请求管理员权限，不提升网站进程。
+
+手动启动和登录自动启动现在使用同一个任务计划程序host；关闭启动CMD窗口不会停止网站。
 
 ## 启动方式说明
 

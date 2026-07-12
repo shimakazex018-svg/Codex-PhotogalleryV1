@@ -4,7 +4,7 @@
 
 ## Last Completed Task
 
-完成Windows服务器双击运行管理和当前用户登录自动启动：CMD入口复用现有PowerShell核心，任务定义与重复触发均已验证，网站最终保持运行。
+修复Windows运行生命周期：任务计划程序现以`run-gallery-host.ps1`长期托管Node，关闭启动CMD后30秒与重复启动验收通过；LAN防火墙脚本已收紧但UAC应用仍待用户完成。
 
 ## Current State
 
@@ -46,6 +46,9 @@
 - `Start Gallery.cmd`、`Stop Gallery.cmd`、`Gallery Status.cmd`
 - `Install Autostart.cmd`、`Uninstall Autostart.cmd`
 - `scripts/install-gallery-autostart.ps1`、`scripts/uninstall-gallery-autostart.ps1`
+- `scripts/run-gallery-host.ps1`
+- `Configure LAN Access.cmd`、`scripts/configure-firewall-48102.ps1`
+- `docs/V1.5_WINDOWS_STARTUP_FIX.md`
 
 ## Validation
 
@@ -77,7 +80,7 @@
 
 ## Recommended Next Task
 
-日常使用双击Start/Stop/Status入口；若不再需要登录启动，双击Uninstall Autostart只删除任务，不影响运行数据。
+网站由Running任务持续托管。下一步只需用户双击Configure LAN Access批准UAC并做实体LAN设备验收；不要改ZeroTier或开放Public+Any。
 
 ## Notes for Next Codex Session
 
