@@ -4,16 +4,16 @@
 
 ## Last Completed Task
 
-完成V1.5.0运行接管基础：站点以正式Runtime保持运行，新增状态脚本、自动启动方案、操作手册和HTTP/API/网络地址验收记录。
+暂停版本计划并完成本机浏览器访问诊断：确认故障时服务实际已停止，重新启动为PID `60468`，页面、静态资源、API和代理审计均正常。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次V1.5.0提交后，本地 `main` 预计比 `origin/main` 领先 9 个提交；均未push。
+- 本次诊断提交后，本地 `main` 预计比 `origin/main` 领先 10个提交；均未push。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
-- V1 Runtime缓存路径已独立；当前PID `56500`运行中，48102本机TCP探测通过，stdout正常、stderr为空。
+- V1 Runtime缓存路径已独立；当前PID `60468`监听IPv4 `0.0.0.0:48102`，stdout正常、stderr为空。
 - 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
@@ -42,6 +42,7 @@
 - `V1.5_AUTOSTART_PLAN.md`
 - `docs/V1.5_OPERATION_MANUAL.md`
 - `docs/V1.5_ACCEPTANCE_REPORT.md`
+- `docs/V1.5_BROWSER_ACCESS_DIAGNOSIS.md`
 
 ## Validation
 
@@ -63,6 +64,7 @@
 - HLS按需后台生成、访问manifest和定时dry-run清理尚未实现。
 - PC受控浏览器权限阻断；实体手机未由Codex实际操作。
 - 48102防火墙规则尚未创建，管理员脚本因当前令牌不足安全退出。
+- 旧PID `56500`没有退出错误日志；若新进程再次自行停止，需要调查进程/会话生命周期。
 
 ## Risks
 
@@ -73,7 +75,7 @@
 
 ## Recommended Next Task
 
-用户以管理员PowerShell创建Private 48102防火墙规则并完成PC/手机人工浏览器验收；之后再决定是否注册登录后自动启动任务。
+用户先按诊断文档用三个明确HTTP URL完成本机浏览器手工验证并报告具体错误；在本机问题确认前不处理其他计划。
 
 ## Notes for Next Codex Session
 

@@ -2,6 +2,14 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-12 - Diagnose local browser access
+
+- Confirmed the previous gallery PID was stale and port 48102 had no listener when the browser failure was investigated.
+- Restarted the formal Runtime; PID `60468` now listens on IPv4 `0.0.0.0:48102`.
+- Verified localhost, loopback, LAN, static assets, core APIs, redirects, MIME types, and Windows proxy state.
+- Found no HTML, JavaScript, CSS, HTTPS redirect, MIME, old-path, or proxy defect requiring code changes.
+- Added `docs/V1.5_BROWSER_ACCESS_DIAGNOSIS.md` and a precise manual browser checklist.
+
 ## 2026-07-12 - Begin V1.5.0 daily runtime takeover
 
 ### Added

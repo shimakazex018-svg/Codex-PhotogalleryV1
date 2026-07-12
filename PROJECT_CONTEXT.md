@@ -25,7 +25,7 @@
 - 当前代码通过进程环境变量读取配置，不自动加载 `.env`。
 - 当前启动入口：`node server.js`、`start-server-48101.cmd`、`start-site.cmd`、`start-site.ps1`。
 - `start-server-48101.cmd` 会固定设置端口并把 `DATA_DIR` 指向项目内 `data`。
-- V1.4 runtime 目标端口已配置为 `48102`，但尚未启动监听。
+- 正式Runtime当前由配置注入`48102`并监听IPv4 `0.0.0.0`；无配置直接运行源码仍使用历史默认`48101`。
 - 正式 runtime 已建立在代码仓库外，并通过新 PowerShell 脚本管理。
 
 ## Core features
