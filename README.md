@@ -107,6 +107,9 @@ Windows服务器可直接双击项目根目录中的：
 - `Gallery Status.cmd`：查看PID、端口、Runtime、日志和访问地址；
 - `Install Autostart.cmd` / `Uninstall Autostart.cmd`：安装或删除当前用户登录自动启动任务。
 - `Configure LAN Access.cmd`：仅为LAN TCP 48102规则请求管理员权限，不提升网站进程。
+- `Configure ZeroTier Access.cmd`：仅为当前ZeroTier IPv4地址和实际子网创建TCP 48102规则；不修改ZeroTier或现有LAN规则。
+
+ZeroTier远程访问使用HTTP地址`http://192.168.192.1:48102/`。当前服务器地址为`192.168.192.1/24`时，专用规则只允许LocalAddress=`192.168.192.1`、RemoteAddress=`192.168.192.0/24`和TCP 48102；即使ZeroTier网络类别为Public，也不会开放Any地址或其他端口。
 
 手动启动和登录自动启动使用同一个任务计划程序host。任务Action以`-NonInteractive -WindowStyle Hidden`运行，Node子进程也显式隐藏；启动CMD自动退出后不需要保留任何Gallery控制台窗口。
 

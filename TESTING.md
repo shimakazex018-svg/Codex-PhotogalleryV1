@@ -86,6 +86,8 @@ Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝
 
 LAN防火墙验收：规则`Codex-PhotogalleryV1-48102-LAN`必须只允许TCP 48102。Private LAN使用LocalAddress=`192.168.31.153`、RemoteAddress=`LocalSubnet`；服务器本机LAN URL 200不等于实体设备通过。
 
+ZeroTier防火墙验收：先用`Get-NetIPAddress`、`Get-NetAdapter`和`Get-NetConnectionProfile`确认地址、实际PrefixLength、Preferred、Up和NetworkCategory。规则`Codex-PhotogalleryV1-48102-ZeroTier`必须只允许TCP 48102，LocalAddress等于当前ZeroTier IPv4，RemoteAddress等于从实际前缀计算的ZeroTier子网，Profile等于该接口当前类别且Enabled=True。服务器本机ZeroTier URL HTTP 200只证明监听和本地路由正常，不等于实体外部设备通过；外部设备必须使用HTTP而非HTTPS。
+
 当前继承脚本：
 
 ```text

@@ -2,6 +2,13 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-13 - Allow gallery access over ZeroTier
+
+- Added an idempotent, UAC-gated ZeroTier-only firewall script and double-click entry for TCP 48102.
+- Restricted the rule to the actual ZeroTier local IPv4 and prefix-derived remote subnet without changing ZeroTier, the LAN rule, runtime settings, or business code.
+- Applied the rule after user-approved UAC and verified Private profile, exact local/remote scope, TCP 48102, and the unchanged LAN rule.
+- Verified host-side HTTP 200 through loopback, physical LAN, and `192.168.192.1`; external-device validation remains a manual gate.
+
 ## 2026-07-13 - Run the Windows host without a visible console
 
 - Changed the Scheduled Task Action to use non-interactive hidden PowerShell and explicitly hide the Node child window.

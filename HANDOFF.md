@@ -4,7 +4,7 @@
 
 ## Last Completed Task
 
-修复Windows可见宿主生命周期：任务计划程序以隐藏、非交互PowerShell运行`run-gallery-host.ps1`，启动CMD自动退出和手工关闭后的30秒验收均通过。
+为ZeroTier地址新增并实际应用严格限定的TCP 48102入站规则；本机`192.168.192.1` HTTP 200，实体外部设备验收仍需用户完成。
 
 ## Current State
 
@@ -15,6 +15,8 @@
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
 - V1 Runtime缓存路径已独立；网站当前由正式入口运行，监听IPv4 `0.0.0.0:48102`，stdout/stderr位于Runtime日志目录。
 - 当前最终运行：任务Running；Host PID与Node PID独立记录；Host/Node主窗口句柄为0；status核对Node父PID和监听PID。
+- ZeroTier地址为`192.168.192.1/24`，专用规则目标为LocalAddress=`192.168.192.1`、RemoteAddress=`192.168.192.0/24`、TCP 48102；不修改现有LAN规则。
+- 用户已批准UAC；`Codex-PhotogalleryV1-48102-ZeroTier`已启用，Profile=`Private`，最终规则范围和现有LAN规则均已读取核对。
 - 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
@@ -49,6 +51,7 @@
 - `scripts/install-gallery-autostart.ps1`、`scripts/uninstall-gallery-autostart.ps1`
 - `scripts/run-gallery-host.ps1`
 - `Configure LAN Access.cmd`、`scripts/configure-firewall-48102.ps1`
+- `Configure ZeroTier Access.cmd`、`scripts/configure-firewall-48102-zerotier.ps1`
 - `docs/V1.5_WINDOWS_STARTUP_FIX.md`
 
 ## Validation
@@ -60,6 +63,7 @@
 - 隐藏启动验收：启动CMD自动退出和手工关闭后各等待30秒，Host/Node保持、PID不变、HTTP 200、stderr为空。
 - 重复启动：没有第二个Gallery Host或Node；精确停止未影响其他Node；最终网站已重新启动并保持运行。
 - 数据库文件：只进行字节复制和 SHA256；未通过 SQLite 或应用打开。媒体未修改。
+- ZeroTier验收：接口connected、实际地址`192.168.192.1/24`，规则精确限定TCP 48102和`192.168.192.0/24`，loopback/LAN/ZeroTier三条本机URL均HTTP 200；外部实体设备尚未验证。
 
 ## Known Issues
 

@@ -4,9 +4,9 @@
 
 ## High Priority
 
-- [ ] 完成LAN防火墙UAC和实体设备验收
-  - 说明：双击`Configure LAN Access.cmd`并批准UAC，再用同一Wi-Fi设备验证首页、目录、原图和视频。
-  - 状态：服务器本机LAN HTTP 200；UAC被取消，规则尚未创建，跨设备未验证。
+- [ ] 完成ZeroTier实体外部设备验收
+  - 说明：批准`Configure ZeroTier Access.cmd`的UAC后，在同一ZeroTier网络的外部设备使用HTTP访问`http://192.168.192.1:48102/`。
+  - 状态：UAC已批准，严格限定的Private规则已实际创建，服务器本机ZeroTier URL返回HTTP 200；实体外部设备结果不得由本机测试替代。
 
 - [ ] 完成本机真实浏览器手工复验
   - 说明：依次打开127.0.0.1、localhost和LAN HTTP URL，记录地址栏最终协议与具体错误。
@@ -61,6 +61,9 @@
   - 状态：若部署范围扩大再处理。
 
 ## Done
+
+- [x] 创建ZeroTier专用TCP 48102规则并验证LocalAddress、RemoteAddress、Profile和现有LAN规则不变。
+- [x] 恢复物理LAN访问并验证LAN规则仅限`192.168.31.153`、`LocalSubnet`和TCP 48102。
 
 - [x] V1.0 功能镜像迁移。
 - [x] V1.0.1 迁移冻结补强。
