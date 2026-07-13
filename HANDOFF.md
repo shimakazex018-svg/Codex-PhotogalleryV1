@@ -4,16 +4,17 @@
 
 ## Last Completed Task
 
-修复Windows运行生命周期：任务计划程序现以`run-gallery-host.ps1`长期托管Node，关闭启动CMD后30秒与重复启动验收通过；LAN防火墙脚本已收紧但UAC应用仍待用户完成。
+修复Windows可见宿主生命周期：任务计划程序以隐藏、非交互PowerShell运行`run-gallery-host.ps1`，启动CMD自动退出和手工关闭后的30秒验收均通过。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 本次运行管理提交后，本地 `main` 预计比 `origin/main` 领先1个提交；是否push由用户另行决定。
+- 本任务完成提交和普通push后，本地`main`应与`origin/main`同步。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
 - V1 Runtime缓存路径已独立；网站当前由正式入口运行，监听IPv4 `0.0.0.0:48102`，stdout/stderr位于Runtime日志目录。
+- 当前最终运行：任务Running；Host PID与Node PID独立记录；Host/Node主窗口句柄为0；status核对Node父PID和监听PID。
 - 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
@@ -56,7 +57,8 @@
 - 前后端入口、主要 API、SQLite 表/index：已从源码核对。
 - 运行数据忽略矩阵：数据库、媒体、日志、cache、runtime、缩略图、poster、HLS 和 `.env` 均命中忽略规则。
 - 业务代码/HTML/CSS/JavaScript diff：本次为零；仅新增运维脚本和更新文档。
-- 网站启动：未执行，符合文档任务限制。
+- 隐藏启动验收：启动CMD自动退出和手工关闭后各等待30秒，Host/Node保持、PID不变、HTTP 200、stderr为空。
+- 重复启动：没有第二个Gallery Host或Node；精确停止未影响其他Node；最终网站已重新启动并保持运行。
 - 数据库文件：只进行字节复制和 SHA256；未通过 SQLite 或应用打开。媒体未修改。
 
 ## Known Issues
@@ -69,7 +71,7 @@
 - 当前小批量脚本不是47万图片的全量调度器。
 - HLS按需后台生成、访问manifest和定时dry-run清理尚未实现。
 - PC受控浏览器权限阻断；实体手机未由Codex实际操作。
-- 48102防火墙规则尚未创建，管理员脚本因当前令牌不足安全退出。
+- 实体桌面仍建议由用户目视确认没有长期Gallery控制台窗口；自动化已确认Host和Node的MainWindowHandle均为0。
 
 ## Risks
 
@@ -80,7 +82,7 @@
 
 ## Recommended Next Task
 
-网站由Running任务持续托管。下一步只需用户双击Configure LAN Access批准UAC并做实体LAN设备验收；不要改ZeroTier或开放Public+Any。
+日常使用继续通过Start/Stop/Status入口；如桌面仍出现长期Gallery控制台，记录窗口标题和PID后单独诊断，不要关闭任务Host来代替Stop。
 
 ## Notes for Next Codex Session
 

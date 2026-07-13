@@ -38,7 +38,8 @@ $quotedServerPath = '"' + $serverPath.Replace('"', '\"') + '"'
 
 Write-HostLog "starting node=$($result.NodePath) server=$serverPath"
 $process = Start-Process -FilePath $result.NodePath -ArgumentList $quotedServerPath `
-  -WorkingDirectory $projectRoot -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
+  -WorkingDirectory $projectRoot -WindowStyle Hidden `
+  -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
 $metadata = [ordered]@{
   ProcessId = $process.Id
   ParentProcessId = $PID

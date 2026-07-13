@@ -240,7 +240,7 @@ Node位于用户目录，SYSTEM上下文和系统启动阶段可能无法访问N
 
 ### Decision
 
-手工CMD和登录启动都只触发`Codex-PhotogalleryV1-Autostart`；任务执行`run-gallery-host.ps1`并在Node存活期间保持Running。
+手工CMD和登录启动都只触发`Codex-PhotogalleryV1-Autostart`；任务使用`-NonInteractive -WindowStyle Hidden`执行`run-gallery-host.ps1`，并在Node存活期间保持Running。Node子进程也显式隐藏窗口。
 
 ### Reason
 
@@ -248,8 +248,8 @@ Node位于用户目录，SYSTEM上下文和系统启动阶段可能无法访问N
 
 ### Impact
 
-stop/status必须同时核对任务、host和Node PID；任务ExecutionTimeLimit为0，重复实例策略为IgnoreNew。
+stop/status必须同时核对任务、host、Node PID、Node父PID和48102监听PID；任务ExecutionTimeLimit为0，重复实例策略为IgnoreNew。
 
 ### Status
 
-有效，30秒CMD关闭和重复启动验收已通过
+有效，启动CMD自动退出、手工关闭启动CMD、重复启动和精确停止验收均已通过

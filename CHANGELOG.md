@@ -2,6 +2,13 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-13 - Run the Windows host without a visible console
+
+- Changed the Scheduled Task Action to use non-interactive hidden PowerShell and explicitly hide the Node child window.
+- Strengthened runtime status reporting to distinguish task state, Host PID, Node PID, Node parent PID, listener PID, and HTTP state; PID mismatches are no longer healthy.
+- Reproduced the visible-host risk from the prior Interactive, non-hidden task Action and recorded the real Task Scheduler -> PowerShell host -> Node process tree.
+- Passed 30-second tests for automatic launcher exit and manual launcher close, duplicate-start isolation, precise stop, and final hidden runtime startup.
+
 ## 2026-07-12 - Detach Windows runtime and prepare secure LAN access
 
 - Replaced orphan-style Node launching with a Scheduled Task host that remains Running for the website lifetime and records host/Node PID plus exit data.

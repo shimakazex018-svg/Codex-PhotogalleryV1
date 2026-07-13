@@ -156,7 +156,7 @@ launcher or shell
   -> listen on HOST:PORT
 ```
 
-Windows正式运行外层由任务计划程序托管`run-gallery-host.ps1`；CMD只触发任务，不直接派生Node。
+Windows正式运行外层由任务计划程序以隐藏、非交互PowerShell托管`run-gallery-host.ps1`；CMD只触发任务，不直接派生Node。Host等待Node退出，PID元数据分别记录Host和Node；status同时核对Node父PID与48102监听PID。
 
 应用不会自动加载 `.env`。V1.4.2 PowerShell 启动器安全解析外部 `gallery.env`，并把 `POSTER_DIR` 映射为当前服务端使用的 `THUMBNAILS_DIR` 后启动子进程。
 

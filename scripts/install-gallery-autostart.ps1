@@ -8,7 +8,7 @@ $powershellExe = Join-Path $PSHOME "powershell.exe"
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $currentUserShort = ($currentUser -split '\\')[-1]
 $acceptedUserIds = @($currentUser, $currentUserShort)
-$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$hostScript`" -EnvFile `"$EnvFile`""
+$arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$hostScript`" -EnvFile `"$EnvFile`""
 
 if (-not (Test-Path -LiteralPath $hostScript -PathType Leaf)) { throw "Host script not found: $hostScript" }
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw "Runtime env file not found: $EnvFile" }

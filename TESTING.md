@@ -80,7 +80,9 @@ Get-ScheduledTask -TaskName Codex-PhotogalleryV1-Autostart
 Get-ScheduledTaskInfo -TaskName Codex-PhotogalleryV1-Autostart
 ```
 
-Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝对路径的`run-gallery-host.ps1`，工作目录为项目根，权限为Limited，重复实例策略为IgnoreNew，且`ExecutionTimeLimit=PT0S`。关闭启动CMD后必须等待至少30秒，要求Node PID不变、任务仍Running、48102监听、首页HTTP 200、stderr为空。
+Trigger必须是当前用户登录且`Delay=PT30S`；Action必须调用完整绝对路径的`run-gallery-host.ps1`，参数包含`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass`，工作目录为项目根，权限为Limited，重复实例策略为IgnoreNew，且`ExecutionTimeLimit=PT0S`。
+
+生命周期验收必须覆盖两种场景：启动CMD自行退出，以及网站就绪后手工关闭仍打开的启动CMD。每种场景都等待至少30秒，要求Host PID和Node PID存在、Node PID不变、Node父PID等于Host PID、48102监听PID等于Node PID、任务仍Running、首页HTTP 200、stderr无致命错误，且Host/Node没有可见主窗口。任何PID不一致都必须判定为degraded。
 
 LAN防火墙验收：规则`Codex-PhotogalleryV1-48102-LAN`必须只允许TCP 48102。Private LAN使用LocalAddress=`192.168.31.153`、RemoteAddress=`LocalSubnet`；服务器本机LAN URL 200不等于实体设备通过。
 
