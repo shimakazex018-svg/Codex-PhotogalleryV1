@@ -4,12 +4,14 @@
 
 ## Last Completed Task
 
-为ZeroTier地址新增并实际应用严格限定的TCP 48102入站规则；本机`192.168.192.1` HTTP 200，实体外部设备验收仍需用户完成。
+完成 V2.0.1 移动端流量与按需加载只读审计；业务代码和生产 Runtime 均未修改。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
+- V2.0.1 审计确认目录 API 不递归深层媒体；主要风险是 thumbnail 缺失回退原图、20项轮播全带src、fetch不可取消和视频可退化为metadata预载。
+- 只读统计显示 Runtime 20个轮播文件共150.15 MiB；现有40个image thumbnail共2.04 MiB。
 - 本任务完成提交和普通push后，本地`main`应与`origin/main`同步。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
@@ -20,6 +22,9 @@
 - 图片thumbnail缺失时返回原图且不落盘；HLS仍为空，7天策略尚未执行自动清理。
 
 ## Recently Changed Files
+
+- `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md`
+- `TODO.md`、`CHANGELOG.md`、`HANDOFF.md`
 
 - `PROJECT_CONTEXT.md`
 - `ARCHITECTURE.md`

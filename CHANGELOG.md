@@ -211,3 +211,9 @@ All notable repository-baseline changes are documented here. Functional behavior
 
 - Established the first clean functional mirror in an independent Git repository.
 - Excluded the legacy Git directory, production data, user media, logs, caches, thumbnails, and generated output.
+
+# V2.0.1 audit - 2026-07-13
+
+- Audited mobile bandwidth, shallow directory loading, image/video rendering, pagination, caching, and request cancellation without changing business code.
+- Confirmed that 20 Runtime carousel files occupied 150.15 MiB and that disabled thumbnail generation can make thumbnail URLs return original images.
+- Added `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md`; browser transfer metrics remain pending manual DevTools verification.
