@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v71`（`app.js` 中的 `APP_VERSION`）。
+- 前端版本标记：`v72`（`app.js` 中的 `APP_VERSION`）。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前分支：`main`。
 

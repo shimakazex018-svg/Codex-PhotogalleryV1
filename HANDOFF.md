@@ -10,7 +10,7 @@
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 前端版本`v71`；列表使用独立按需WebP预览，首页/媒体limit为40，图片DOM首批24，视频始终preload=none。
+- 前端版本`v72`；列表使用独立按需WebP预览，首页/媒体limit为40，图片DOM首批24，视频始终preload=none。
 - 轮播不再空闲自动推进；初始化只加载当前和下一项，后续仅由用户按钮切换触发。
 - 隔离preview smoke通过；正式Runtime已配置并重启，最小样本生成1个33,926-byte WebP。真实Chrome HAR尚未完成。
 - V2.0.1 审计确认目录 API 不递归深层媒体；主要风险是 thumbnail 缺失回退原图、20项轮播全带src、fetch不可取消和视频可退化为metadata预载。
