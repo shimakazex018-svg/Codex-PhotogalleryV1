@@ -386,16 +386,19 @@ function upsertScanState(dbFile, state) {
   });
 }
 
-function getRootCollections(dbFile) {
+function getRootCollections(dbFile, options = {}) {
+  const limit = Math.min(Math.max(Number(options.limit) || 500, 1), 500);
+  const offset = Math.max(Number(options.offset) || 0, 0);
   return withDatabase(dbFile, (db) =>
     db
       .prepare(
         `SELECT c.*, (SELECT COUNT(*) FROM collections child WHERE child.parent_id = c.id) AS child_count
          FROM collections c
          WHERE c.parent_id IS NULL
-         ORDER BY c.sort_order`
+         ORDER BY c.sort_order
+         LIMIT ? OFFSET ?`
       )
-      .all()
+      .all(limit, offset)
       .map(rowToCollection)
   );
 }

@@ -23,8 +23,11 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v70";
+const APP_VERSION = "v71";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
+const HOME_COLLECTION_LIMIT = 40;
+const MEDIA_PAGE_LIMIT = 40;
+const IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 10'%3E%3Crect width='16' height='10' fill='%23e4e7eb'/%3E%3C/svg%3E";
 
 const state = {
   gallery: { models: [] },
@@ -60,6 +63,10 @@ const state = {
   renderedImageCount: 0,
   imageBatchObserver: null,
   imageBatchScrollHandler: null,
+  lazyImageObserver: null,
+  pageAbortController: null,
+  searchAbortController: null,
+  routeGeneration: 0,
   lightboxIndex: 0,
   lightboxScale: 1,
   lightboxX: 0,
@@ -119,6 +126,15 @@ function escapeHtml(value) {
 
 function setStatus(message) {
   statusEl.textContent = message || "";
+}
+
+function beginPageNavigation() {
+  state.pageAbortController?.abort();
+  state.searchAbortController?.abort();
+  state.pageAbortController = new AbortController();
+  state.searchAbortController = null;
+  state.sqliteLoading = null;
+  state.routeGeneration += 1;
 }
 
 function setColumns(count) {
@@ -393,8 +409,11 @@ async function loadSqliteHome(showMessage = false) {
   }
 
   const [payload, highlightsPayload] = await Promise.all([
-    fetchJson("/api/collections/root"),
-    fetchJson("/api/highlights").catch(() => ({ items: [] })),
+    fetchJson(`/api/collections/root?limit=${HOME_COLLECTION_LIMIT}`, { signal: state.pageAbortController?.signal }),
+    fetchJson("/api/highlights", { signal: state.pageAbortController?.signal }).catch((error) => {
+      if (error.name === "AbortError") throw error;
+      return { items: [] };
+    }),
   ]);
   const collections = (Array.isArray(payload.items) ? payload.items : []).map(cacheSqliteCollection);
   state.gallery = {
@@ -407,8 +426,8 @@ async function loadSqliteHome(showMessage = false) {
   state.galleryMode = "sqlite";
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, { cache: "no-store" });
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, { cache: "no-store", ...options });
   if (!response.ok) throw new Error(`${url} failed`);
   return response.json();
 }
@@ -430,11 +449,11 @@ async function deleteJson(url) {
   return response.json();
 }
 
-async function loadUserMarks() {
+async function loadUserMarks(signal = null) {
   try {
     const [recentPayload, favoritesPayload] = await Promise.all([
-      fetchJson("/api/recent"),
-      fetchJson("/api/favorites"),
+      fetchJson("/api/recent", { signal }),
+      fetchJson("/api/favorites", { signal }),
     ]);
     const recentItems = Array.isArray(recentPayload.items) ? recentPayload.items.filter((item) => item && item.hash && item.title).slice(0, 10) : [];
     const favoriteItems = Array.isArray(favoritesPayload.items) ? favoritesPayload.items.filter((item) => item && item.id && item.hash && item.title).slice(0, 100) : [];
@@ -443,6 +462,7 @@ async function loadUserMarks() {
     saveRecentViews();
     saveFavorites();
   } catch (error) {
+    if (error.name === "AbortError") throw error;
     // localStorage remains the offline fallback if the SQLite mark API is unavailable.
   }
 }
@@ -564,8 +584,8 @@ async function startBackgroundScan() {
   }
 }
 
-async function fetchSqliteMediaPage(collectionId, offset = 0, limit = 120) {
-  const media = await fetchJson(`/api/media?collectionId=${encodeURIComponent(collectionId)}&limit=${limit}&offset=${offset}`);
+async function fetchSqliteMediaPage(collectionId, offset = 0, limit = MEDIA_PAGE_LIMIT, signal = state.pageAbortController?.signal) {
+  const media = await fetchJson(`/api/media?collectionId=${encodeURIComponent(collectionId)}&limit=${limit}&offset=${offset}`, { signal });
   return {
     items: Array.isArray(media.items) ? media.items : [],
     total: Number(media.total || 0),
@@ -579,7 +599,7 @@ async function loadSqliteCollection(parts) {
   let collection = state.sqliteCollections.get(id);
   const needsChildren = collection && (collection.childCount || 0) > 0 && !(collection.children || []).length;
   if (!collection || !Array.isArray(collection.children) || needsChildren) {
-    collection = cacheSqliteCollection(await fetchJson(`/api/collections/${parts.map(encodeURIComponent).join("/")}`));
+    collection = cacheSqliteCollection(await fetchJson(`/api/collections/${parts.map(encodeURIComponent).join("/")}`, { signal: state.pageAbortController?.signal }));
   }
 
   if (!collection) throw new Error("collection missing");
@@ -587,13 +607,13 @@ async function loadSqliteCollection(parts) {
   const hasKnownMedia = (collection.images || []).length || (collection.videos || []).length;
   const expectedMedia = (collection.imageCount || 0) + (collection.videoCount || 0);
   if (!hasKnownMedia && expectedMedia > 0) {
-    const media = await fetchSqliteMediaPage(collection.id, 0, 120);
+    const media = await fetchSqliteMediaPage(collection.id, 0, MEDIA_PAGE_LIMIT);
     const rawItems = Array.isArray(media.items) ? media.items : [];
     collection.images = rawItems.filter((item) => item.type === "image").map(sqliteMediaToGalleryMedia).filter(Boolean);
     collection.videos = rawItems.filter((item) => item.type === "video").map(sqliteMediaToGalleryMedia).filter(Boolean);
     collection.mediaTotal = media.total || rawItems.length;
     collection.mediaLoaded = rawItems.length;
-    collection.mediaPageLimit = media.limit || 120;
+    collection.mediaPageLimit = media.limit || MEDIA_PAGE_LIMIT;
     cacheSqliteCollection(collection);
   }
 
@@ -605,7 +625,9 @@ function requestSqliteSearch() {
   const query = state.searchQuery;
   if (!query || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
   state.sqliteSearch.loading = true;
-  fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=80`)
+  state.searchAbortController?.abort();
+  state.searchAbortController = new AbortController();
+  fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=80`, { signal: state.searchAbortController.signal })
     .then((payload) => {
       if (state.searchQuery !== query) return;
       const collections = (payload.collections || []).map(cacheSqliteCollection).filter(Boolean);
@@ -613,7 +635,8 @@ function requestSqliteSearch() {
       state.sqliteSearch = { query, loading: false, collections, media };
       render();
     })
-    .catch(() => {
+    .catch((error) => {
+      if (error.name === "AbortError") return;
       if (state.searchQuery !== query) return;
       state.sqliteSearch = { query, loading: false, collections: [], media: [] };
       render();
@@ -639,13 +662,16 @@ function renderSqliteRoute(parts) {
   }
 
   state.sqliteLoading = id;
+  const generation = state.routeGeneration;
   renderEmpty(text.refreshing);
   loadSqliteCollection(parts)
     .then((collection) => {
+      if (generation !== state.routeGeneration || sqliteCollectionIdFromParts(parseRouteParts()) !== id) return;
       state.sqliteLoading = null;
       renderCollection(collection);
     })
-    .catch(() => {
+    .catch((error) => {
+      if (error.name === "AbortError" || generation !== state.routeGeneration) return;
       state.sqliteLoading = null;
       renderEmpty(text.cannotRead);
     });
@@ -705,6 +731,11 @@ function parseRoute() {
   };
 }
 
+function parseRouteParts() {
+  const { modelId, workId } = parseRoute();
+  return modelId ? [modelId, ...workId] : [];
+}
+
 function renderCrumbs(model, work) {
   const items = [`<a href="#/">${text.home}</a>`];
   if (model) items.push(`<a href="${encodeHash([model.id])}">${escapeHtml(model.name)}</a>`);
@@ -739,9 +770,41 @@ function titleFromName(name) {
   return name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function coverHtml(src, label) {
+function imagePreviewUrl(src) {
+  return src ? `/api/image-preview?url=${encodeURIComponent(src)}&size=768` : "";
+}
+
+function lazyImageHtml(src, label, attributes = "") {
   if (!src) return `<div class="empty-cover">${escapeHtml(label || text.waitingImage)}</div>`;
-  return `<img src="${src}" alt="${escapeHtml(label || "")}" loading="lazy" />`;
+  return `<img src="${IMAGE_PLACEHOLDER}" data-preview-src="${escapeHtml(imagePreviewUrl(src))}" alt="${escapeHtml(label || "")}" loading="lazy" decoding="async" ${attributes} />`;
+}
+
+function setupLazyPreviewImages() {
+  state.lazyImageObserver?.disconnect();
+  state.lazyImageObserver = null;
+  const images = [...document.querySelectorAll("img[data-preview-src]")];
+  if (!images.length) return;
+  const load = (image) => {
+    if (!image.dataset.previewSrc) return;
+    image.src = image.dataset.previewSrc;
+    delete image.dataset.previewSrc;
+  };
+  if (!("IntersectionObserver" in window)) {
+    images.slice(0, 24).forEach(load);
+    return;
+  }
+  state.lazyImageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      load(entry.target);
+      observer.unobserve(entry.target);
+    });
+  }, { rootMargin: "100% 0px" });
+  images.forEach((image) => state.lazyImageObserver.observe(image));
+}
+
+function coverHtml(src, label) {
+  return lazyImageHtml(src, label);
 }
 
 function readRecentViews() {
@@ -1028,7 +1091,7 @@ function renderHighlightCarousel() {
           .map(
             (item) => `
               <a class="highlight-card" href="${item.href}">
-                <img src="${item.src}" alt="${escapeHtml(item.title || item.model || "")}" loading="lazy" />
+                <img src="${IMAGE_PLACEHOLDER}" data-carousel-src="${escapeHtml(item.src)}" alt="${escapeHtml(item.title || item.model || "")}" loading="lazy" decoding="async" />
               </a>
             `,
           )
@@ -1198,7 +1261,7 @@ function duplicateItemHtml(item, role) {
         <button class="duplicate-recycle-one" type="button" data-duplicate-recycle="${escapeHtml(item.id)}">\u653e\u5165\u56de\u6536\u7ad9</button>
       </div>
       <div class="duplicate-image-wrap">
-        <img src="${escapeHtml(item.detailThumb || item.thumb || item.src || "")}" alt="${escapeHtml(item.title || item.file || "")}" loading="lazy" />
+        ${lazyImageHtml(item.src || "", item.title || item.file || "")}
       </div>
       <div class="duplicate-meta">
         ${duplicateMetaRows(item)}
@@ -1268,9 +1331,11 @@ function renderDuplicatePage() {
 function renderDuplicateSurface() {
   if (settingsHashRoute()) {
     renderSettingsPage();
+    queueMicrotask(setupLazyPreviewImages);
     return;
   }
   renderDuplicatePage();
+  queueMicrotask(setupLazyPreviewImages);
 }
 
 function formatAccessTime(value) {
@@ -1462,7 +1527,17 @@ function setupHighlightCarousel() {
   state.highlightIndex = Math.floor(now / intervalMs) % cards.length;
   state.highlightTimer = { timeoutId: null, intervalId: null };
 
+  const loadCarouselWindow = () => {
+    [state.highlightIndex, (state.highlightIndex + 1) % cards.length].forEach((index) => {
+      const image = cards[index]?.querySelector("img[data-carousel-src]");
+      if (!image) return;
+      image.src = image.dataset.carouselSrc;
+      delete image.dataset.carouselSrc;
+    });
+  };
+
   const centerActiveCard = () => {
+    loadCarouselWindow();
     const card = cards[state.highlightIndex];
     if (!card) return;
 
@@ -1544,6 +1619,13 @@ function clearImageBatchLoading() {
   state.detailImages = [];
   state.renderedImageCount = 0;
   state.mediaPaging = null;
+  state.lazyImageObserver?.disconnect();
+  state.lazyImageObserver = null;
+  view.querySelectorAll("video").forEach((video) => {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  });
 }
 
 function renderModels() {
@@ -1644,6 +1726,7 @@ function renderWorks(model) {
 }
 
 function renderCollection(collection) {
+  queueMicrotask(setupLazyPreviewImages);
   renderCollectionCrumbs(collection);
   const parts = collection.pathParts || collection.id.split("/");
   recordAccessLog({
@@ -1676,7 +1759,7 @@ function renderCollection(collection) {
       videos,
       poster: collection.cover,
       emptyMessage: text.detailEmpty,
-      paging: state.galleryMode === "sqlite" && collection.imageCount > images.length ? {
+      paging: state.galleryMode === "sqlite" && (collection.mediaTotal || (collection.imageCount + collection.videoCount)) > (collection.mediaLoaded || (images.length + videos.length)) ? {
         collectionId: collection.id,
         loaded: collection.mediaLoaded || (images.length + videos.length),
         total: collection.mediaTotal,
@@ -1707,6 +1790,15 @@ function renderCollection(collection) {
   const visibleVideos = showVideos ? videos : [];
   state.detailImages = visibleImages;
   state.lightboxImages = visibleImages.map((image) => image.src);
+  const mediaTotal = collection.mediaTotal || (collection.imageCount + collection.videoCount);
+  const mediaLoaded = collection.mediaLoaded || (images.length + videos.length);
+  state.mediaPaging = state.galleryMode === "sqlite" && showImages && mediaLoaded < mediaTotal ? {
+    collectionId: collection.id,
+    loaded: mediaLoaded,
+    total: mediaTotal,
+    limit: collection.mediaPageLimit || MEDIA_PAGE_LIMIT,
+    loading: false,
+  } : null;
 
   view.innerHTML = `
     <section class="detail-header">
@@ -1719,7 +1811,7 @@ function renderCollection(collection) {
     </section>
     ${hasChildren ? renderCollectionGrid(children) : ""}
     ${hasChildren && hasMedia ? `<section class="collection-media-section">` : ""}
-    ${hasMedia ? `${renderVideos(visibleVideos, collection.cover)}${renderImages(visibleImages)}` : ""}
+    ${hasMedia ? `${renderVideos(visibleVideos, collection.cover)}${renderImages(visibleImages, Boolean(state.mediaPaging))}` : ""}
     ${hasChildren && hasMedia ? `</section>` : ""}
   `;
   bindDetailMediaControls(mediaFilter);
@@ -1794,7 +1886,7 @@ function renderVideos(videos, poster) {
         .map(
           (video) => `
             <figure class="video-item">
-              <video ${state.lazyLoading ? `data-src="${video.src}" preload="none"` : `src="${video.src}" preload="metadata"`} ${video.poster || poster ? `poster="${video.poster || poster}"` : ""} controls></video>
+              <video data-src="${video.src}" preload="none" ${video.poster || poster ? `poster="${video.poster || poster}"` : ""} controls></video>
               <figcaption>
                 <span>${escapeHtml(video.title)}</span>
                 ${videoMeta(video) ? `<small>${escapeHtml(videoMeta(video))}</small>` : ""}
@@ -1807,14 +1899,14 @@ function renderVideos(videos, poster) {
   `;
 }
 
-const imageBatchSize = 50;
+const imageBatchSize = 24;
 
 function renderImageButtons(images, startIndex = 0) {
   return images
     .map(
       (image, index) => `
         <button type="button" data-image-index="${startIndex + index}">
-          <img src="${image.previewThumb || image.thumb || image.src}" alt="${escapeHtml(image.title)}" loading="${state.lazyLoading ? "lazy" : "eager"}" />
+          ${lazyImageHtml(image.src, image.title, `data-original="${escapeHtml(image.src)}"`)}
         </button>
       `,
     )
@@ -1920,6 +2012,7 @@ function appendImageBatch() {
   const nodes = fragment.content;
   bindImageButtons(nodes);
   stack.append(nodes);
+  setupLazyPreviewImages();
   state.renderedImageCount += nextImages.length;
 
   if (state.renderedImageCount >= state.detailImages.length && (!state.mediaPaging || state.mediaPaging.loaded >= state.mediaPaging.total)) {
@@ -2036,6 +2129,7 @@ function render() {
   clearHighlightCarouselTimer();
   clearImageBatchLoading();
   updateSortToggle();
+  queueMicrotask(setupLazyPreviewImages);
 
   if (duplicateHashRoute()) {
     renderEmpty(text.refreshing);
@@ -2269,7 +2363,10 @@ sortToggle.addEventListener("click", cycleSortMode);
 
 refreshButton.addEventListener("click", startBackgroundScan);
 topButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", () => {
+  beginPageNavigation();
+  render();
+});
 closeLightbox.addEventListener("click", hideLightbox);
 prevImage.addEventListener("click", () => stepLightbox(-1));
 nextImage.addEventListener("click", () => stepLightbox(1));
@@ -2314,6 +2411,11 @@ setSortMode("works", state.workSort, false);
 if (versionFooter) versionFooter.textContent = `版本 ${APP_VERSION}`;
 
 (async () => {
-  await loadUserMarks();
-  await loadGallery(false);
+  beginPageNavigation();
+  try {
+    await loadUserMarks(state.pageAbortController.signal);
+    await loadGallery(false);
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  }
 })();

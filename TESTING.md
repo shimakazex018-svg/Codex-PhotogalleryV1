@@ -171,6 +171,14 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 ## Thumbnail checks
 
+V2.0.1图片预览隔离smoke：
+
+```powershell
+.\scripts\test-v201-preview.ps1 -NodePath <node-exe> -FfmpegPath <ffmpeg-exe> -Port <isolated-port>
+```
+
+验证路径边界、非图片/缺失/失败、同key并发去重、缓存命中、mtime新key、root limit和失败后进程存活，最后按精确PID停止并清理临时目录。不得指向生产媒体或正式端口。
+
 V1.4.5正式Runtime策略：
 
 1. 选择一个Runtime中不存在的thumbnail URL。

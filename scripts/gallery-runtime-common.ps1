@@ -7,7 +7,8 @@ function Read-GalleryEnvironment {
   $allowedKeys = @(
     "PORT", "DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR",
     "HLS_DIR", "TRASH_DIR", "FFMPEG_PATH", "FFPROBE_PATH", "ALLOW_REMOTE_DELETE",
-    "ENABLE_IMAGE_THUMBNAIL_GENERATION", "HLS_CACHE_EXPIRE_DAYS"
+    "ENABLE_IMAGE_THUMBNAIL_GENERATION", "ENABLE_IMAGE_PREVIEW_GENERATION",
+    "IMAGE_PREVIEW_DIR", "IMAGE_PREVIEW_MAX_EDGE", "IMAGE_PREVIEW_QUALITY", "HLS_CACHE_EXPIRE_DAYS"
   )
   $values = @{}
 
@@ -66,13 +67,24 @@ function Test-GalleryEnvironment {
   if ($Config.ENABLE_IMAGE_THUMBNAIL_GENERATION -notin @("0", "false")) {
     throw "V1.4.5 requires ENABLE_IMAGE_THUMBNAIL_GENERATION=0."
   }
+  if ($Config.ENABLE_IMAGE_PREVIEW_GENERATION -notin @("1", "true")) {
+    throw "V2.0.1 requires ENABLE_IMAGE_PREVIEW_GENERATION=1."
+  }
+  $previewMaxEdge = 0
+  $previewQuality = 0
+  if (-not [int]::TryParse($Config.IMAGE_PREVIEW_MAX_EDGE, [ref]$previewMaxEdge) -or $previewMaxEdge -lt 320 -or $previewMaxEdge -gt 1600) {
+    throw "IMAGE_PREVIEW_MAX_EDGE must be between 320 and 1600."
+  }
+  if (-not [int]::TryParse($Config.IMAGE_PREVIEW_QUALITY, [ref]$previewQuality) -or $previewQuality -lt 40 -or $previewQuality -gt 95) {
+    throw "IMAGE_PREVIEW_QUALITY must be between 40 and 95."
+  }
   $hlsExpireDays = 0
   if (-not [int]::TryParse($Config.HLS_CACHE_EXPIRE_DAYS, [ref]$hlsExpireDays) -or $hlsExpireDays -lt 1) {
     throw "HLS_CACHE_EXPIRE_DAYS must be a positive integer."
   }
 
   $project = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
-  $pathKeys = @("DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR", "HLS_DIR", "TRASH_DIR")
+  $pathKeys = @("DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR", "HLS_DIR", "TRASH_DIR", "IMAGE_PREVIEW_DIR")
   foreach ($key in $pathKeys) {
     $resolved = (Resolve-Path -LiteralPath $Config[$key]).Path.TrimEnd('\')
     if ($key -eq "DATA_DIR" -and $resolved.StartsWith($project, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -80,7 +92,7 @@ function Test-GalleryEnvironment {
     }
   }
 
-  foreach ($key in @("DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR", "HLS_DIR", "TRASH_DIR")) {
+  foreach ($key in @("DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR", "HLS_DIR", "TRASH_DIR", "IMAGE_PREVIEW_DIR")) {
     if (-not (Test-Path -LiteralPath $Config[$key] -PathType Container)) {
       throw "$key directory does not exist."
     }
@@ -125,5 +137,9 @@ function Set-GalleryProcessEnvironment {
   $env:FFPROBE_PATH = $Config.FFPROBE_PATH
   $env:ALLOW_REMOTE_DELETE = $Config.ALLOW_REMOTE_DELETE
   $env:ENABLE_IMAGE_THUMBNAIL_GENERATION = $Config.ENABLE_IMAGE_THUMBNAIL_GENERATION
+  $env:ENABLE_IMAGE_PREVIEW_GENERATION = $Config.ENABLE_IMAGE_PREVIEW_GENERATION
+  $env:IMAGE_PREVIEW_DIR = $Config.IMAGE_PREVIEW_DIR
+  $env:IMAGE_PREVIEW_MAX_EDGE = $Config.IMAGE_PREVIEW_MAX_EDGE
+  $env:IMAGE_PREVIEW_QUALITY = $Config.IMAGE_PREVIEW_QUALITY
   $env:HLS_CACHE_EXPIRE_DAYS = $Config.HLS_CACHE_EXPIRE_DAYS
 }

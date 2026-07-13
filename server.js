@@ -16,6 +16,7 @@ const photosDir = resolveConfiguredPath(process.env.PHOTOS_DIR, path.join(rootDi
 const dataDir = resolveConfiguredPath(process.env.DATA_DIR, path.join(rootDir, "data"));
 const thumbnailsDir = resolveConfiguredPath(process.env.THUMBNAILS_DIR, path.join(dataDir, "video-thumbnails"));
 const imageThumbnailsDir = path.join(dataDir, "thumbnails");
+const imagePreviewDir = resolveConfiguredPath(process.env.IMAGE_PREVIEW_DIR, path.join(dataDir, "image-previews"));
 const hlsDir = resolveConfiguredPath(process.env.HLS_DIR, path.join(dataDir, "hls"));
 const highlightDir = path.join(dataDir, "highlight-carousel");
 const trashDir = resolveConfiguredPath(process.env.TRASH_DIR, path.join(path.dirname(photosDir), "回收站"));
@@ -30,9 +31,14 @@ const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
 const ffprobePath = process.env.FFPROBE_PATH || (path.basename(ffmpegPath).toLowerCase().startsWith("ffmpeg") ? path.join(path.dirname(ffmpegPath), process.platform === "win32" ? "ffprobe.exe" : "ffprobe") : "ffprobe");
 const allowRemoteDelete = process.env.ALLOW_REMOTE_DELETE === "1" || process.env.ALLOW_REMOTE_DELETE === "true";
 const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
+const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
+const imagePreviewMaxEdge = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_MAX_EDGE) || 768, 320), 1600);
+const imagePreviewQuality = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_QUALITY) || 78, 40), 95);
 const duplicateRecycleLimit = 50000;
 const videoPosterSources = new Map();
 const imageThumbnailSources = new Map();
+const imagePreviewJobs = new Map();
+let imagePreviewQueue = Promise.resolve();
 let videoMetadataCache = null;
 let videoMetadataDirty = false;
 let videoMetadataProbeStartedAt = 0;
@@ -43,7 +49,7 @@ const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avi
 const videoExtensions = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
 const staticAssetExtensions = new Set([".css", ".js"]);
 const oneWeekSeconds = 7 * 24 * 60 * 60;
-const highlightSelectionVersion = 2;
+const highlightSelectionVersion = 3;
 const maxHighlightDimensionReads = 360;
 const globalScanStatePath = "__photos_global__";
 let scanTask = {
@@ -76,6 +82,7 @@ function ensureFolders() {
   fs.mkdirSync(photosDir, { recursive: true });
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(thumbnailsDir, { recursive: true });
+  fs.mkdirSync(imagePreviewDir, { recursive: true });
   fs.mkdirSync(imageThumbnailsDir, { recursive: true });
   fs.mkdirSync(hlsDir, { recursive: true });
   fs.mkdirSync(highlightDir, { recursive: true });
@@ -446,6 +453,66 @@ function mediaSrcToFilePath(src) {
   } catch (error) {
     return "";
   }
+}
+
+function imagePreviewDescriptor(src) {
+  let sourceUrl = src;
+  try {
+    const pathname = new URL(src, "http://localhost").pathname;
+    if (pathname.startsWith("/image-thumbnails/")) {
+      sourceUrl = galleryDb.getImageSourceByThumbnail(galleryDbFile, pathname) || "";
+    }
+  } catch (error) {
+    sourceUrl = "";
+  }
+  const sourcePath = mediaSrcToFilePath(sourceUrl);
+  if (!sourcePath || !fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile() || !isImage(sourcePath)) return null;
+  const stats = fs.statSync(sourcePath);
+  const key = crypto
+    .createHash("sha256")
+    .update(`${path.normalize(sourcePath)}|${stats.size}|${stats.mtimeMs}|${imagePreviewMaxEdge}|webp|${imagePreviewQuality}`)
+    .digest("hex");
+  return { sourcePath, key, filePath: path.join(imagePreviewDir, `${key}.webp`) };
+}
+
+function imagePreviewApiUrl(src) {
+  return `/api/image-preview?url=${encodeURIComponent(src)}`;
+}
+
+function generateImagePreview(descriptor) {
+  if (fs.existsSync(descriptor.filePath)) return Promise.resolve(descriptor);
+  if (!enableImagePreviewGeneration) return Promise.reject(new Error("Image preview generation is disabled"));
+  if (imagePreviewJobs.has(descriptor.key)) return imagePreviewJobs.get(descriptor.key);
+
+  const job = (imagePreviewQueue = imagePreviewQueue.catch(() => {}).then(() => new Promise((resolve, reject) => {
+    if (fs.existsSync(descriptor.filePath)) {
+      resolve(descriptor);
+      return;
+    }
+    fs.mkdirSync(imagePreviewDir, { recursive: true });
+    const temporaryPath = `${descriptor.filePath}.${process.pid}.${Date.now()}.tmp.webp`;
+    const child = spawn(ffmpegPath, [
+      "-y", "-i", descriptor.sourcePath,
+      "-vf", `scale='min(${imagePreviewMaxEdge},iw)':'min(${imagePreviewMaxEdge},ih)':force_original_aspect_ratio=decrease`,
+      "-frames:v", "1", "-c:v", "libwebp", "-quality", String(imagePreviewQuality), temporaryPath,
+    ], { windowsHide: true, stdio: "ignore" });
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (error) {
+        fs.rm(temporaryPath, { force: true }, () => {});
+        reject(error);
+        return;
+      }
+      fs.rename(temporaryPath, descriptor.filePath, (renameError) => renameError ? reject(renameError) : resolve(descriptor));
+    };
+    child.once("error", finish);
+    child.once("exit", (code) => finish(code === 0 ? null : new Error(`FFmpeg preview exited with code ${code}`)));
+  })));
+  imagePreviewJobs.set(descriptor.key, job);
+  job.finally(() => imagePreviewJobs.delete(descriptor.key)).catch(() => {});
+  return job;
 }
 
 function resolveImageThumbnailSource(width, id) {
@@ -831,11 +898,7 @@ function readStoredHighlights(hourKey) {
   try {
     const stored = JSON.parse(fs.readFileSync(highlightFile, "utf8"));
     const items = Array.isArray(stored.items) ? stored.items : [];
-    const filesExist = items.every((item) => {
-      const itemPath = path.normalize(path.join(highlightDir, path.basename(item.src || "")));
-      return isInsideDir(highlightDir, itemPath) && fs.existsSync(itemPath);
-    });
-    if (stored.hourKey === hourKey && stored.version === highlightSelectionVersion && filesExist) return items;
+    if (stored.hourKey === hourKey && stored.version === highlightSelectionVersion) return items;
   } catch (error) {
     return null;
   }
@@ -868,28 +931,14 @@ function ensureHighlightCarouselFromDb(forceRefresh = false) {
   const storedItems = forceRefresh ? null : readStoredHighlights(hourKey);
   if (storedItems) return storedItems;
 
-  clearHighlightFolder();
   const selected = shuffleItems(bestHighlightGroup(collectHighlightCandidatesFromDb())).slice(0, 20);
   const items = [];
 
-  const filePrefix = fileSafeHourKey(hourKey);
-  selected.forEach((candidate, index) => {
-    const sourcePath = candidate.sourcePath || photoUrlToPath(candidate.source);
-    if (!sourcePath || !fs.existsSync(sourcePath)) return;
-
-    const thumbId = path.basename(candidate.carouselThumb || "", ".jpg");
-    const thumbPath = thumbId ? path.join(imageThumbnailsDir, "960", `${thumbId}.jpg`) : "";
-    const copyPath =
-      thumbPath && isInsideDir(imageThumbnailsDir, thumbPath) && generateImageThumbnail(sourcePath, thumbPath, 960)
-        ? thumbPath
-        : sourcePath;
-
-    const extension = path.extname(copyPath).toLowerCase() || ".jpg";
-    const fileName = `${filePrefix}-${String(index + 1).padStart(2, "0")}${extension}`;
-    const targetPath = path.join(highlightDir, fileName);
-    fs.copyFileSync(copyPath, targetPath);
+  selected.forEach((candidate) => {
+    if (!imagePreviewDescriptor(candidate.source)) return;
     items.push({
-      src: toHighlightUrl(targetPath),
+      src: imagePreviewApiUrl(candidate.source),
+      original: candidate.source,
       href: candidate.href,
       title: candidate.title,
       model: candidate.model,
@@ -935,6 +984,31 @@ function sendText(response, status, message) {
 function sendJsonError(response, status, message) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   response.end(JSON.stringify({ error: message }));
+}
+
+function sendImagePreview(requestUrl, response) {
+  let descriptor;
+  try {
+    descriptor = imagePreviewDescriptor(requestUrl.searchParams.get("url") || "");
+  } catch (error) {
+    descriptor = null;
+  }
+  if (!descriptor) {
+    sendJsonError(response, 400, "A valid image URL inside PHOTOS_DIR is required");
+    return;
+  }
+  generateImagePreview(descriptor)
+    .then(() => {
+      response.writeHead(302, {
+        Location: `/image-previews/${descriptor.key}.webp`,
+        "Cache-Control": "no-store",
+      });
+      response.end();
+    })
+    .catch((error) => {
+      logEvent("image_preview_generation_failed", { source: descriptor.sourcePath, error: error.message });
+      sendJsonError(response, 503, "Image preview unavailable");
+    });
 }
 
 function isSqliteCorruption(error) {
@@ -1058,7 +1132,10 @@ function handleIndexApi(requestUrl, response) {
 
   if (requestUrl.pathname === "/api/collections/root") {
     sendDbResponse(response, () => ({
-      items: galleryDb.getRootCollections(galleryDbFile),
+      items: galleryDb.getRootCollections(galleryDbFile, {
+        limit: requestUrl.searchParams.get("limit") || "",
+        offset: requestUrl.searchParams.get("offset") || "",
+      }),
     }));
     return true;
   }
@@ -1657,11 +1734,20 @@ function sendFile(request, response, filePath) {
     }
 
     const contentType = contentTypes[extension] || "application/octet-stream";
+    const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
     const baseHeaders = {
       "Content-Type": contentType,
-      "Cache-Control": cacheControlFor(extension),
+      "Cache-Control": isInsideDir(imagePreviewDir, filePath) ? "public, max-age=31536000, immutable" : cacheControlFor(extension),
       "Accept-Ranges": "bytes",
+      ETag: etag,
+      "Last-Modified": stats.mtime.toUTCString(),
     };
+
+    if (request.headers["if-none-match"] === etag || (request.headers["if-modified-since"] && new Date(request.headers["if-modified-since"]).getTime() >= Math.trunc(stats.mtimeMs / 1000) * 1000)) {
+      response.writeHead(304, baseHeaders);
+      response.end();
+      return;
+    }
 
     const range = request.headers.range;
     if (range) {
@@ -1719,6 +1805,11 @@ function handleRequest(request, response) {
       dataSource: "sqlite",
       useSqliteApi: true,
     });
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/image-preview") {
+    sendImagePreview(requestUrl, response);
     return;
   }
 
@@ -1942,6 +2033,21 @@ function handleRequest(request, response) {
     }
 
     sendFile(request, response, sourcePath);
+    return;
+  }
+
+  if (decodedPath.startsWith("/image-previews/")) {
+    const match = decodedPath.match(/^\/image-previews\/([a-f0-9]{64})\.webp$/);
+    if (!match) {
+      sendText(response, 404, "Not found");
+      return;
+    }
+    const previewPath = path.join(imagePreviewDir, `${match[1]}.webp`);
+    if (!isInsideDir(imagePreviewDir, previewPath)) {
+      sendText(response, 403, "Forbidden");
+      return;
+    }
+    sendFile(request, response, previewPath);
     return;
   }
 

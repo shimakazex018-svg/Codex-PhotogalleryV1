@@ -1,5 +1,9 @@
 # Codex Photogallery V1
 
+## V2.0.1 按需图片预览
+
+列表和首页轮播使用独立WebP预览，进入视口附近才请求；原图仅在灯箱点击后加载。正式Runtime配置见`.env.example`，缓存可用`scripts/check-image-preview-cache.ps1`只读统计。禁止全库预生成或把预览目录放入Git。
+
 ## 项目介绍
 
 Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网写真图库。项目将外部图片和视频目录索引到 SQLite，通过浏览器提供多级目录浏览、媒体预览、搜索、收藏、最近浏览和维护工具。

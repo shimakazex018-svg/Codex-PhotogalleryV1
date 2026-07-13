@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-015：列表图片使用独立按需预览
+
+### Decision
+保持旧thumbnail生成关闭；列表统一请求版本化WebP预览。预览只按访问生成，单进程并发1，失败不回退原图，不自动删除缓存。
+
+### Reason
+避免全库任务和thumbnail URL静默传输原图，同时保持原媒体与SQLite schema不变。
+
+### Impact
+新增`IMAGE_PREVIEW_DIR`和预览API；未来需补容量门限、dry-run和多进程锁。
+
+### Status
+有效，V2.0.1实施。
+
 本文件记录长期有效或明确废弃的技术决策，不记录普通修复过程。
 
 ## DEC-001：代码与运行数据分离

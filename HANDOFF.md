@@ -4,12 +4,14 @@
 
 ## Last Completed Task
 
-完成 V2.0.1 移动端流量与按需加载只读审计；业务代码和生产 Runtime 均未修改。
+完成 V2.0.1 移动端流量与按需加载核心实现及隔离验证；真实Chrome Network前后对比待插件恢复后补验。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
+- 前端版本`v71`；列表使用独立按需WebP预览，首页/媒体limit为40，图片DOM首批24，视频始终preload=none。
+- 隔离preview smoke通过；正式Runtime已配置并重启，最小样本生成1个33,926-byte WebP。真实Chrome HAR尚未完成。
 - V2.0.1 审计确认目录 API 不递归深层媒体；主要风险是 thumbnail 缺失回退原图、20项轮播全带src、fetch不可取消和视频可退化为metadata预载。
 - 只读统计显示 Runtime 20个轮播文件共150.15 MiB；现有40个image thumbnail共2.04 MiB。
 - 本任务完成提交和普通push后，本地`main`应与`origin/main`同步。

@@ -116,6 +116,8 @@ Browser SPA
 - `/photos/...` 映射到 `PHOTOS_DIR`，路径必须保持在媒体根内。
 - 图片缩略图 URL：`/image-thumbnails/{480|720|960}/<hash>.jpg`。
 - 图片缩略图文件：`DATA_DIR/thumbnails/<width>/`。
+- 图片预览入口：`/api/image-preview?url=...`，成功后重定向到版本化 `/image-previews/<sha256>.webp`。
+- 图片预览文件：`IMAGE_PREVIEW_DIR`；单进程内单并发、同key去重、仅按请求生成。
 - 视频 poster URL：`/video-posters/<hash>.jpg`。
 - 视频 poster 文件：`THUMBNAILS_DIR`，默认 `DATA_DIR/video-thumbnails`。
 - poster进程内映射未命中时，服务端按poster URL从SQLite只读回查`src`并验证媒体根路径。
@@ -123,7 +125,7 @@ Browser SPA
 - 轮播 URL：`/highlight-carousel/...`；文件来自 `DATA_DIR/highlight-carousel`。
 - FFprobe 元数据缓存：`DATA_DIR/video-metadata.json`。
 
-V1.4.5 Runtime关闭新的图片缩略图生成：已有文件继续兼容提供，缺失时thumbnail URL直接返回原图。poster继续按需生成。HLS由脚本手工生成，不应在启动或列表加载时全量转码。
+V1.4.5 Runtime继续关闭旧图片缩略图生成。V2.0.1列表改用独立WebP预览，失败不再回退原图。poster继续按需生成。HLS由脚本手工生成，不应在启动或列表加载时全量转码。
 
 V1.4.4小批量缓存工具把状态、暂停标记和逐项日志写入Runtime `logs`，不修改数据库或媒体。它不是全量调度器。
 

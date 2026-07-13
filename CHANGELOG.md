@@ -1,5 +1,11 @@
 # Changelog
 
+## V2.0.1 - 2026-07-13
+
+- Added bounded on-demand WebP previews with immutable versioned responses.
+- Reduced home/media batches, added viewport image loading, current/next carousel loading, fetch cancellation, and strict video `preload="none"`.
+- Added isolated preview smoke coverage and read-only cache statistics.
+
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
 ## 2026-07-13 - Allow gallery access over ZeroTier

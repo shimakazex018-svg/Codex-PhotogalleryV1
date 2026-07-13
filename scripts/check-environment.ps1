@@ -18,6 +18,7 @@ try {
   Write-Host "[OK] FFmpeg: present"
   Write-Host "[OK] FFprobe: present"
   Write-Host "[OK] Image thumbnail generation: disabled"
+  Write-Host "[OK] Image previews: enabled, $($config.IMAGE_PREVIEW_MAX_EDGE)px WebP quality $($config.IMAGE_PREVIEW_QUALITY)"
   Write-Host "[OK] HLS expiry policy: $($config.HLS_CACHE_EXPIRE_DAYS) days (not automatically deleting)"
   $runtimeRoot = Split-Path -Parent $config.DATA_DIR
   $drive = Get-PSDrive -Name ([System.IO.Path]::GetPathRoot($runtimeRoot).TrimEnd(':\'))

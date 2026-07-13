@@ -4,13 +4,13 @@
 
 ## High Priority
 
-- [ ] 实施 V2.0.1 移动端流量与按需加载优化
+- [x] 实施 V2.0.1 移动端流量与按需加载优化
   - 说明：依据 `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md` 修复预览回退原图、轮播全量 src、请求取消、首页/媒体批次和缓存维护。
-  - 状态：完整审计已完成；本轮额度不足以安全完成代码、隔离验证和全套文档同步，业务代码未修改。
+  - 状态：核心实现和隔离smoke完成；真实Chrome Network对比仍由下项跟踪。
 
 - [ ] 使用浏览器 DevTools 补录 V2.0.1 优化前基线
   - 说明：移动端视口、Disable cache、导出 HAR，记录请求数、原图数、API/图片/总传输量和首屏时间。
-  - 状态：应用内浏览器安全策略拒绝48102，未虚构测量数据。
+  - 状态：Chrome已安装，但当前Native Messaging Host/manifest缺失；需从Codex插件界面重新安装Chrome插件后补录前后HAR，未虚构测量数据。
 
 - [ ] 完成ZeroTier实体外部设备验收
   - 说明：批准`Configure ZeroTier Access.cmd`的UAC后，在同一ZeroTier网络的外部设备使用HTTP访问`http://192.168.192.1:48102/`。

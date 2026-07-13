@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v70`（`app.js` 中的 `APP_VERSION`）。
+- 前端版本标记：`v71`（`app.js` 中的 `APP_VERSION`）。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前分支：`main`。
 
@@ -27,6 +27,7 @@
 - `start-server-48101.cmd` 会固定设置端口并把 `DATA_DIR` 指向项目内 `data`。
 - 正式Runtime当前由配置注入`48102`并监听IPv4 `0.0.0.0`；无配置直接运行源码仍使用历史默认`48101`。
 - 正式 runtime 已建立在代码仓库外，并通过新 PowerShell 脚本管理。
+- V2.0.1正式Runtime已配置`D:\GalleryRuntime\image-previews`，按需预览生成开启，旧thumbnail生成保持关闭。
 
 ## Core features
 
@@ -51,6 +52,7 @@
 | 原始媒体 | `PHOTOS_DIR`，默认 `<project-root>/photos` | 不提交；仓库仅跟踪 `.gitkeep` |
 | SQLite | `DATA_DIR/gallery.db` | 不提交 |
 | 图片缩略图 | `DATA_DIR/thumbnails/<width>/` | 不提交 |
+| 图片预览 | `IMAGE_PREVIEW_DIR`，默认 `DATA_DIR/image-previews` | 不提交 |
 | 视频 poster | `THUMBNAILS_DIR`，默认 `DATA_DIR/video-thumbnails` | 不提交 |
 | HLS | `HLS_DIR`，默认 `DATA_DIR/hls` | 不提交 |
 | 轮播缓存 | `DATA_DIR/highlight-carousel` 和 JSON 描述文件 | 不提交 |
