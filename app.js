@@ -1522,9 +1522,7 @@ function setupHighlightCarousel() {
   const prevButton = document.querySelector(".highlight-prev");
   const nextButton = document.querySelector(".highlight-next");
   if (!carousel || !track || cards.length <= 1) return;
-  const intervalMs = 10000;
-  const now = Date.now();
-  state.highlightIndex = Math.floor(now / intervalMs) % cards.length;
+  state.highlightIndex = 0;
   state.highlightTimer = { timeoutId: null, intervalId: null };
 
   const loadCarouselWindow = () => {
@@ -1546,39 +1544,17 @@ function setupHighlightCarousel() {
     track.style.transform = `translateX(${carouselCenter - cardCenter}px)`;
   };
 
-  const restartProgress = (elapsedMs = 0) => {
+  const restartProgress = () => {
     if (!progress) return;
     progress.classList.remove("running", "resuming");
     progress.style.animationDuration = "";
     progress.style.transform = "scaleX(0)";
-    void progress.offsetWidth;
-    if (elapsedMs > 0) {
-      progress.style.transform = `scaleX(${Math.min(0.99, elapsedMs / intervalMs)})`;
-      progress.style.animationDuration = `${Math.max(1, intervalMs - elapsedMs)}ms`;
-      progress.classList.add("resuming");
-    } else {
-      progress.classList.add("running");
-    }
   };
 
-  const moveHighlight = (step, resetTimer = true) => {
+  const moveHighlight = (step) => {
     state.highlightIndex = (state.highlightIndex + step + cards.length) % cards.length;
     centerActiveCard();
     restartProgress();
-    if (resetTimer) scheduleNext(intervalMs);
-  };
-
-  const advance = () => {
-    moveHighlight(1, false);
-  };
-
-  const scheduleNext = (delayMs) => {
-    clearTimeout(state.highlightTimer.timeoutId);
-    clearInterval(state.highlightTimer.intervalId);
-    state.highlightTimer.timeoutId = setTimeout(() => {
-      advance();
-      state.highlightTimer.intervalId = setInterval(advance, intervalMs);
-    }, Math.max(1, delayMs));
   };
 
   prevButton?.addEventListener("click", (event) => {
@@ -1593,9 +1569,7 @@ function setupHighlightCarousel() {
   });
 
   centerActiveCard();
-  const elapsedMs = now % intervalMs;
-  restartProgress(elapsedMs);
-  scheduleNext(intervalMs - elapsedMs);
+  restartProgress();
 }
 
 function clearHighlightCarouselTimer() {
