@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-13 - Add responsive back-to-top control
+
+- Added a body-level floating back-to-top button that remains available across hash routes without changing existing navigation or media behavior.
+- Added compact responsive positioning with safe-area offsets, a 25% idle state, full-opacity interaction feedback, keyboard focus styling, and a layer below the lightbox.
+- Added a cancellable 1000 ms smootherstep scroll animation with direct reduced-motion fallback and bumped frontend cache assets to `v73`.
+
 ## V2.0.1 - 2026-07-13
 
 - Added bounded on-demand WebP previews with immutable versioned responses.

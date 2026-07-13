@@ -1110,6 +1110,74 @@ a {
   touch-action: none;
 }
 
+.back-to-top {
+  position: fixed;
+  z-index: 20;
+  right: calc(24px + env(safe-area-inset-right, 0px));
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  place-items: center;
+  width: clamp(44px, 3.2vw, 50px);
+  height: clamp(44px, 3.2vw, 50px);
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(35, 35, 35, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  color: rgba(255, 255, 255, 0.96);
+  opacity: 0.25;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 300ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.back-to-top svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.back-to-top:hover,
+.back-to-top:active,
+.back-to-top:focus-visible,
+.back-to-top--scrolling,
+.back-to-top--interacting,
+.back-to-top--animating {
+  opacity: 1;
+}
+
+.back-to-top:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 3px;
+}
+
+.back-to-top--scrolling,
+.back-to-top--interacting,
+.back-to-top--animating {
+  transition-duration: 0ms, 180ms, 180ms;
+}
+
+@media (max-width: 760px) {
+  .back-to-top {
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .back-to-top {
+    transition-duration: 0.01ms;
+  }
+}
+
 .lightbox.open {
   display: flex;
 }

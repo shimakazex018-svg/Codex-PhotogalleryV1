@@ -4,13 +4,13 @@
 
 ## Last Completed Task
 
-完成 V2.0.1 移动端流量与按需加载核心实现及隔离验证；真实Chrome Network前后对比待插件恢复后补验。
+增加响应式“回到顶部”悬浮按钮，完成正式站点窄屏布局与交互验证，并将前端资源版本更新为 `v73`。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 前端版本`v72`；列表使用独立按需WebP预览，首页/媒体limit为40，图片DOM首批24，视频始终preload=none。
+- 前端版本`v73`；列表使用独立按需WebP预览，首页/媒体limit为40，图片DOM首批24，视频始终preload=none。页面新增支持安全区、空闲弱化、可中断S曲线动画和减少动态效果回退的全局回顶按钮。
 - 轮播不再空闲自动推进；初始化只加载当前和下一项，后续仅由用户按钮切换触发。
 - 隔离preview smoke通过；正式Runtime已配置并重启，最小样本生成1个33,926-byte WebP。真实Chrome HAR尚未完成。
 - V2.0.1 审计确认目录 API 不递归深层媒体；主要风险是 thumbnail 缺失回退原图、20项轮播全带src、fetch不可取消和视频可退化为metadata预载。
@@ -26,6 +26,8 @@
 
 ## Recently Changed Files
 
+- `index.html`、`styles.css`、`app.js`
+- `CHANGELOG.md`、`TESTING.md`、`TODO.md`、`HANDOFF.md`
 - `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md`
 - `TODO.md`、`CHANGELOG.md`、`HANDOFF.md`
 
@@ -64,6 +66,7 @@
 
 ## Validation
 
+- 回顶按钮源码检查通过；正式LAN站点返回HTTP 200并加载`v73`。受控浏览器确认语义、固定定位、窄屏无横向溢出、灯箱层级、最终回到顶部和滚轮中断。浏览器视口覆盖未实际切换全部六组尺寸，因此六设备视觉复验保留为人工项，未虚构通过。
 - 仓库根目录、tracked files、启动脚本和 `.gitignore`：已审计。
 - 前后端入口、主要 API、SQLite 表/index：已从源码核对。
 - 运行数据忽略矩阵：数据库、媒体、日志、cache、runtime、缩略图、poster、HLS 和 `.env` 均命中忽略规则。

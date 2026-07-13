@@ -70,6 +70,7 @@
 
 ## Done
 
+- [x] 增加并验证响应式“回到顶部”悬浮按钮（前端 `v73`）。
 - [x] 创建ZeroTier专用TCP 48102规则并验证LocalAddress、RemoteAddress、Profile和现有LAN规则不变。
 - [x] 恢复物理LAN访问并验证LAN规则仅限`192.168.31.153`、`LocalSubnet`和TCP 48102。
 

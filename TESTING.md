@@ -148,6 +148,18 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 ## Browser checks
 
+### Back-to-top control
+
+For changes to the floating back-to-top control, verify:
+
+- desktop targets `1920x1080` and `1366x768`;
+- tablet targets `768x1024` and `1024x768`;
+- mobile targets `390x844` and `844x390`;
+- fixed positioning, no horizontal overflow, 44-50 px hit target, and lightbox z-index above the control;
+- idle opacity, scrolling/hover/focus opacity, approximately 1000 ms return to `scrollY=0`, user wheel/touch/key interruption, and reduced-motion direct return.
+
+2026-07-13 validation: the formal LAN site returned HTTP 200 and loaded frontend `v73`. The controlled browser confirmed a unique accessible button, fixed positioning, zero horizontal overflow in the available narrow viewport, z-index `20` below lightbox `30`, visual placement, final `scrollY=0`, and wheel interruption at user-controlled `scrollY=420`. The browser viewport override remained at one narrow inner viewport instead of applying all six requested outer sizes; all six target geometries and both CSS breakpoints were therefore also checked statically, while six-device visual confirmation remains manual.
+
 运行型前端修改至少检查：
 
 - 首页和 hash 导航；

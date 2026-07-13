@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v72";
+const APP_VERSION = "v73";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -85,6 +85,7 @@ const statusEl = document.querySelector("#status");
 const crumbs = document.querySelector("#crumbs");
 const refreshButton = document.querySelector("#refreshButton");
 const topButton = document.querySelector("#topButton");
+const backToTopButton = document.querySelector("#backToTopButton");
 const versionFooter = document.querySelector("#versionFooter");
 const columnButtons = [...document.querySelectorAll("[data-columns]")];
 const coverFitToggle = document.querySelector("#coverFitToggle");
@@ -135,6 +136,75 @@ function beginPageNavigation() {
   state.searchAbortController = null;
   state.sqliteLoading = null;
   state.routeGeneration += 1;
+}
+
+function initBackToTopButton() {
+  if (!backToTopButton || backToTopButton.dataset.initialized === "true") return;
+  backToTopButton.dataset.initialized = "true";
+
+  const animationDurationMs = 1000;
+  const scrollIdleDelayMs = 200;
+  const interruptKeys = new Set(["PageDown", "PageUp", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+  let scrollIdleTimer = null;
+  let animationFrameId = null;
+
+  const smootherStep = (progress) => progress * progress * progress * (progress * (progress * 6 - 15) + 10);
+  const finishAnimation = () => {
+    if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+    backToTopButton.classList.remove("back-to-top--animating");
+  };
+  const cancelAnimation = () => {
+    if (animationFrameId === null) return;
+    finishAnimation();
+  };
+  const markScrolling = () => {
+    backToTopButton.classList.add("back-to-top--scrolling");
+    clearTimeout(scrollIdleTimer);
+    scrollIdleTimer = setTimeout(() => {
+      backToTopButton.classList.remove("back-to-top--scrolling");
+    }, scrollIdleDelayMs);
+  };
+  const startAnimation = () => {
+    const startY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    cancelAnimation();
+    if (startY <= 0) {
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    const startedAt = performance.now();
+    backToTopButton.classList.add("back-to-top--animating");
+    const animate = (now) => {
+      const progress = Math.min(1, Math.max(0, (now - startedAt) / animationDurationMs));
+      const nextY = Math.max(0, startY * (1 - smootherStep(progress)));
+      window.scrollTo(0, nextY);
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(animate);
+        return;
+      }
+      window.scrollTo(0, 0);
+      finishAnimation();
+    };
+    animationFrameId = requestAnimationFrame(animate);
+  };
+
+  window.addEventListener("scroll", markScrolling, { passive: true });
+  window.addEventListener("wheel", cancelAnimation, { passive: true });
+  window.addEventListener("touchstart", cancelAnimation, { passive: true });
+  window.addEventListener("pointerdown", cancelAnimation, { passive: true });
+  window.addEventListener("keydown", (event) => {
+    if (interruptKeys.has(event.key)) cancelAnimation();
+  });
+  backToTopButton.addEventListener("pointerdown", () => backToTopButton.classList.add("back-to-top--interacting"));
+  ["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => {
+    backToTopButton.addEventListener(eventName, () => backToTopButton.classList.remove("back-to-top--interacting"));
+  });
+  backToTopButton.addEventListener("click", startAnimation);
 }
 
 function setColumns(count) {
@@ -2383,6 +2453,7 @@ setTheme(state.theme);
 setSortMode("models", state.modelSort, false);
 setSortMode("works", state.workSort, false);
 if (versionFooter) versionFooter.textContent = `版本 ${APP_VERSION}`;
+initBackToTopButton();
 
 (async () => {
   beginPageNavigation();
