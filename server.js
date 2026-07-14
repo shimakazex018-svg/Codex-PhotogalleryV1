@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
+const readline = require("readline");
 const galleryDb = require("./gallery-db");
 
 const rootDir = __dirname;
@@ -77,6 +78,18 @@ let duplicateTask = {
   stats: null,
 };
 let duplicateTaskChild = null;
+let mediaCleanupTask = {
+  id: "",
+  status: "idle",
+  startedAt: "",
+  finishedAt: "",
+  errorMessage: "",
+  summary: null,
+};
+let mediaCleanupChild = null;
+const mediaCleanupWorkerPath = path.join(rootDir, "scripts", "media-library-cleanup-worker.ps1");
+const mediaCleanupPageSizeMax = 200;
+const mediaCleanupOffsetMax = 50000;
 
 function ensureFolders() {
   fs.mkdirSync(photosDir, { recursive: true });
@@ -1601,6 +1614,204 @@ function readRequestBody(request, callback) {
   request.on("end", () => callback(body));
 }
 
+function mediaCleanupPaths(id) {
+  const safeId = /^[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$/.test(String(id || "")) ? String(id) : "";
+  if (!safeId) return null;
+  const prefix = path.join(logsDir, `media-cleanup-${safeId}`);
+  return {
+    prefix,
+    summary: `${prefix}-summary.json`,
+    records: `${prefix}-records.ndjson`,
+    deletionRecords: `${prefix}-deletion.ndjson`,
+    progress: `${prefix}-progress.json`,
+    cancel: `${prefix}-cancel.request`,
+    nonMedia: `${prefix}-non-media.csv`,
+  };
+}
+
+function readCleanupJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
+  } catch (error) {
+    return null;
+  }
+}
+
+function mediaCleanupSnapshot() {
+  const paths = mediaCleanupPaths(mediaCleanupTask.id);
+  const progress = paths ? readCleanupJson(paths.progress) : null;
+  const summary = paths ? readCleanupJson(paths.summary) : null;
+  if (summary && !["scanning", "stopping", "deleting"].includes(mediaCleanupTask.status)) {
+    mediaCleanupTask.summary = summary;
+  }
+  return {
+    id: mediaCleanupTask.id,
+    status: mediaCleanupTask.status,
+    rootPath: photosDir,
+    startedAt: mediaCleanupTask.startedAt,
+    finishedAt: mediaCleanupTask.finishedAt,
+    errorMessage: mediaCleanupTask.errorMessage,
+    progress,
+    summary: mediaCleanupTask.summary || summary,
+    canDelete: mediaCleanupTask.status === "completed",
+    localDeleteOnly: !allowRemoteDelete,
+  };
+}
+
+function cleanupJobId() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+  return `${stamp}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function spawnMediaCleanup(mode, id) {
+  const paths = mediaCleanupPaths(id);
+  const args = [
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", mediaCleanupWorkerPath,
+    "-Mode", mode, "-RootPath", photosDir, "-LogsPath", logsDir, "-JobId", id,
+  ];
+  if (mode === "Scan") args.push("-CancelPath", paths.cancel);
+  if (mode === "Delete") args.push("-CandidatePath", paths.records);
+  const child = spawn("powershell.exe", args, {
+    cwd: rootDir,
+    windowsHide: true,
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  mediaCleanupChild = child;
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-16000); });
+  child.on("error", (error) => {
+    mediaCleanupTask.status = "failed";
+    mediaCleanupTask.errorMessage = error.message;
+    mediaCleanupTask.finishedAt = new Date().toISOString();
+  });
+  child.on("close", (code) => {
+    if (mediaCleanupChild === child) mediaCleanupChild = null;
+    if (mediaCleanupTask.id !== id) return;
+    const summary = readCleanupJson(paths.summary);
+    mediaCleanupTask.summary = summary;
+    mediaCleanupTask.finishedAt = new Date().toISOString();
+    if (code === 0 && summary && ["completed", "stopped", "delete-completed"].includes(summary.status)) {
+      mediaCleanupTask.status = summary.status;
+      mediaCleanupTask.errorMessage = "";
+    } else {
+      mediaCleanupTask.status = "failed";
+      mediaCleanupTask.errorMessage = (summary && summary.errorMessage) || stderr.trim() || `Media cleanup worker exited with code ${code}`;
+    }
+  });
+  return child;
+}
+
+function startMediaCleanupScan() {
+  if (mediaCleanupChild || ["scanning", "stopping", "deleting"].includes(mediaCleanupTask.status)) {
+    const error = new Error("A media cleanup task is already running.");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (!fs.existsSync(mediaCleanupWorkerPath)) throw new Error("Media cleanup worker is missing.");
+  const id = cleanupJobId();
+  mediaCleanupTask = { id, status: "scanning", startedAt: new Date().toISOString(), finishedAt: "", errorMessage: "", summary: null };
+  spawnMediaCleanup("Scan", id);
+  return mediaCleanupSnapshot();
+}
+
+function stopMediaCleanupScan() {
+  if (mediaCleanupTask.status !== "scanning" || !mediaCleanupChild) {
+    const error = new Error("No media cleanup scan is running.");
+    error.statusCode = 409;
+    throw error;
+  }
+  const paths = mediaCleanupPaths(mediaCleanupTask.id);
+  fs.writeFileSync(paths.cancel, new Date().toISOString(), "utf8");
+  mediaCleanupTask.status = "stopping";
+  return mediaCleanupSnapshot();
+}
+
+function startMediaCleanupDelete(request, payload) {
+  if (!isLocalRequest(request) && !allowRemoteDelete) {
+    const error = new Error("Deleting files is only available from this server PC.");
+    error.statusCode = 403;
+    throw error;
+  }
+  const id = String(payload.jobId || "");
+  const confirmation = String(payload.confirmation || "").trim();
+  if (confirmation !== "DELETE" && confirmation !== "删除") {
+    const error = new Error("Type DELETE or 删除 to confirm.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (id !== mediaCleanupTask.id || mediaCleanupTask.status !== "completed" || !mediaCleanupTask.summary || mediaCleanupTask.summary.incomplete) {
+    const error = new Error("Only the current completed scan can be deleted.");
+    error.statusCode = 409;
+    throw error;
+  }
+  const paths = mediaCleanupPaths(id);
+  if (!paths || !fs.existsSync(paths.records)) throw new Error("Candidate report is missing.");
+  mediaCleanupTask.status = "deleting";
+  mediaCleanupTask.errorMessage = "";
+  spawnMediaCleanup("Delete", id);
+  return mediaCleanupSnapshot();
+}
+
+function cleanupRecordCompare(sort, direction) {
+  const factor = direction === "desc" ? -1 : 1;
+  return (a, b) => {
+    if (sort === "size") {
+      const difference = Number(a.sizeBytes || 0) - Number(b.sizeBytes || 0);
+      if (difference) return difference * factor;
+    }
+    return String(a.relativePath || "").localeCompare(String(b.relativePath || ""), "zh-CN", { sensitivity: "base" }) * factor;
+  };
+}
+
+async function queryMediaCleanupResults(requestUrl) {
+  const id = requestUrl.searchParams.get("jobId") || mediaCleanupTask.id;
+  const paths = mediaCleanupPaths(id);
+  const kind = String(requestUrl.searchParams.get("kind") || "non-media").toLowerCase();
+  const recordsFile = kind === "deletion" ? paths && paths.deletionRecords : paths && paths.records;
+  if (!paths || !recordsFile || !fs.existsSync(recordsFile)) {
+    const error = new Error("Cleanup results were not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+  const page = Math.max(Number.parseInt(requestUrl.searchParams.get("page") || "1", 10) || 1, 1);
+  const pageSize = Math.min(Math.max(Number.parseInt(requestUrl.searchParams.get("pageSize") || "50", 10) || 50, 1), mediaCleanupPageSizeMax);
+  const offset = (page - 1) * pageSize;
+  if (offset > mediaCleanupOffsetMax) {
+    const error = new Error(`Result offset exceeds the ${mediaCleanupOffsetMax} record safety limit. Narrow the search or filter.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  const category = String(requestUrl.searchParams.get("category") || "").toLowerCase();
+  const search = String(requestUrl.searchParams.get("search") || "").trim().toLowerCase().slice(0, 200);
+  const sort = requestUrl.searchParams.get("sort") === "size" ? "size" : "path";
+  const direction = requestUrl.searchParams.get("direction") === "desc" ? "desc" : "asc";
+  const compare = cleanupRecordCompare(sort, direction);
+  const keep = offset + pageSize;
+  const selected = [];
+  let total = 0;
+  const input = fs.createReadStream(recordsFile, { encoding: "utf8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    let record;
+    try { record = JSON.parse(line.replace(/^\uFEFF/, "")); } catch (error) { continue; }
+    if (kind && String(record.kind || "").toLowerCase() !== kind) continue;
+    if (category && String(record.category || "").toLowerCase() !== category) continue;
+    const haystack = `${record.fileName || ""}\n${record.relativePath || ""}`.toLowerCase();
+    if (search && !haystack.includes(search)) continue;
+    total += 1;
+    selected.push(record);
+    if (selected.length >= Math.max(keep * 2, 400)) {
+      selected.sort(compare);
+      selected.length = Math.min(selected.length, keep);
+    }
+  }
+  selected.sort(compare);
+  const items = selected.slice(offset, offset + pageSize).map(({ fullPath, ...record }) => record);
+  return { jobId: id, page, pageSize, total, items, safetyOffsetLimit: mediaCleanupOffsetMax };
+}
+
 function photoUrlToPath(src) {
   const sourceUrl = new URL(src, "http://localhost");
   const decodedPath = decodeURIComponent(sourceUrl.pathname);
@@ -1857,6 +2068,54 @@ function handleRequest(request, response) {
 
   if (requestUrl.pathname === "/api/duplicate-delete-marks") {
     sendUserMarks(request, response, "duplicate-delete", 500);
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-cleanup/status") {
+    if (request.method !== "GET") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    sendJson(response, mediaCleanupSnapshot());
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-cleanup/scan/start" || requestUrl.pathname === "/api/media-cleanup/scan/stop") {
+    if (request.method !== "POST") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    try {
+      sendJson(response, requestUrl.pathname.endsWith("/start") ? startMediaCleanupScan() : stopMediaCleanupScan());
+    } catch (error) {
+      sendJsonError(response, error.statusCode || 500, error.message);
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-cleanup/results") {
+    if (request.method !== "GET") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    queryMediaCleanupResults(requestUrl)
+      .then((result) => sendJson(response, result))
+      .catch((error) => sendJsonError(response, error.statusCode || 500, error.message));
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-cleanup/delete") {
+    if (request.method !== "POST") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    readRequestBody(request, (body) => {
+      try {
+        sendJson(response, startMediaCleanupDelete(request, JSON.parse(body || "{}")));
+      } catch (error) {
+        sendJsonError(response, error.statusCode || 500, error.message);
+      }
+    });
     return;
   }
 
