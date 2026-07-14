@@ -1,5 +1,9 @@
 # Codex Photogallery V1
 
+## 媒体库清理
+
+设置页 `#/__settings/media-cleanup` 提供独立的低负载媒体库扫描、分页报告和显式确认删除。扫描根目录只来自运行配置 `PHOTOS_DIR`，单线程 PowerShell worker 不读取媒体内容、不解码、不哈希；报告直接写入现有 `DATA_DIR/logs`。删除默认仅 localhost，必须输入 `DELETE` 或“删除”，并只处理当前完成报告中的非媒体候选。详见 `docs/MEDIA_LIBRARY_CLEANUP_SETTINGS.md`。
+
 ## V2.0.1 按需图片预览
 
 列表和首页轮播使用独立WebP预览，进入视口附近才请求；原图仅在灯箱点击后加载。正式Runtime配置见`.env.example`，缓存可用`scripts/check-image-preview-cache.ps1`只读统计。禁止全库预生成或把预览目录放入Git。
@@ -22,6 +26,7 @@ Codex Photogallery V1 是一个从成熟旧站点完整继承的本地/局域网
 - 首页轮播
 - 图片查重与回收站移动
 - 访问日志
+- 媒体库清理扫描、分页报告与受控删除
 - HLS 生成与静态访问
 
 项目没有账号、登录、上传或管理员角色系统。对局域网或虚拟网络开放时，必须在项目外配置适当的网络访问控制。
@@ -178,6 +183,7 @@ start-server-48101.cmd
 - `网页.md`：页面、路由、按钮、API、数据库和交接索引
 - `AGENTS.md`：未来 Codex 和维护者必须遵守的规则
 - `docs/DEVELOPMENT.md`：开发、验证和提交工作流
+- `docs/MEDIA_LIBRARY_CLEANUP_SETTINGS.md`：媒体清理范围、生命周期、报告、删除边界和隔离测试
 - `docs/CLEANUP_REPORT.md`：V1.2 文件、脚本和代码候选审计
 - `docs/CODE_CLEANUP_REPORT.md`：V1.2.5 死代码证据与验证结果
 - `docs/PROJECT_STATUS.md`：当前发布版本、结构、规模、问题和后续计划

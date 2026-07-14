@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v79`（`app.js` 中的 `APP_VERSION`）。
+- 前端版本标记：`v80`（`app.js` 中的 `APP_VERSION`）。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前分支：`main`。
 
@@ -41,6 +41,8 @@
 - 首页轮播；
 - 后台目录扫描；
 - 图片 SHA-256 查重、标记和回收站移动；
+- 设置页媒体库清理：单 PowerShell 子进程扫描、可停止进度、分页报告和 localhost 显式确认删除；
+- 2026-07-14 正式 `PHOTOS_DIR` 只读扫描完成：482450 文件、7288 目录、472490 图片、2109 视频、7851 非媒体（4204588435 bytes）、0 错误；未执行删除。
 - 访问日志；
 - 可选手工 HLS 生成与静态访问。
 
@@ -59,6 +61,7 @@
 | 轮播缓存 | `DATA_DIR/highlight-carousel` 和 JSON 描述文件 | 不提交 |
 | 视频元数据缓存 | `DATA_DIR/video-metadata.json` | 不提交 |
 | 日志 | `DATA_DIR/logs` | 不提交 |
+| 媒体清理报告 | `DATA_DIR/logs/media-cleanup-<jobId>-*` | 不提交 |
 | 回收目录 | `TRASH_DIR`，默认媒体根同级回收目录 | 不提交 |
 
 当前仓库的 `data/` 和 `photos/` 只有 `.gitkeep`；不存在受 Git 管理的生产数据库、媒体、缩略图、HLS、日志或 cache。

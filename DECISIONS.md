@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-017：媒体库清理使用独立单线程报告 worker
+
+### Decision
+媒体清理不复用 SQLite 索引扫描，也不修改数据库 schema。Node 只负责单任务生命周期、API 和有界分页；PowerShell 单线程枚举 `PHOTOS_DIR` 元数据并把报告直接写入现有 `DATA_DIR/logs`。删除只接受当前 completed `jobId` 和确认文本，路径由报告解析，并继续服从 localhost/`ALLOW_REMOTE_DELETE` 边界。
+
+### Reason
+47 万对象不能同步阻塞 Node、一次性进入 Node/浏览器内存或触发媒体解码/哈希；独立进程能在完成、停止和失败后释放 CPU/句柄，同时把误删边界固定在服务端。
+
+### Impact
+新增正式 PowerShell worker、设置页和 `/api/media-cleanup/*`。报告会占用 Runtime logs 容量，后续需要根据真实扫描体积确定保留策略；第一阶段正式验收只读扫描，不删除。
+
+### Status
+有效，前端 `v80` 实施并通过隔离扫描/停止/删除和浏览器验收。
+
 ## DEC-016：SPA滚动恢复采用有界锚点快照
 
 ### Decision

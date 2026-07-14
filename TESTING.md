@@ -39,6 +39,28 @@ node --check duplicates-worker.js
 git diff --check
 ```
 
+PowerShell worker 还必须通过解析器检查：
+
+```powershell
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+  (Resolve-Path '.\scripts\media-library-cleanup-worker.ps1'),
+  [ref]$null,
+  [ref]$errors
+) | Out-Null
+if ($errors) { $errors; exit 1 }
+```
+
+## Media library cleanup isolated validation
+
+- 只在 `$env:TEMP\Codex-PhotogalleryV1-MediaCleanup-<GUID>` 创建媒体、Runtime 和报告。
+- 覆盖图片、视频、ZIP/TXT、无扩展名、系统垃圾、空目录、叶非媒体目录、多层无媒体树、0 字节媒体、可疑小媒体、中文与空格路径；ReparsePoint 仅在可安全创建时验证。
+- 验证第二个 start 返回 409，stop 进入 `stopping` 后到 `stopped`，`incomplete=true`，取消标记和 `.tmp` 为 0。
+- API 验证扫描期间首页 HTTP 200、结果分页/搜索/排序、错误确认 400、localhost 删除只处理报告候选、媒体保留、空目录自底向上清理。
+- 浏览器验证 `#/__settings/media-cleanup` 的状态、统计、分页、按钮互斥、自定义确认对话框、控制台和 390×844 布局。
+- `finally` 精确停止测试 Node，删除整个 GUID 目录，并要求 `Test-Path -LiteralPath $root` 为 `False`；否则测试失败。
+- 正式媒体第一阶段只允许扫描/查看/报告，禁止调用删除 API。
+
 同时检查：
 
 ```powershell

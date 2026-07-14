@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-14 - Add media library cleanup settings
+
+- Added a single-process, sequential PowerShell scanner that reads only configured `PHOTOS_DIR` metadata, skips reparse points, reports conservative image/video formats, and exits after completion or cancellation.
+- Added bounded status/results APIs with category/search/path/size pagination and reports written directly to the existing Runtime logs directory.
+- Added explicit `DELETE`/“删除” confirmation, current-job report binding, repeated root/reparse validation, localhost/`ALLOW_REMOTE_DELETE` enforcement, and bottom-up true-empty-directory cleanup.
+- Added the `#/__settings/media-cleanup` interface, responsive results table, progress/statistics, cancellation, custom confirmation dialog, and frontend version `v80`.
+- Validated isolated scan, duplicate-start rejection, stop cleanup, localhost test deletion, HTTP responsiveness, Chinese paths, mobile layout, and complete temporary-directory removal; production deletion was not performed.
+- Confirmed that a correctly formed delete request through the LAN address returns HTTP 403 when `ALLOW_REMOTE_DELETE=0`, while the same isolated localhost workflow remains available.
+- Completed one formal read-only scan from the existing Runtime `PHOTOS_DIR`: 482,450 files, 7,288 directories, 7,851 non-media candidates (4,204,588,435 bytes), 269 empty directories, 5 media-free trees, 2 suspicious tiny media files, and zero scan errors. No formal file or directory was deleted.
+
 ## 2026-07-14 - Restore gallery scroll position on history navigation
 
 - Added route-scoped scroll snapshots with stable DOM anchors, relative offsets, rendered media depth, paging cursor, and bounded in-memory/session storage retention.
