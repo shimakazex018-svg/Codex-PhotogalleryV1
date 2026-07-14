@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v79";
+const APP_VERSION = "v80";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -49,6 +49,15 @@ const state = {
   duplicateDeleteMarks: [],
   accessLogs: [],
   accessLogsLoading: false,
+  mediaCleanupStatus: null,
+  mediaCleanupResults: { items: [], total: 0, page: 1, pageSize: 50 },
+  mediaCleanupKind: "non-media",
+  mediaCleanupCategory: "",
+  mediaCleanupSearch: "",
+  mediaCleanupSort: "path",
+  mediaCleanupDirection: "asc",
+  mediaCleanupPollTimer: null,
+  mediaCleanupLoading: false,
   lastAccessLogKey: "",
   columns: Number(localStorage.getItem("galleryColumns") || 4),
   coverFit: localStorage.getItem("galleryCoverFit") || "crop",
@@ -757,6 +766,7 @@ function settingsHashRoute() {
 function settingsSection() {
   const route = location.hash.replace(/^#\/?/, "");
   if (route.includes("access-log")) return "access-log";
+  if (route.includes("media-cleanup")) return "media-cleanup";
   return route.includes("duplicates") ? "duplicates" : "display";
 }
 
@@ -1736,20 +1746,164 @@ function accessLogPageHtml() {
   `;
 }
 
+function stopMediaCleanupPolling() {
+  if (state.mediaCleanupPollTimer) clearTimeout(state.mediaCleanupPollTimer);
+  state.mediaCleanupPollTimer = null;
+}
+
+function mediaCleanupActive(status = state.mediaCleanupStatus?.status) {
+  return ["scanning", "stopping", "deleting"].includes(status);
+}
+
+async function loadMediaCleanupStatus() {
+  state.mediaCleanupStatus = await fetchJson("/api/media-cleanup/status");
+  return state.mediaCleanupStatus;
+}
+
+async function loadMediaCleanupResults(page = 1) {
+  const status = state.mediaCleanupStatus || {};
+  if (!status.id || !["completed", "delete-completed", "stopped"].includes(status.status)) return;
+  state.mediaCleanupLoading = true;
+  const query = new URLSearchParams({
+    jobId: status.id,
+    page: String(Math.max(page, 1)),
+    pageSize: String(state.mediaCleanupResults.pageSize || 50),
+    kind: state.mediaCleanupKind,
+    category: state.mediaCleanupCategory,
+    search: state.mediaCleanupSearch,
+    sort: state.mediaCleanupSort,
+    direction: state.mediaCleanupDirection,
+  });
+  try {
+    state.mediaCleanupResults = await fetchJson(`/api/media-cleanup/results?${query}`);
+  } finally {
+    state.mediaCleanupLoading = false;
+  }
+}
+
+function cleanupMetric(label, value) {
+  return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value ?? 0)}</strong></span>`;
+}
+
+function mediaCleanupPageHtml() {
+  const status = state.mediaCleanupStatus || {};
+  const summary = status.summary || status.progress || {};
+  const results = state.mediaCleanupResults || { items: [], total: 0, page: 1, pageSize: 50 };
+  const active = mediaCleanupActive(status.status);
+  const totalPages = Math.max(Math.ceil(Number(results.total || 0) / Number(results.pageSize || 50)), 1);
+  const tabs = [
+    ["non-media", "", "非媒体文件"],
+    ["directory", "EmptyDirectory", "空目录"],
+    ["directory", "MediaFreeTree", "无媒体目录树"],
+    ["zero-byte-media", "", "0字节媒体"],
+    ["suspicious-media", "", "可疑小媒体"],
+    ["error", "", "错误"],
+    ["deletion", "", "删除记录"],
+  ];
+  return `
+    <section class="media-cleanup-page">
+      <div class="media-cleanup-header">
+        <div><h1>媒体库清理</h1><p>只读取文件元数据进行低负载扫描；扫描完成前不会删除任何内容。</p></div>
+        <div class="media-cleanup-actions">
+          <button id="mediaCleanupStart" type="button" ${active ? "disabled" : ""}>开始扫描</button>
+          <button id="mediaCleanupStop" type="button" ${status.status !== "scanning" ? "disabled" : ""}>停止扫描</button>
+          <button id="mediaCleanupDelete" class="danger" type="button" ${status.status !== "completed" ? "disabled" : ""}>删除候选文件</button>
+        </div>
+      </div>
+      <div class="media-cleanup-root"><strong>当前媒体根目录</strong><code>${escapeHtml(status.rootPath || "读取中…")}</code></div>
+      <div class="media-cleanup-state"><strong>状态：${escapeHtml(status.status || "idle")}</strong><span>${escapeHtml(status.errorMessage || summary.currentPath || "")}</span></div>
+      <div class="media-cleanup-metrics">
+        ${cleanupMetric("文件", summary.totalFiles ?? summary.scannedFiles)}
+        ${cleanupMetric("目录", summary.scannedDirectories)}
+        ${cleanupMetric("图片", summary.imageCount)}
+        ${cleanupMetric("视频", summary.videoCount)}
+        ${cleanupMetric("非媒体", summary.nonMediaCount)}
+        ${cleanupMetric("非媒体容量", formatBytes(summary.nonMediaBytes || 0))}
+        ${cleanupMetric("空目录", summary.emptyDirectoryCount)}
+        ${cleanupMetric("无媒体树", summary.mediaFreeTreeCount)}
+        ${cleanupMetric("0字节媒体", summary.zeroByteMediaCount)}
+        ${cleanupMetric("可疑小媒体", summary.suspiciousTinyMediaCount)}
+        ${cleanupMetric("ReparsePoint", summary.reparsePointCount)}
+        ${cleanupMetric("错误", summary.errorCount)}
+        ${cleanupMetric("耗时", summary.elapsedMilliseconds ? `${(summary.elapsedMilliseconds / 1000).toFixed(1)} 秒` : "-")}
+      </div>
+      <div class="media-cleanup-tabs">
+        ${tabs.map(([kind, category, label]) => `<button type="button" data-cleanup-kind="${kind}" data-cleanup-category="${category}" class="${state.mediaCleanupKind === kind && state.mediaCleanupCategory === category ? "active" : ""}">${label}</button>`).join("")}
+      </div>
+      <div class="media-cleanup-filters">
+        <select id="mediaCleanupCategory">
+          <option value="">全部分类</option>
+          ${["Archive","Document","MetadataOrSidecar","TemporaryOrPartial","ExecutableOrScript","SystemJunk","Extensionless","Unknown","EmptyDirectory","LeafNonMediaDirectory","MediaFreeTree","Image","Video","ReparsePoint","LongPath","ScanError"].map((category) => `<option value="${category}" ${state.mediaCleanupCategory === category ? "selected" : ""}>${category}</option>`).join("")}
+        </select>
+        <input id="mediaCleanupSearch" value="${escapeHtml(state.mediaCleanupSearch)}" placeholder="搜索文件名或相对路径" maxlength="200" />
+        <select id="mediaCleanupSort"><option value="path" ${state.mediaCleanupSort === "path" ? "selected" : ""}>按路径</option><option value="size" ${state.mediaCleanupSort === "size" ? "selected" : ""}>按大小</option></select>
+        <select id="mediaCleanupDirection"><option value="asc" ${state.mediaCleanupDirection === "asc" ? "selected" : ""}>升序</option><option value="desc" ${state.mediaCleanupDirection === "desc" ? "selected" : ""}>降序</option></select>
+        <button id="mediaCleanupApply" type="button">查询</button>
+      </div>
+      ${state.mediaCleanupLoading ? `<div class="empty-state">${text.refreshing}</div>` : `
+        <div class="media-cleanup-table">
+          <div class="media-cleanup-row head"><span>分类</span><span>路径</span><span>大小</span><span>时间</span></div>
+          ${(results.items || []).map((item) => `<div class="media-cleanup-row"><span>${escapeHtml(item.category || item.kind || "")}</span><span title="${escapeHtml(item.relativePath || "")}">${escapeHtml(item.relativePath || "")}</span><span>${formatBytes(item.sizeBytes || 0)}</span><span>${escapeHtml(formatAccessTime(item.lastWriteTime || ""))}</span></div>`).join("")}
+        </div>
+      `}
+      ${!state.mediaCleanupLoading && !(results.items || []).length ? `<div class="empty-state">当前筛选没有结果。</div>` : ""}
+      <div class="media-cleanup-pagination"><button id="mediaCleanupPrev" type="button" ${Number(results.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${results.page || 1} / ${totalPages}（${results.total || 0} 条）</span><button id="mediaCleanupNext" type="button" ${Number(results.page || 1) >= totalPages ? "disabled" : ""}>下一页</button></div>
+      <div class="media-cleanup-modal" id="mediaCleanupModal" hidden>
+        <div class="media-cleanup-dialog" role="dialog" aria-modal="true" aria-labelledby="mediaCleanupDialogTitle">
+          <h2 id="mediaCleanupDialogTitle">确认删除非媒体候选</h2>
+          <p>将按本次报告顺序删除 ${summary.nonMediaCount || 0} 个候选，预计释放 ${formatBytes(summary.nonMediaBytes || 0)}。图片、视频、0字节媒体、可疑小媒体和 ReparsePoint 不会删除；随后只清理真正空目录。</p>
+          <label>请输入 DELETE 或 删除<input id="mediaCleanupConfirmation" autocomplete="off" /></label>
+          <div><button id="mediaCleanupCancelDelete" type="button">取消</button><button id="mediaCleanupConfirmDelete" class="danger" type="button" disabled>确认删除</button></div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function scheduleMediaCleanupPolling() {
+  stopMediaCleanupPolling();
+  if (!mediaCleanupActive()) return;
+  state.mediaCleanupPollTimer = setTimeout(async () => {
+    if (settingsSection() !== "media-cleanup") return;
+    try {
+      const previous = state.mediaCleanupStatus?.status;
+      await loadMediaCleanupStatus();
+      if (previous !== state.mediaCleanupStatus?.status && ["completed", "delete-completed", "stopped"].includes(state.mediaCleanupStatus?.status)) await loadMediaCleanupResults(1);
+    } catch (error) {}
+    renderSettingsPage();
+  }, 1000);
+}
+
+function bindMediaCleanupPage() {
+  scheduleMediaCleanupPolling();
+  document.querySelector("#mediaCleanupStart")?.addEventListener("click", async () => { await postJson("/api/media-cleanup/scan/start"); state.mediaCleanupResults = { items: [], total: 0, page: 1, pageSize: 50 }; await loadMediaCleanupStatus(); renderSettingsPage(); });
+  document.querySelector("#mediaCleanupStop")?.addEventListener("click", async () => { await postJson("/api/media-cleanup/scan/stop"); await loadMediaCleanupStatus(); renderSettingsPage(); });
+  document.querySelectorAll("[data-cleanup-kind]").forEach((button) => button.addEventListener("click", async () => { state.mediaCleanupKind=button.dataset.cleanupKind; state.mediaCleanupCategory=button.dataset.cleanupCategory || ""; await loadMediaCleanupResults(1); renderSettingsPage(); }));
+  document.querySelector("#mediaCleanupApply")?.addEventListener("click", async () => { state.mediaCleanupCategory=document.querySelector("#mediaCleanupCategory").value; state.mediaCleanupSearch=document.querySelector("#mediaCleanupSearch").value.trim(); state.mediaCleanupSort=document.querySelector("#mediaCleanupSort").value; state.mediaCleanupDirection=document.querySelector("#mediaCleanupDirection").value; await loadMediaCleanupResults(1); renderSettingsPage(); });
+  document.querySelector("#mediaCleanupPrev")?.addEventListener("click", async () => { await loadMediaCleanupResults(Math.max(1, Number(state.mediaCleanupResults.page || 1)-1)); renderSettingsPage(); });
+  document.querySelector("#mediaCleanupNext")?.addEventListener("click", async () => { await loadMediaCleanupResults(Number(state.mediaCleanupResults.page || 1)+1); renderSettingsPage(); });
+  const modal=document.querySelector("#mediaCleanupModal"); const input=document.querySelector("#mediaCleanupConfirmation"); const confirmButton=document.querySelector("#mediaCleanupConfirmDelete");
+  document.querySelector("#mediaCleanupDelete")?.addEventListener("click", () => { modal.hidden=false; input.focus(); });
+  document.querySelector("#mediaCleanupCancelDelete")?.addEventListener("click", () => { modal.hidden=true; input.value=""; confirmButton.disabled=true; });
+  input?.addEventListener("input", () => { confirmButton.disabled = !["DELETE","删除"].includes(input.value.trim()); });
+  confirmButton?.addEventListener("click", async () => { confirmButton.disabled=true; await postJson("/api/media-cleanup/delete", { jobId: state.mediaCleanupStatus.id, confirmation: input.value.trim() }); modal.hidden=true; await loadMediaCleanupStatus(); renderSettingsPage(); });
+}
+
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  recordAccessLog({ type: "settings", title: section === "duplicates" ? "\u56fe\u7247\u67e5\u91cd" : section === "access-log" ? "\u8bbf\u95ee\u65e5\u5fd7" : "\u663e\u793a\u8bbe\u7f6e", model: "", work: "", pathParts: ["__settings", section] });
+  recordAccessLog({ type: "settings", title: section === "duplicates" ? "\u56fe\u7247\u67e5\u91cd" : section === "access-log" ? "\u8bbf\u95ee\u65e5\u5fd7" : section === "media-cleanup" ? "媒体库清理" : "\u663e\u793a\u8bbe\u7f6e", model: "", work: "", pathParts: ["__settings", section] });
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <strong>\u8bbe\u7f6e</strong>`;
   view.innerHTML = `
     <section class="settings-page">
       <aside class="settings-sidebar">
         <a class="${section === "display" ? "active" : ""}" href="#/__settings">\u663e\u793a\u8bbe\u7f6e</a>
         <a class="${section === "duplicates" ? "active" : ""}" href="#/__settings/duplicates">\u56fe\u7247\u67e5\u91cd</a>
+        <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
       </aside>
       <div class="settings-content">
-        ${section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : `
+        ${section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -1762,6 +1916,7 @@ function renderSettingsPage() {
   const toolbarSettings = document.querySelector("#toolbarSettings");
   if (mount && toolbarSettings) mount.appendChild(toolbarSettings);
   if (section === "duplicates") bindDuplicatePage();
+  if (section === "media-cleanup") bindMediaCleanupPage();
   if (section === "access-log") {
     document.querySelector("#accessLogRefreshButton")?.addEventListener("click", async () => {
       await loadAccessLogs();
@@ -1785,6 +1940,10 @@ async function ensureSettingsPage() {
   }
   if (settingsSection() === "access-log" && !state.accessLogs.length && !state.accessLogsLoading) {
     await loadAccessLogs();
+  }
+  if (settingsSection() === "media-cleanup") {
+    await loadMediaCleanupStatus();
+    if (state.mediaCleanupStatus?.id && ["completed", "delete-completed", "stopped"].includes(state.mediaCleanupStatus.status) && !state.mediaCleanupResults.items.length) await loadMediaCleanupResults(1);
   }
   renderSettingsPage();
 }
@@ -2484,6 +2643,7 @@ function renderEmpty(message) {
 }
 
 function render() {
+  stopMediaCleanupPolling();
   restoreToolbarSettings();
   clearHighlightCarouselTimer();
   clearImageBatchLoading();
