@@ -15,6 +15,13 @@
 
 All notable repository-baseline changes are documented here. Functional behavior remains inherited from the migrated site unless a later version explicitly states otherwise.
 
+## 2026-07-14 - Load every highlight preview and restore autoplay
+
+- Changed only the homepage highlight carousel to load all 20 bounded WebP preview URLs during initialization instead of the current and next items only.
+- Restored the original leftward one-card autoplay cadence of 10 seconds; manual navigation resets the next 10-second interval.
+- Kept original-image URLs, other lists, video loading, carousel navigation, CSS, APIs, and Runtime configuration unchanged.
+- Updated the frontend script cache version to `v75`.
+
 ## 2026-07-13 - Allow gallery access over ZeroTier
 
 - Added an idempotent, UAC-gated ZeroTier-only firewall script and double-click entry for TCP 48102.

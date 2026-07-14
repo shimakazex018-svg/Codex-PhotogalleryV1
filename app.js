@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v73";
+const APP_VERSION = "v75";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -1591,21 +1591,23 @@ function setupHighlightCarousel() {
   const progress = document.querySelector(".highlight-progress span");
   const prevButton = document.querySelector(".highlight-prev");
   const nextButton = document.querySelector(".highlight-next");
-  if (!carousel || !track || cards.length <= 1) return;
-  state.highlightIndex = 0;
+  if (!carousel || !track || !cards.length) return;
+  const intervalMs = 10000;
+  const now = Date.now();
+  state.highlightIndex = Math.floor(now / intervalMs) % cards.length;
   state.highlightTimer = { timeoutId: null, intervalId: null };
 
-  const loadCarouselWindow = () => {
-    [state.highlightIndex, (state.highlightIndex + 1) % cards.length].forEach((index) => {
-      const image = cards[index]?.querySelector("img[data-carousel-src]");
+  const loadAllCarouselImages = () => {
+    cards.forEach((card) => {
+      const image = card.querySelector("img[data-carousel-src]");
       if (!image) return;
+      image.loading = "eager";
       image.src = image.dataset.carouselSrc;
       delete image.dataset.carouselSrc;
     });
   };
 
   const centerActiveCard = () => {
-    loadCarouselWindow();
     const card = cards[state.highlightIndex];
     if (!card) return;
 
@@ -1614,17 +1616,39 @@ function setupHighlightCarousel() {
     track.style.transform = `translateX(${carouselCenter - cardCenter}px)`;
   };
 
-  const restartProgress = () => {
+  const restartProgress = (elapsedMs = 0) => {
     if (!progress) return;
     progress.classList.remove("running", "resuming");
     progress.style.animationDuration = "";
     progress.style.transform = "scaleX(0)";
+    void progress.offsetWidth;
+    if (elapsedMs > 0) {
+      progress.style.transform = `scaleX(${Math.min(0.99, elapsedMs / intervalMs)})`;
+      progress.style.animationDuration = `${Math.max(1, intervalMs - elapsedMs)}ms`;
+      progress.classList.add("resuming");
+    } else {
+      progress.classList.add("running");
+    }
   };
 
-  const moveHighlight = (step) => {
+  const moveHighlight = (step, resetTimer = true) => {
     state.highlightIndex = (state.highlightIndex + step + cards.length) % cards.length;
     centerActiveCard();
     restartProgress();
+    if (resetTimer) scheduleNext(intervalMs);
+  };
+
+  const advance = () => {
+    moveHighlight(1, false);
+  };
+
+  const scheduleNext = (delayMs) => {
+    clearTimeout(state.highlightTimer.timeoutId);
+    clearInterval(state.highlightTimer.intervalId);
+    state.highlightTimer.timeoutId = setTimeout(() => {
+      advance();
+      state.highlightTimer.intervalId = setInterval(advance, intervalMs);
+    }, Math.max(1, delayMs));
   };
 
   prevButton?.addEventListener("click", (event) => {
@@ -1638,8 +1662,11 @@ function setupHighlightCarousel() {
     moveHighlight(1);
   });
 
+  loadAllCarouselImages();
   centerActiveCard();
-  restartProgress();
+  const elapsedMs = now % intervalMs;
+  restartProgress(elapsedMs);
+  scheduleNext(intervalMs - elapsedMs);
 }
 
 function clearHighlightCarouselTimer() {
