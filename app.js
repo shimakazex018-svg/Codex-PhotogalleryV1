@@ -23,10 +23,13 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v80";
+const APP_VERSION = "v81";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
+const LIGHTBOX_PRELOAD_AHEAD_COUNT = 3;
+const LIGHTBOX_PRELOAD_CONCURRENCY = 2;
+const LIGHTBOX_PRELOAD_CACHE_LIMIT = 5;
 const SCROLL_STATE_STORAGE_KEY = "galleryScrollStatesV1";
 const SCROLL_STATE_LIMIT = 75;
 const SCROLL_SAVE_DELAY_MS = 150;
@@ -65,6 +68,7 @@ const state = {
   highlightTimer: null,
   lightboxImages: [],
   lightboxUseCompatibilityPreview: false,
+  lightboxRenderToken: 0,
   detailImages: [],
   renderedImageCount: 0,
   imageBatchObserver: null,
@@ -402,6 +406,7 @@ function initScrollRestoration() {
 }
 
 function beginPageNavigation() {
+  if (lightbox.classList.contains("open")) hideLightbox();
   cancelBackToTopAnimation();
   cancelScrollRestoration();
   state.pageAbortController?.abort();
@@ -1137,6 +1142,261 @@ function imagePreviewUrl(src) {
 function useCompatibilityLightboxPreview(collectionId = "") {
   return collectionId === HEIC_COMPATIBILITY_COLLECTION_ID;
 }
+
+function getLightboxPreloadCount() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (connection?.saveData) return 0;
+  if (connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g") return 1;
+  if (connection?.effectiveType === "3g") return 2;
+  return LIGHTBOX_PRELOAD_AHEAD_COUNT;
+}
+
+function getLightboxPreloadIndices(currentIndex, imageCount, count = getLightboxPreloadCount()) {
+  if (imageCount <= 1 || count <= 0) return [];
+  const indices = [];
+  const seen = new Set([currentIndex]);
+  for (let offset = 1; offset < imageCount && indices.length < count; offset += 1) {
+    const index = (currentIndex + offset) % imageCount;
+    if (seen.has(index)) continue;
+    seen.add(index);
+    indices.push(index);
+  }
+  return indices;
+}
+
+function canonicalLightboxUrl(src) {
+  if (!src) return "";
+  try {
+    return new URL(src, window.location.href).href;
+  } catch (error) {
+    return "";
+  }
+}
+
+function createLightboxPreloadManager() {
+  let generation = 0;
+  let active = false;
+  let activeCount = 0;
+  let maxActiveCount = 0;
+  let maxCacheSize = 0;
+  let queue = [];
+  const cache = new Map();
+  const scheduledTasks = new Set();
+
+  function settleEntry(entry, status) {
+    if (entry.settled) return;
+    entry.settled = true;
+    entry.status = status;
+    entry.completedAt = performance.now();
+    entry.resolve(entry);
+  }
+
+  function cancelEntry(entry) {
+    if (!entry || entry.settled) return;
+    entry.image.onload = null;
+    entry.image.onerror = null;
+    if (entry.status === "loading") entry.image.src = "";
+    settleEntry(entry, "cancelled");
+  }
+
+  function clearScheduledTasks() {
+    for (const task of scheduledTasks) {
+      if (task.type === "idle") window.cancelIdleCallback(task.id);
+      else clearTimeout(task.id);
+    }
+    scheduledTasks.clear();
+  }
+
+  function scheduleLowPriority(callback) {
+    const task = { type: "timeout", id: 0 };
+    const run = () => {
+      scheduledTasks.delete(task);
+      callback();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      task.type = "idle";
+      task.id = window.requestIdleCallback(run, { timeout: 250 });
+    } else {
+      task.id = window.setTimeout(run, 75);
+    }
+    scheduledTasks.add(task);
+  }
+
+  function decodeEntry(entry) {
+    if (!entry || entry.decodeStarted || !entry.decodeRequested || entry.status !== "loaded" || typeof entry.image.decode !== "function") return;
+    entry.decodeStarted = true;
+    entry.image.decode().then(() => {
+      if (entry.status === "loaded") entry.status = "decoded";
+    }).catch(() => {});
+  }
+
+  function startEntry(entry) {
+    if (!active || entry.generation !== generation || entry.settled) {
+      cancelEntry(entry);
+      return;
+    }
+    entry.status = "loading";
+    entry.startedAt = performance.now();
+    activeCount += 1;
+    maxActiveCount = Math.max(maxActiveCount, activeCount);
+    entry.image.decoding = "async";
+    entry.image.fetchPriority = entry.priority === 0 ? "high" : "low";
+    entry.image.onload = () => {
+      entry.status = "loaded";
+      decodeEntry(entry);
+      settleEntry(entry, entry.status);
+    };
+    entry.image.onerror = (error) => {
+      entry.error = error || true;
+      settleEntry(entry, "error");
+    };
+    entry.load.finally(() => {
+      activeCount = Math.max(0, activeCount - 1);
+      pumpQueue();
+    });
+    entry.image.src = entry.canonicalUrl;
+  }
+
+  function pumpQueue() {
+    if (!active) return;
+    queue.sort((left, right) => left.priority - right.priority || left.queuedAt - right.queuedAt);
+    while (activeCount < LIGHTBOX_PRELOAD_CONCURRENCY && queue.length) {
+      const entry = queue.shift();
+      if (!entry || entry.settled || entry.generation !== generation || cache.get(entry.canonicalUrl) !== entry) {
+        cancelEntry(entry);
+        continue;
+      }
+      startEntry(entry);
+    }
+  }
+
+  function createEntry(canonicalUrl, index, options, retryCount = 0) {
+    let resolve;
+    const load = new Promise((done) => { resolve = done; });
+    return {
+      canonicalUrl,
+      index,
+      status: "queued",
+      image: new Image(),
+      load,
+      error: null,
+      startedAt: 0,
+      completedAt: 0,
+      priority: options.priority,
+      decodeRequested: options.decode,
+      decodeStarted: false,
+      queuedAt: performance.now(),
+      generation,
+      retryCount,
+      settled: false,
+      resolve,
+    };
+  }
+
+  function enqueue(src, index, options) {
+    const canonicalUrl = canonicalLightboxUrl(src);
+    if (!active || !canonicalUrl) return null;
+    let entry = cache.get(canonicalUrl);
+    let retryCount = 0;
+    if (entry?.status === "error" && options.explicitRetry && entry.retryCount < 1) {
+      retryCount = entry.retryCount + 1;
+      cache.delete(canonicalUrl);
+      entry = null;
+    }
+    if (entry) {
+      entry.index = index;
+      entry.decodeRequested ||= options.decode;
+      entry.priority = Math.min(entry.priority, options.priority);
+      decodeEntry(entry);
+      return entry;
+    }
+    entry = createEntry(canonicalUrl, index, options, retryCount);
+    cache.set(canonicalUrl, entry);
+    while (cache.size > LIGHTBOX_PRELOAD_CACHE_LIMIT) {
+      const oldest = [...cache.values()].find((candidate) => candidate !== entry);
+      if (!oldest) break;
+      cancelEntry(oldest);
+      cache.delete(oldest.canonicalUrl);
+    }
+    maxCacheSize = Math.max(maxCacheSize, cache.size);
+    queue.push(entry);
+    pumpQueue();
+    return entry;
+  }
+
+  function prune(currentIndex, urls, aheadIndices) {
+    const keepIndices = new Set([currentIndex, ...aheadIndices]);
+    if (urls.length > 1) keepIndices.add((currentIndex - 1 + urls.length) % urls.length);
+    const keepUrls = new Set([...keepIndices].map((index) => canonicalLightboxUrl(urls[index])).filter(Boolean));
+    for (const [url, entry] of cache) {
+      if (keepUrls.has(url)) continue;
+      cancelEntry(entry);
+      cache.delete(url);
+    }
+    queue = queue.filter((entry) => cache.get(entry.canonicalUrl) === entry);
+  }
+
+  function schedule(currentIndex, urls) {
+    if (!active || !urls.length) return { entry: null, generation };
+    clearScheduledTasks();
+    const currentGeneration = generation;
+    const aheadIndices = getLightboxPreloadIndices(currentIndex, urls.length);
+    prune(currentIndex, urls, aheadIndices);
+    const currentEntry = enqueue(urls[currentIndex], currentIndex, { priority: 0, decode: false, explicitRetry: true });
+    aheadIndices.forEach((index, offset) => {
+      const options = { priority: offset === 0 ? 0 : 1, decode: offset === 0, explicitRetry: false };
+      if (offset === 0) enqueue(urls[index], index, options);
+      else scheduleLowPriority(() => {
+        if (!active || generation !== currentGeneration) return;
+        enqueue(urls[index], index, options);
+      });
+    });
+    return { entry: currentEntry, generation: currentGeneration };
+  }
+
+  function stop() {
+    active = false;
+    generation += 1;
+    clearScheduledTasks();
+    queue = [];
+    for (const entry of cache.values()) cancelEntry(entry);
+    cache.clear();
+  }
+
+  return {
+    open(currentIndex, urls) {
+      stop();
+      active = true;
+      return schedule(currentIndex, urls);
+    },
+    schedule,
+    stop,
+    isCurrent(expectedGeneration) {
+      return active && generation === expectedGeneration;
+    },
+    diagnostics() {
+      return {
+        active,
+        generation,
+        activeCount,
+        cacheSize: cache.size,
+        queueSize: queue.length,
+        maxActiveCount,
+        maxCacheSize,
+        entries: [...cache.values()].map(({ index, status, retryCount, decodeRequested, decodeStarted }) => ({
+          index,
+          status,
+          retryCount,
+          decodeRequested,
+          decodeStarted,
+        })),
+      };
+    },
+    cacheLimit: LIGHTBOX_PRELOAD_CACHE_LIMIT,
+  };
+}
+
+const lightboxPreloadManager = createLightboxPreloadManager();
 
 function lazyImageHtml(src, label, attributes = "") {
   if (!src) return `<div class="empty-cover">${escapeHtml(label || text.waitingImage)}</div>`;
@@ -2561,16 +2821,68 @@ function render() {
 
 function openLightbox(index) {
   state.lightboxIndex = index;
-  updateLightbox();
   lightbox.classList.add("open");
   lightbox.setAttribute("aria-hidden", "false");
+  updateLightbox(true);
   showLightboxControls();
 }
 
-function updateLightbox() {
+function lightboxAssetUrls() {
+  return state.lightboxImages.map((src) => state.lightboxUseCompatibilityPreview ? imagePreviewUrl(src) : src);
+}
+
+function lightboxPreloadUrls() {
+  const urls = lightboxAssetUrls();
+  if (state.lightboxUseCompatibilityPreview) urls[state.lightboxIndex] = "";
+  return urls;
+}
+
+function setLightboxImageSource(src, renderToken, phase) {
+  if (!src || renderToken !== state.lightboxRenderToken) return;
+  lightbox.classList.toggle("image-loading", phase === "preview");
+  lightbox.classList.remove("image-error");
+  lightboxImage.onload = () => {
+    if (renderToken !== state.lightboxRenderToken) return;
+    lightbox.classList.remove("image-loading", "image-error");
+  };
+  lightboxImage.onerror = () => {
+    if (renderToken !== state.lightboxRenderToken) return;
+    lightbox.classList.remove("image-loading");
+    lightbox.classList.add("image-error");
+  };
+  lightboxImage.src = src;
+}
+
+function updateLightbox(newSession = false) {
   const src = state.lightboxImages[state.lightboxIndex];
-  lightboxImage.src = src && state.lightboxUseCompatibilityPreview ? imagePreviewUrl(src) : src || "";
+  const renderToken = ++state.lightboxRenderToken;
+  const previewUrl = imagePreviewUrl(src);
+  const assetUrls = lightboxPreloadUrls();
+  const preload = newSession
+    ? lightboxPreloadManager.open(state.lightboxIndex, assetUrls)
+    : lightboxPreloadManager.schedule(state.lightboxIndex, assetUrls);
   resetLightboxZoom();
+  if (!src || !preload.entry) {
+    setLightboxImageSource(previewUrl || IMAGE_PLACEHOLDER, renderToken, "preview");
+    return;
+  }
+
+  const originalUrl = preload.entry.canonicalUrl;
+  if (preload.entry.status === "loaded" || preload.entry.status === "decoded") {
+    setLightboxImageSource(originalUrl, renderToken, "original");
+    return;
+  }
+
+  setLightboxImageSource(previewUrl || IMAGE_PLACEHOLDER, renderToken, "preview");
+  preload.entry.load.then((entry) => {
+    if (renderToken !== state.lightboxRenderToken || !lightboxPreloadManager.isCurrent(preload.generation)) return;
+    if (!lightbox.classList.contains("open") || state.lightboxIndex < 0) return;
+    if (entry.status === "loaded" || entry.status === "decoded") {
+      if (canonicalLightboxUrl(previewUrl) !== entry.canonicalUrl) setLightboxImageSource(entry.canonicalUrl, renderToken, "original");
+      return;
+    }
+    if (entry.status === "error") lightbox.classList.add("image-error");
+  });
 }
 
 function stepLightbox(direction) {
@@ -2581,9 +2893,13 @@ function stepLightbox(direction) {
 }
 
 function hideLightbox() {
+  state.lightboxRenderToken += 1;
+  lightboxPreloadManager.stop();
   lightbox.classList.remove("open");
-  lightbox.classList.remove("controls-hidden", "dragging");
+  lightbox.classList.remove("controls-hidden", "dragging", "image-loading", "image-error");
   lightbox.setAttribute("aria-hidden", "true");
+  lightboxImage.onload = null;
+  lightboxImage.onerror = null;
   lightboxImage.src = "";
   clearTimeout(state.lightboxControlsTimer);
   resetLightboxZoom();

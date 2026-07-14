@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-14 - Preload upcoming lightbox images
+
+- Changed image lightboxes to show the existing on-demand WebP preview immediately, then replace it with the current original image when ready.
+- Added a session-scoped preload manager with a default three-image look-ahead, maximum concurrency of two, next-image decode attempt, URL task reuse, and a five-entry previous/current/ahead cache window.
+- Added Save-Data and effective-connection downgrades, cyclic/small-gallery deduplication, one controlled retry for an explicitly viewed failed original, and generation/render-token guards.
+- Closing the lightbox or changing routes now cancels pending idle timers, clears queued work and Image references, and prevents stale callbacks from replacing the current image.
+- Preserved original media paths, HEIC compatibility previews, video `preload="none"`, video/HLS behavior, API formats, database schema, and Runtime paths; raised the frontend cache version to `v81`.
+
 ## 2026-07-14 - Display mislabeled HEIC images in the selected lightbox
 
 - Confirmed that the seven `杏子yada/亮点` source files use HEIC content despite their `.jpg` names and `image/jpeg` responses, so Chrome cannot decode them directly.

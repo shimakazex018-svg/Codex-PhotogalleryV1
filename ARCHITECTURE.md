@@ -52,6 +52,8 @@ Browser SPA
 
 前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
 
+灯箱使用两阶段图片显示：先请求现有按需WebP预览，当前原图完成后再替换。会话级预加载管理器只处理当前`lightboxImages`图片数组，默认向后3张、最大并发2，并按Save-Data/2G/3G降级；仅下一张尝试提前解码。缓存窗口保留前一张、当前和后三张，最多5项；关闭灯箱或换路由时取消未开始调度、释放Image引用并提升generation，旧回调不能覆盖新页面。视频数组与灯箱图片数组分离，不参与原图预加载。
+
 滚动恢复由 `app.js` 管理：`history.scrollRestoration` 使用 `manual`，内存与 `sessionStorage` 最多保留75条路由快照。快照包含稳定DOM锚点、相对视口偏移、scrollY、已渲染媒体数量和分页游标；历史/父级返回按现有24张DOM批次和40条API分页补齐到锚点，普通新导航保持顶部。搜索词写入对应的History entry，Back/Forward和刷新可恢复搜索结果上下文。
 
 ## Backend architecture
