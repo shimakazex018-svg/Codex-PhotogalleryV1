@@ -10,7 +10,7 @@
 
 - [ ] 使用浏览器 DevTools 补录 V2.0.1 优化前基线
   - 说明：移动端视口、Disable cache、导出 HAR，记录请求数、原图数、API/图片/总传输量和首屏时间。
-  - 状态：Chrome、扩展和Native Messaging Host已验证可用；本次只完成滚动恢复功能回归，HAR带宽基线仍未补录，未虚构测量数据。
+  - 状态：Chrome、扩展和Native Messaging Host已验证可用；灯箱v85已通过受控Chrome页面资源与调度时间线验收，但Disable cache/HAR、节流和长期内存基线仍未补录，未虚构测量数据。
 
 - [ ] 完成ZeroTier实体外部设备验收
   - 说明：批准`Configure ZeroTier Access.cmd`的UAC后，在同一ZeroTier网络的外部设备使用HTTP访问`http://192.168.192.1:48102/`。
@@ -70,6 +70,7 @@
 
 ## Done
 
+- [x] 将灯箱当前原图改为独立P0立即通道；下一张P1提前解码，预测图P3延后，URL任务/Promise复用、低优先级缩略图和默认关闭的调试观测已用真实Chrome专项验证（前端`v85`；亚秒级快速连点仍由人工DevTools补测）。
 - [x] 灯箱采用WebP即时预览、当前原图与后续最多3张的有界自适应预加载；并发2、缓存最多5项、下一张提前decode，关闭/换路由停止追加（前端`v81`）。
 - [x] 修复`杏子yada/亮点`中伪装为`.jpg`的HEIC原图无法在Chrome灯箱显示；仅该图集灯箱使用既有WebP兼容预览，其他页面与原媒体不变（前端`v80`）。
 - [x] 实现并用真实Chrome验证SPA滚动位置恢复、搜索历史状态和有界深层媒体补齐（前端`v79`）。

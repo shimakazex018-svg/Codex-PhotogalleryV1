@@ -202,6 +202,8 @@ For changes to the floating back-to-top control, verify:
 
 2026-07-14验证：正式LAN首页HTTP 200并加载`app.js?v=81`与`styles.css?v=81`；抽样原图返回`Cache-Control: public, max-age=604800`、ETag、Last-Modified，条件请求返回304。隔离Image队列模拟确认初始只请求当前和后3张，前进一张只补1张，5个请求URL全部唯一；最大并发2、Map最大5，stop后等待不再新增请求。循环、小图集和Save-Data/2G/3G/4G策略通过纯逻辑检查。真实Chrome Network、等待时间、内存趋势以及1440x900、768x1024、390x844交互未验证：当前Chrome插件环境缺少Native Host manifest/注册表项和Chrome用户数据目录。
 
+2026-07-14 v85真实Chrome专项验收：正式LAN 114张`剧照`图集加载`app.js?v=85`与`styles.css?v=85`。页面初始资源观察为16个按需WebP预览、0个`/photos/`原图；DOM有40个图片按钮但24个远端预览仍未请求。点击第5张时，点击到P0请求开始8.6ms、占位图显示117.1ms、原图网络完成124.6ms、decode完成140.0ms、最终显示142.7ms；P0先于P1开始，P3在当前图显示后才创建。下一张已为`ready`并发生优先级升级，点击到显示68.9ms，调度日志没有第二次同URL`request-start`。资源观察窗口共5个唯一原图URL，最大普通预加载并发2、最大缓存5；连续前进7次最终索引/图片一致，旧窗口任务被标记`outside-window`，控制台无error，但受Chrome控制动作时延影响，该结果不代表亚秒级快速连点。关闭后队列、缓存和活动请求均为0，等待3秒新增原图URL为0。该Chrome接口不提供DevTools Disable cache、HAR/请求实例明细、网络节流或可靠堆内存趋势，因此冷缓存、浏览器层重复传输、亚秒级快速连点、Save-Data/慢网及长期内存仍标记未验证。
+
 ## Database checks
 
 - 禁止用当前应用代码“只读打开”生产源库；数据库打开逻辑会启用 WAL 并保证 schema/index。

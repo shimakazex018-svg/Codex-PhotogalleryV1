@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-14 - Prioritize the current lightbox original
+
+- Replaced the shared FIFO lightbox path with a normalized-URL task scheduler that tracks network, decode, ready, failure and abort states and reuses in-flight promises.
+- Added an independent P0 immediate channel for the current original, a decoded P1 next image, delayed low-priority P3 predictions, bounded retry, cancellation and five-entry retention.
+- Kept the clicked WebP preview visible while the original loads and decodes, configured display attributes before `src`, and prevented stale callbacks from replacing the current image.
+- Limited detail-page preview requests to the viewport neighborhood, marked non-critical thumbnails low priority, and added opt-in bounded timing diagnostics without default console noise.
+- Preserved server cache policy, APIs, media paths, video/HLS behavior and visual layout; raised the frontend cache version to `v85`.
+
 ## 2026-07-14 - Preload upcoming lightbox images
 
 - Changed image lightboxes to show the existing on-demand WebP preview immediately, then replace it with the current original image when ready.

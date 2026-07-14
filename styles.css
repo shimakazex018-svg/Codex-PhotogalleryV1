@@ -1196,8 +1196,9 @@ a {
   transition: opacity 140ms ease;
 }
 
+.lightbox.showing-preview img,
 .lightbox.image-loading img {
-  opacity: 0;
+  opacity: 0.96;
 }
 
 .lightbox.image-error img {

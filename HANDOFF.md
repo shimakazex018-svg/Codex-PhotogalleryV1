@@ -4,20 +4,20 @@
 
 ## Last Completed Task
 
-优化灯箱大图切换：先显示现有WebP预览，当前原图与后续最多3张使用并发2、有界5项的网络自适应预加载；下一张尝试提前decode，关闭/换路由停止追加并使旧回调失效，前端版本为`v81`。
+完成灯箱原图优先级调度：点击预览立即显示，当前原图走独立P0通道，下一张P1提前加载和decode，预测图P3延后；任务按规范化URL复用并有界清理，前端版本为`v85`。
 
 ## Current State
 
 - 业务基线：`v1.3-release` 已发布到 GitHub。
 - 当前分支：`main`。
-- 前端版本`v81`；普通灯箱先显示按需WebP预览，再加载当前原图，并按网络条件向后预加载0-3张；最大并发2、缓存最多5项，仅下一张尝试decode。`杏子yada/亮点`继续以兼容WebP作为最终灯箱资产。首页/媒体limit为40，图片DOM首批24，视频始终preload=none。
+- 前端版本`v85`；当前原图使用独立P0立即通道并设置高请求优先级，P1下一张提前decode，P3预测图在当前图显示后进入普通并发2队列，缓存最多5项。列表只请求按需WebP预览，视口外缩略图低优先级懒加载；`杏子yada/亮点`继续以兼容WebP作为最终灯箱资产，视频始终`preload=none`。
 - 滚动状态按hash、搜索、媒体筛选和排序隔离，最多保留75条；保存稳定锚点、相对偏移、scrollY、已渲染数量和分页游标，损坏的sessionStorage会安全降级。
 - 浏览器原生滚动恢复设为manual；新导航回到顶部，历史/父级返回和刷新恢复。搜索词保存在对应history entry，进入详情时不再被搜索结果分支拦截。
 - 轮播初始化加载全部20张有界WebP预览，每10秒自动向左推进一张；手动左右切换后重新计算下一次10秒周期。
-- 隔离preview smoke通过；正式Runtime已配置并重启，最小样本生成1个33,926-byte WebP。真实Chrome HAR尚未完成。
+- 隔离preview smoke通过；正式Runtime已配置并重启。真实Chrome已完成v85灯箱专项验收，DevTools Disable cache/HAR、节流和长期内存趋势仍未完成。
 - V2.0.1 审计确认目录 API 不递归深层媒体；主要风险是 thumbnail 缺失回退原图、20项轮播全带src、fetch不可取消和视频可退化为metadata预载。
 - 只读统计显示 Runtime 20个轮播文件共150.15 MiB；现有40个image thumbnail共2.04 MiB。
-- 本任务完成提交和普通push后，本地`main`应与`origin/main`同步。
+- 本任务将只创建本地提交；用户本轮未要求push，远程同步状态需在提交后重新核对。
 - 工作区不包含生产数据库、媒体、缩略图、HLS、日志或 cache。
 - `D:\GalleryRuntime` 已创建，数据库副本 SHA256 已验证，真实配置位于 runtime 外部配置目录。
 - V1 Runtime缓存路径已独立；网站当前由正式入口运行，监听IPv4 `0.0.0.0:48102`，stdout/stderr位于Runtime日志目录。
@@ -68,10 +68,12 @@
 
 ## Validation
 
-- 正式LAN首页HTTP 200并返回`app.js?v=81`、`styles.css?v=81`；抽样原图响应为`Cache-Control: public, max-age=604800`，同时包含ETag、Last-Modified，If-None-Match条件请求返回304。
+- 正式LAN站点由真实Chrome加载`app.js?v=85`、`styles.css?v=85`；114张`剧照`图集初始观察到16个WebP预览、0个原图，未一次请求全部屏幕外缩略图。
+- 点击第5张到P0请求开始8.6ms、占位显示117.1ms、原图显示142.7ms；下一张已ready并升级为P0，点击到显示68.9ms，调度日志无同URL第二次`request-start`。
+- 最大普通预加载并发2、最大缓存5；连续前进7次最终索引与图片一致，但自动化动作时延不能代表亚秒级快速连点；关闭后队列/缓存/活动请求归零，等待3秒新增原图URL为0，Chrome控制台无error。
 - 隔离Image队列模拟：首次只请求当前与后3张；切到下一张只新增第5张，5个请求URL全部唯一；最大并发2、Map最大5，下一张decode标记生效，第二/第三张首次仅网络加载；stop后等待没有新增请求。
 - 纯逻辑检查：第100张后为1/2/3，第99张后为100/1/2；1/2/3张图集分别预加载0/1/2张且不含自身；Save-Data/2G/3G/4G或无API分别为0/1/2/3/3张。
-- 真实Chrome验收未执行：当前环境缺少Chrome用户数据目录，且`com.openai.codexextension` Native Host manifest和注册表项不存在。未虚构Network等待时间、重复传输、内存趋势或Windows/iPad/iPhone交互结果。
+- Chrome页面资源与调度时间线验收已执行；当前接口不提供Disable cache、HAR请求实例、亚秒级动作、网络节流或可靠堆内存趋势，因此冷缓存、浏览器层重复传输、快速连点、Save-Data/慢网和长期内存仍未验证。
 - 内置浏览器以`v80`实测`杏子yada/亮点`：7/7灯箱图片均通过WebP兼容预览完成加载，尺寸为512×512，控制台无warning/error；另以林心澜图集对照确认非目标灯箱仍加载`/photos/...`原图（3600×5400）。
 - 真实Chrome正式LAN站点`v79`通过：1440x900桌面与390x844移动视口的后退/前进、面包屑、收藏、最近观看和搜索结果均恢复到原锚点，常规偏差0px。
 - 86张媒体详情刷新后按既有批次恢复86个节点，锚点偏差约0.125px；没有一次性挂载全库。搜索词、80条搜索结果和scrollY=2600刷新后恢复。
@@ -89,7 +91,7 @@
 
 ## Known Issues
 
-- 当前Codex Chrome插件连接不可用；需从Codex插件界面重新安装/恢复Chrome插件后，补做灯箱Network、三视口交互和内存验收。
+- Chrome控制当前可用；仍需人工DevTools补做Disable cache/HAR、Save-Data/慢网、三视口和长期内存验收。
 - 项目没有登录、角色权限或 API 鉴权。
 - 项目没有自动化测试、lint、typecheck 或 build pipeline。
 - 正式 Node 24.x 托管方式：待确认；预检支持显式 Node 路径。
@@ -102,7 +104,7 @@
 
 ## Risks
 
-- 默认4G/无Connection API会同时准备当前和后3张原图；虽限制并发2和Map 5项，超大图集仍会增加短时带宽，真实设备内存趋势待Chrome恢复后确认。
+- 默认4G/无Connection API会准备下一张和两张预测原图；虽限制普通并发2和Map 5项，超大原图仍会增加短时带宽，真实慢网和长期设备内存趋势待补。
 - 旧项目未来需要删除，但在 V1 runtime 独立验证、备份和回滚演练前不能删除。
 - 顶层 runtime `trash` 与媒体不同盘，未来移动媒体前必须隔离验证；当前远程删除固定关闭。
 - 缩略图/poster/HLS 重新生成可能造成 CPU、磁盘 I/O 和容量增长，必须分阶段执行。
@@ -110,7 +112,7 @@
 
 ## Recommended Next Task
 
-从Codex插件界面恢复Chrome插件后，按`TESTING.md`补做灯箱禁用缓存/正常缓存、快速切换、关闭30秒、Save-Data/慢网和1440x900、768x1024、390x844验收；通过后再记录真实等待时间与内存趋势。
+用人工DevTools按`TESTING.md`补做Disable cache/HAR、Save-Data/慢网、关闭30秒和1440x900、768x1024、390x844验收，并记录浏览器请求实例与长期内存趋势。
 
 ## Notes for Next Codex Session
 
