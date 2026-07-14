@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-016：SPA滚动恢复采用有界锚点快照
+
+### Decision
+使用`history.scrollRestoration=manual`，在内存和`sessionStorage`中最多保存75条路由快照。优先按稳定元素锚点与相对视口偏移恢复；深层媒体只补齐已保存的现有分页/DOM批次，并限制加载预算为2.5秒。
+
+### Reason
+单独保存scrollY无法抵抗异步图片高度和分批DOM变化；一次性加载整个图集又会放大网络、DOM和内存压力。
+
+### Impact
+目录、搜索、收藏、最近观看和媒体节点提供稳定`data-scroll-anchor`。搜索词随History entry保存，使详情返回和刷新能够恢复搜索上下文；损坏或不可用的sessionStorage安全降级为内存或scrollY恢复。
+
+### Status
+有效，前端`v79`实施并通过真实Chrome桌面/移动回归。
+
 ## DEC-015：列表图片使用独立按需预览
 
 ### Decision

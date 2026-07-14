@@ -10,7 +10,7 @@
 
 - [ ] 使用浏览器 DevTools 补录 V2.0.1 优化前基线
   - 说明：移动端视口、Disable cache、导出 HAR，记录请求数、原图数、API/图片/总传输量和首屏时间。
-  - 状态：Chrome已安装，但当前Native Messaging Host/manifest缺失；需从Codex插件界面重新安装Chrome插件后补录前后HAR，未虚构测量数据。
+  - 状态：Chrome、扩展和Native Messaging Host已验证可用；本次只完成滚动恢复功能回归，HAR带宽基线仍未补录，未虚构测量数据。
 
 - [ ] 完成ZeroTier实体外部设备验收
   - 说明：批准`Configure ZeroTier Access.cmd`的UAC后，在同一ZeroTier网络的外部设备使用HTTP访问`http://192.168.192.1:48102/`。
@@ -18,7 +18,7 @@
 
 - [ ] 完成本机真实浏览器手工复验
   - 说明：依次打开127.0.0.1、localhost和LAN HTTP URL，记录地址栏最终协议与具体错误。
-  - 状态：服务重启后curl/IWR/静态资源/API均通过；等待用户真实浏览器反馈。
+  - 状态：正式LAN URL已由真实Chrome完成滚动恢复专项回归；127.0.0.1与localhost地址栏协议复验仍待补充。
 
 - [ ] 若48102再次停止，调查进程退出生命周期
   - 说明：保留PID、stdout/stderr、进程启动方式和停止时间；不要把无监听误判为页面故障。
@@ -70,6 +70,7 @@
 
 ## Done
 
+- [x] 实现并用真实Chrome验证SPA滚动位置恢复、搜索历史状态和有界深层媒体补齐（前端`v79`）。
 - [x] 首页亮点轮播加载全部20张有界WebP预览，并恢复每10秒向左自动推进一张（前端`v75`）。
 - [x] 增加并验证响应式“回到顶部”悬浮按钮（前端 `v73`）。
 - [x] 创建ZeroTier专用TCP 48102规则并验证LocalAddress、RemoteAddress、Profile和现有LAN规则不变。

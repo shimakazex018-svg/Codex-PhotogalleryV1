@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-14 - Restore gallery scroll position on history navigation
+
+- Added route-scoped scroll snapshots with stable DOM anchors, relative offsets, rendered media depth, paging cursor, and bounded in-memory/session storage retention.
+- Distinguished new navigation from browser history and parent/breadcrumb returns; new pages start at the top while Back, Forward, parent returns, and reload restore the prior visible item.
+- Restored only the required existing 24/40 media batches with a 2.5-second loading budget instead of mounting or requesting an entire gallery.
+- Preserved search queries in the current browser history entry so search-result detail navigation and refresh can restore both the query and its exact result position.
+- Cancelled conflicting return-to-top animation/restoration work during route changes and raised the frontend cache version to `v79`.
+
 ## 2026-07-13 - Add responsive back-to-top control
 
 - Added a body-level floating back-to-top button that remains available across hash routes without changing existing navigation or media behavior.

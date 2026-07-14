@@ -23,10 +23,14 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v75";
+const APP_VERSION = "v79";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
+const SCROLL_STATE_STORAGE_KEY = "galleryScrollStatesV1";
+const SCROLL_STATE_LIMIT = 75;
+const SCROLL_SAVE_DELAY_MS = 150;
+const SCROLL_RESTORE_TIMEOUT_MS = 2500;
 const IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 10'%3E%3Crect width='16' height='10' fill='%23e4e7eb'/%3E%3C/svg%3E";
 
 const state = {
@@ -78,6 +82,13 @@ const state = {
   lightboxDragOriginX: 0,
   lightboxDragOriginY: 0,
   lightboxControlsTimer: null,
+  scrollPositions: new Map(),
+  activeScrollRouteKey: "",
+  scrollNavigationIntent: "new",
+  pendingScrollNavigationIntent: null,
+  scrollRestoreToken: 0,
+  scrollSaveTimer: null,
+  backToTopAnimationFrameId: null,
 };
 
 const view = document.querySelector("#view");
@@ -129,7 +140,268 @@ function setStatus(message) {
   statusEl.textContent = message || "";
 }
 
+function currentScrollRouteKey() {
+  const hash = location.hash || "#/";
+  return [
+    hash,
+    `q=${encodeURIComponent(state.searchQuery)}`,
+    `filter=${state.mediaFilter}`,
+    `modelSort=${state.modelSort}`,
+    `workSort=${state.workSort}`,
+  ].join("|");
+}
+
+function searchQueryFromHistoryState(historyState = history.state) {
+  if (!historyState || typeof historyState !== "object") return "";
+  return normalizeSearch(historyState.gallerySearchQuery || "");
+}
+
+function replaceHistorySearchQuery(query) {
+  const currentState = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...currentState, gallerySearchQuery: normalizeSearch(query) }, "");
+}
+
+function applyHistorySearchQuery(historyState = history.state) {
+  const query = searchQueryFromHistoryState(historyState);
+  state.searchQuery = query;
+  state.sqliteSearch = { query, loading: false, collections: [], media: [] };
+  if (searchBox) searchBox.value = query;
+}
+
+function isValidScrollSnapshot(item) {
+  return Boolean(
+    item
+      && typeof item.routeKey === "string"
+      && item.routeKey.length <= 2048
+      && Number.isFinite(item.scrollY)
+      && item.scrollY >= 0
+      && (item.anchorKey === null || (typeof item.anchorKey === "string" && item.anchorKey.length <= 4096))
+      && Number.isFinite(item.anchorOffset)
+      && Number.isFinite(item.renderedCount)
+      && Number.isFinite(item.savedAt),
+  );
+}
+
+function loadScrollPositions() {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(SCROLL_STATE_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return new Map();
+    return new Map(
+      parsed
+        .filter(isValidScrollSnapshot)
+        .sort((a, b) => b.savedAt - a.savedAt)
+        .slice(0, SCROLL_STATE_LIMIT)
+        .map((item) => [item.routeKey, item]),
+    );
+  } catch (error) {
+    return new Map();
+  }
+}
+
+function persistScrollPositions() {
+  try {
+    const snapshots = [...state.scrollPositions.values()]
+      .filter(isValidScrollSnapshot)
+      .sort((a, b) => b.savedAt - a.savedAt)
+      .slice(0, SCROLL_STATE_LIMIT);
+    state.scrollPositions = new Map(snapshots.map((item) => [item.routeKey, item]));
+    sessionStorage.setItem(SCROLL_STATE_STORAGE_KEY, JSON.stringify(snapshots));
+  } catch (error) {
+    // sessionStorage can be unavailable or full; in-memory restoration remains usable.
+  }
+}
+
+function stableScrollAnchor(type, value) {
+  return `${type}:${String(value || "")}`;
+}
+
+function scrollAnchorAttribute(type, value) {
+  return `data-scroll-anchor="${escapeHtml(stableScrollAnchor(type, value))}"`;
+}
+
+function findAnchorElement(anchorKey) {
+  if (!anchorKey) return null;
+  return [...document.querySelectorAll("[data-scroll-anchor]")]
+    .find((element) => element.dataset.scrollAnchor === anchorKey) || null;
+}
+
+function visibleScrollAnchor() {
+  const candidates = [...document.querySelectorAll("[data-scroll-anchor]")]
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .filter(({ rect }) => rect.bottom > 0 && rect.top < window.innerHeight);
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => Math.abs(a.rect.top) - Math.abs(b.rect.top));
+  return candidates[0];
+}
+
+function captureScrollSnapshot(routeKey = state.activeScrollRouteKey || currentScrollRouteKey()) {
+  if (!routeKey) return null;
+  const anchor = visibleScrollAnchor();
+  const paging = state.mediaPaging;
+  return {
+    routeKey,
+    scrollY: Math.max(0, window.scrollY || window.pageYOffset || 0),
+    anchorKey: anchor?.element.dataset.scrollAnchor || null,
+    anchorOffset: anchor?.rect.top || 0,
+    renderedCount: Math.max(0, Number(state.renderedImageCount || 0)),
+    cursor: paging ? Math.max(0, Number(paging.loaded || 0)) : null,
+    paging: paging ? {
+      loaded: Math.max(0, Number(paging.loaded || 0)),
+      total: Math.max(0, Number(paging.total || 0)),
+      limit: Math.max(1, Number(paging.limit || MEDIA_PAGE_LIMIT)),
+    } : null,
+    savedAt: Date.now(),
+  };
+}
+
+function saveCurrentScrollPosition(persist = false) {
+  if (state.scrollSaveTimer) {
+    clearTimeout(state.scrollSaveTimer);
+    state.scrollSaveTimer = null;
+  }
+  const snapshot = captureScrollSnapshot();
+  if (snapshot) state.scrollPositions.set(snapshot.routeKey, snapshot);
+  if (persist) persistScrollPositions();
+}
+
+function scheduleScrollPositionSave() {
+  clearTimeout(state.scrollSaveTimer);
+  state.scrollSaveTimer = setTimeout(() => {
+    state.scrollSaveTimer = null;
+    const snapshot = captureScrollSnapshot();
+    if (snapshot) state.scrollPositions.set(snapshot.routeKey, snapshot);
+  }, SCROLL_SAVE_DELAY_MS);
+}
+
+function cancelBackToTopAnimation() {
+  if (state.backToTopAnimationFrameId !== null) {
+    cancelAnimationFrame(state.backToTopAnimationFrameId);
+    state.backToTopAnimationFrameId = null;
+  }
+  backToTopButton?.classList.remove("back-to-top--animating");
+}
+
+function cancelScrollRestoration() {
+  state.scrollRestoreToken += 1;
+}
+
+function routeDepth(hash) {
+  return String(hash || "#/").replace(/^#\/?/, "").split("/").filter(Boolean).length;
+}
+
+function prepareScrollNavigation(intent) {
+  cancelBackToTopAnimation();
+  cancelScrollRestoration();
+  state.scrollNavigationIntent = intent === "restore" ? "restore" : "new";
+  state.activeScrollRouteKey = currentScrollRouteKey();
+  if (state.scrollNavigationIntent === "new") window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+async function ensureSavedMediaDepth(snapshot, token, deadline) {
+  const targetRendered = Math.max(0, Number(snapshot.renderedCount || 0));
+  while (state.renderedImageCount < targetRendered && performance.now() < deadline && token === state.scrollRestoreToken) {
+    if (state.renderedImageCount < state.detailImages.length) {
+      appendImageBatch();
+      await nextAnimationFrame();
+      continue;
+    }
+    const paging = state.mediaPaging;
+    const targetCursor = Math.max(targetRendered, Number(snapshot.cursor || snapshot.paging?.loaded || 0));
+    if (paging && paging.loaded < paging.total && paging.loaded < targetCursor) {
+      const before = paging.loaded;
+      await appendRemoteMediaPage();
+      if (paging.loaded <= before) break;
+      continue;
+    }
+    break;
+  }
+}
+
+async function restoreSavedScrollPosition(token) {
+  const routeKey = state.activeScrollRouteKey;
+  const snapshot = state.scrollPositions.get(routeKey);
+  if (!snapshot || token !== state.scrollRestoreToken) return;
+
+  await nextAnimationFrame();
+  await nextAnimationFrame();
+  const deadline = performance.now() + SCROLL_RESTORE_TIMEOUT_MS;
+  await ensureSavedMediaDepth(snapshot, token, deadline);
+
+  if (token !== state.scrollRestoreToken) return;
+  const anchor = findAnchorElement(snapshot.anchorKey);
+  if (anchor) {
+    const delta = anchor.getBoundingClientRect().top - snapshot.anchorOffset;
+    window.scrollTo({ top: Math.max(0, window.scrollY + delta), left: 0, behavior: "auto" });
+    await nextAnimationFrame();
+    const correction = anchor.getBoundingClientRect().top - snapshot.anchorOffset;
+    if (Math.abs(correction) > 1) window.scrollTo({ top: Math.max(0, window.scrollY + correction), left: 0, behavior: "auto" });
+  } else {
+    window.scrollTo({ top: snapshot.scrollY, left: 0, behavior: "auto" });
+  }
+  state.scrollNavigationIntent = "idle";
+  saveCurrentScrollPosition();
+}
+
+function requestScrollRestoration() {
+  if (state.scrollNavigationIntent !== "restore") return;
+  const snapshot = state.scrollPositions.get(state.activeScrollRouteKey);
+  if (!snapshot) {
+    state.scrollNavigationIntent = "idle";
+    return;
+  }
+  if (snapshot.anchorKey && !document.querySelector("[data-scroll-anchor]") && (state.sqliteLoading || state.sqliteSearch.loading)) return;
+  const token = state.scrollRestoreToken;
+  restoreSavedScrollPosition(token).catch(() => {});
+}
+
+function initScrollRestoration() {
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  applyHistorySearchQuery();
+  state.scrollPositions = loadScrollPositions();
+  const navigationType = performance.getEntriesByType?.("navigation")?.[0]?.type;
+  state.scrollNavigationIntent = navigationType === "reload" ? "restore" : "new";
+  state.activeScrollRouteKey = currentScrollRouteKey();
+
+  window.addEventListener("scroll", scheduleScrollPositionSave, { passive: true });
+  window.addEventListener("pagehide", () => saveCurrentScrollPosition(true));
+  window.addEventListener("popstate", (event) => {
+    saveCurrentScrollPosition(true);
+    applyHistorySearchQuery(event.state);
+    state.pendingScrollNavigationIntent = "restore";
+  });
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest?.("a[href]");
+    if (!link) return;
+    const target = new URL(link.href, location.href);
+    if (target.origin !== location.origin || !target.hash.startsWith("#/")) return;
+    saveCurrentScrollPosition(true);
+    const intent = routeDepth(target.hash) < routeDepth(location.hash) ? "restore" : "new";
+    if (state.searchQuery) {
+      event.preventDefault();
+      replaceHistorySearchQuery(state.searchQuery);
+      state.searchQuery = "";
+      state.sqliteSearch = { query: "", loading: false, collections: [], media: [] };
+      searchBox.value = "";
+      const nextState = history.state && typeof history.state === "object" ? history.state : {};
+      history.pushState({ ...nextState, gallerySearchQuery: "" }, "", target.href);
+      prepareScrollNavigation(intent);
+      beginPageNavigation();
+      render();
+      return;
+    }
+    if (target.hash === location.hash) return;
+    state.pendingScrollNavigationIntent = intent;
+  }, true);
+}
+
 function beginPageNavigation() {
+  cancelBackToTopAnimation();
+  cancelScrollRestoration();
   state.pageAbortController?.abort();
   state.searchAbortController?.abort();
   state.pageAbortController = new AbortController();
@@ -146,16 +418,14 @@ function initBackToTopButton() {
   const scrollIdleDelayMs = 200;
   const interruptKeys = new Set(["PageDown", "PageUp", "Home", "End", "ArrowUp", "ArrowDown", " "]);
   let scrollIdleTimer = null;
-  let animationFrameId = null;
 
   const smootherStep = (progress) => progress * progress * progress * (progress * (progress * 6 - 15) + 10);
   const finishAnimation = () => {
-    if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
-    animationFrameId = null;
+    cancelBackToTopAnimation();
     backToTopButton.classList.remove("back-to-top--animating");
   };
   const cancelAnimation = () => {
-    if (animationFrameId === null) return;
+    if (state.backToTopAnimationFrameId === null) return;
     finishAnimation();
   };
   const markScrolling = () => {
@@ -166,6 +436,8 @@ function initBackToTopButton() {
     }, scrollIdleDelayMs);
   };
   const startAnimation = () => {
+    cancelScrollRestoration();
+    state.scrollNavigationIntent = "idle";
     const startY = Math.max(0, window.scrollY || window.pageYOffset || 0);
     cancelAnimation();
     if (startY <= 0) {
@@ -184,13 +456,14 @@ function initBackToTopButton() {
       const nextY = Math.max(0, startY * (1 - smootherStep(progress)));
       window.scrollTo(0, nextY);
       if (progress < 1) {
-        animationFrameId = requestAnimationFrame(animate);
+        state.backToTopAnimationFrameId = requestAnimationFrame(animate);
         return;
       }
       window.scrollTo(0, 0);
       finishAnimation();
+      saveCurrentScrollPosition();
     };
-    animationFrameId = requestAnimationFrame(animate);
+    state.backToTopAnimationFrameId = requestAnimationFrame(animate);
   };
 
   window.addEventListener("scroll", markScrolling, { passive: true });
@@ -228,9 +501,13 @@ function setCoverFit(mode) {
 
 function setMediaFilter(mode, rerender = true) {
   const nextMode = ["all", "images", "videos"].includes(mode) ? mode : "all";
+  if (rerender) saveCurrentScrollPosition(true);
   state.mediaFilter = nextMode;
   localStorage.setItem("galleryMediaFilter", nextMode);
-  if (rerender) render();
+  if (rerender) {
+    prepareScrollNavigation("new");
+    render();
+  }
 }
 
 function setLazyLoading(enabled, rerender = true) {
@@ -291,6 +568,7 @@ function updateSortToggle() {
 function setSortMode(scope, mode, rerender = true) {
   const options = sortOptionsForScope(scope);
   const nextMode = options.some((item) => item.mode === mode) ? mode : options[0].mode;
+  if (rerender) saveCurrentScrollPosition(true);
   if (scope === "works") {
     state.workSort = nextMode;
     localStorage.setItem("galleryWorkSort", nextMode);
@@ -299,7 +577,10 @@ function setSortMode(scope, mode, rerender = true) {
     localStorage.setItem("galleryModelSort", nextMode);
   }
   updateSortToggle();
-  if (rerender) render();
+  if (rerender) {
+    prepareScrollNavigation("new");
+    render();
+  }
 }
 
 function cycleSortMode() {
@@ -347,10 +628,16 @@ function sortSearchWorkResults(results) {
 }
 
 function setSearchQuery(value) {
-  state.searchQuery = normalizeSearch(value);
+  const previousQuery = state.searchQuery;
+  const nextQuery = normalizeSearch(value);
+  if (previousQuery === nextQuery) return;
+  saveCurrentScrollPosition(true);
+  state.searchQuery = nextQuery;
+  replaceHistorySearchQuery(nextQuery);
   if (state.galleryMode === "sqlite" && state.sqliteSearch.query !== state.searchQuery) {
     state.sqliteSearch = { query: state.searchQuery, loading: false, collections: [], media: [] };
   }
+  prepareScrollNavigation(previousQuery && !nextQuery ? "restore" : "new");
   render();
 }
 
@@ -739,6 +1026,7 @@ function renderSqliteRoute(parts) {
       if (generation !== state.routeGeneration || sqliteCollectionIdFromParts(parseRouteParts()) !== id) return;
       state.sqliteLoading = null;
       renderCollection(collection);
+      queueMicrotask(requestScrollRestoration);
     })
     .catch((error) => {
       if (error.name === "AbortError" || generation !== state.routeGeneration) return;
@@ -976,7 +1264,7 @@ function renderFavorites() {
         ${state.favorites
           .map(
             (item) => `
-              <div class="favorite-card">
+              <div class="favorite-card" ${scrollAnchorAttribute("favorite", item.id)}>
                 <a class="compact-card compact-link" href="${item.hash}">
                   <div class="compact-cover">${coverHtml(storedItemCover(item), item.title)}</div>
                   <div class="compact-info">
@@ -1069,7 +1357,7 @@ function renderRecentViews() {
         ${state.recentViews
           .map(
             (item) => `
-              <a class="compact-card compact-link" href="${item.hash}">
+              <a class="compact-card compact-link" href="${item.hash}" ${scrollAnchorAttribute("recent", item.hash)}>
                 <div class="compact-cover">${coverHtml(storedItemCover(item), item.title)}</div>
                 <div class="compact-info">
                   <h2>${escapeHtml(item.title)}</h2>
@@ -1160,7 +1448,7 @@ function renderHighlightCarousel() {
         ${highlights
           .map(
             (item) => `
-              <a class="highlight-card" href="${item.href}">
+              <a class="highlight-card" href="${item.href}" ${scrollAnchorAttribute("highlight", item.href)}>
                 <img src="${IMAGE_PLACEHOLDER}" data-carousel-src="${escapeHtml(item.src)}" alt="${escapeHtml(item.title || item.model || "")}" loading="lazy" decoding="async" />
               </a>
             `,
@@ -1179,7 +1467,7 @@ function renderModelGrid(models) {
       ${models
         .map(
           (model) => `
-            <a class="model-card" href="${encodeHash([model.id])}">
+            <a class="model-card" href="${encodeHash([model.id])}" ${scrollAnchorAttribute("model", model.id)}>
               <div class="cover">
                 ${coverHtml(model.coverThumb || model.cover, model.name)}
                 <span class="badge">${escapeHtml(model.name)}</span>
@@ -1202,7 +1490,7 @@ function renderSearchWorkGrid(results) {
       ${results
         .map(
           ({ model, work, pathParts }) => `
-            <a class="work-card" href="${encodeHash(pathParts)}">
+            <a class="work-card" href="${encodeHash(pathParts)}" ${scrollAnchorAttribute("work", work.id)}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
                 <span class="badge">${escapeHtml(model.name)}</span>
@@ -1226,7 +1514,7 @@ function renderSqliteSearchMediaGrid(items) {
         .map((item) => {
           const media = item.galleryMedia || sqliteMediaToGalleryMedia(item);
           return `
-            <a class="work-card" href="${sqliteHashFromId(item.collectionId)}">
+            <a class="work-card" href="${sqliteHashFromId(item.collectionId)}" ${scrollAnchorAttribute("search-media", item.id || media.src || item.title)}>
               <div class="cover">
                 ${coverHtml(mediaResultCover(media), media.title || item.title)}
                 <span class="badge">${escapeHtml(item.type === "video" ? text.videos : text.photos)}</span>
@@ -1895,7 +2183,7 @@ function renderWorkGrid(model, works, pathParts) {
       ${works
         .map(
           (work) => `
-            <a class="work-card" href="${encodeHash([...pathParts, work.folder])}">
+            <a class="work-card" href="${encodeHash([...pathParts, work.folder])}" ${scrollAnchorAttribute("work", work.id || [...pathParts, work.folder].join("/"))}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
                 <span class="badge">${escapeHtml(model.name)}</span>
@@ -1918,7 +2206,7 @@ function renderCollectionGrid(collections) {
       ${collections
         .map(
           (collection) => `
-            <a class="work-card" href="${encodeHash(collection.pathParts || collection.id.split("/"))}">
+            <a class="work-card" href="${encodeHash(collection.pathParts || collection.id.split("/"))}" ${scrollAnchorAttribute("collection", collection.id)}>
               <div class="cover">
                 ${coverHtml(collection.coverThumb || collection.cover, collection.title)}
                 <span class="badge">${escapeHtml(collection.pathParts?.[0] ? titleFromName(collection.pathParts[0]) : collection.title)}</span>
@@ -1956,7 +2244,7 @@ function renderVideos(videos, poster) {
       ${videos
         .map(
           (video) => `
-            <figure class="video-item">
+            <figure class="video-item" ${scrollAnchorAttribute("video", video.src || video.file)}>
               <video data-src="${video.src}" preload="none" ${video.poster || poster ? `poster="${video.poster || poster}"` : ""} controls></video>
               <figcaption>
                 <span>${escapeHtml(video.title)}</span>
@@ -1976,7 +2264,7 @@ function renderImageButtons(images, startIndex = 0) {
   return images
     .map(
       (image, index) => `
-        <button type="button" data-image-index="${startIndex + index}">
+        <button type="button" data-image-index="${startIndex + index}" ${scrollAnchorAttribute("media", image.src || image.file)}>
           ${lazyImageHtml(image.src, image.title, `data-original="${escapeHtml(image.src)}"`)}
         </button>
       `,
@@ -2201,6 +2489,7 @@ function render() {
   clearImageBatchLoading();
   updateSortToggle();
   queueMicrotask(setupLazyPreviewImages);
+  queueMicrotask(requestScrollRestoration);
 
   if (duplicateHashRoute()) {
     renderEmpty(text.refreshing);
@@ -2433,8 +2722,15 @@ searchBox.addEventListener("search", () => setSearchQuery(searchBox.value));
 sortToggle.addEventListener("click", cycleSortMode);
 
 refreshButton.addEventListener("click", startBackgroundScan);
-topButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+topButton.addEventListener("click", () => {
+  cancelScrollRestoration();
+  state.scrollNavigationIntent = "idle";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 window.addEventListener("hashchange", () => {
+  const intent = state.pendingScrollNavigationIntent || "new";
+  state.pendingScrollNavigationIntent = null;
+  prepareScrollNavigation(intent);
   beginPageNavigation();
   render();
 });
@@ -2481,6 +2777,7 @@ setSortMode("models", state.modelSort, false);
 setSortMode("works", state.workSort, false);
 if (versionFooter) versionFooter.textContent = `版本 ${APP_VERSION}`;
 initBackToTopButton();
+initScrollRestoration();
 
 (async () => {
   beginPageNavigation();

@@ -50,7 +50,9 @@ Browser SPA
 - `#/__duplicates`：旧查重兼容入口。
 - 灯箱不是独立路由，由 overlay 和内存状态控制。
 
-前端直接使用原生 DOM、事件监听、`fetch` 和 `localStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
+前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
+
+滚动恢复由 `app.js` 管理：`history.scrollRestoration` 使用 `manual`，内存与 `sessionStorage` 最多保留75条路由快照。快照包含稳定DOM锚点、相对视口偏移、scrollY、已渲染媒体数量和分页游标；历史/父级返回按现有24张DOM批次和40条API分页补齐到锚点，普通新导航保持顶部。搜索词写入对应的History entry，Back/Forward和刷新可恢复搜索结果上下文。
 
 ## Backend architecture
 
