@@ -208,6 +208,32 @@ For changes to the floating back-to-top control, verify:
 
 2026-07-14验证：正式LAN站点前端`v79`在1440x900与390x844视口通过。目录、面包屑、收藏、最近观看和80条搜索结果的锚点偏差为0px；86张媒体详情刷新后恢复86个节点，锚点偏差约0.125px；回顶完成与滚轮中断通过，控制台无warning/error。
 
+### Lightbox preload regression
+
+灯箱预加载修改必须使用至少10张图片的图集，在真实Chrome分别做禁用缓存观察和正常缓存复用测试：
+
+1. 打开第1张后必须先显示WebP预览；原图窗口只包含当前及第2-4张，不请求第5张、其他目录、视频或HLS。
+2. 第2-4张完成后切到第2张，应直接使用已准备资源并只补第5张；同一原图URL不重复创建会话任务。
+3. 连续和快速前进至少6次，确认无错图、旧回调覆盖、控制台错误或无界Map增长；缓存最多5项，并发最多2。
+4. 最后一张向后索引必须循环到第1-3张；1/2/3张小图集分别得到0/1/2个不重复且不含自身的预加载索引。
+5. 前进后返回上一张，刚查看的图片仍在缓存窗口；关闭灯箱等待30秒，不再追加原图请求。
+6. 检查Save-Data为0张后向原图、slow-2g/2g为1张、3g为2张、4g或Connection API缺失为3张；只有下一张设置decode请求。
+7. 至少覆盖1440x900、768x1024、390x844，确认按钮/键盘/缩放拖动、路径按钮、WebP预览、目录懒加载和视频`preload="none"`未退化。
+
+只记录实测等待时间、请求数、重复URL、关闭后新增请求和内存趋势；无法可靠测量的项目明确标记未验证，不得估算。
+
+2026-07-14验证：正式LAN首页HTTP 200并加载`app.js?v=81`与`styles.css?v=81`；抽样原图返回`Cache-Control: public, max-age=604800`、ETag、Last-Modified，条件请求返回304。隔离Image队列模拟确认初始只请求当前和后3张，前进一张只补1张，5个请求URL全部唯一；最大并发2、Map最大5，stop后等待不再新增请求。循环、小图集和Save-Data/2G/3G/4G策略通过纯逻辑检查。真实Chrome Network、等待时间、内存趋势以及1440x900、768x1024、390x844交互未验证：当前Chrome插件环境缺少Native Host manifest/注册表项和Chrome用户数据目录。
+
+2026-07-14 v85真实Chrome专项验收：正式LAN 114张`剧照`图集加载`app.js?v=85`与`styles.css?v=85`。页面初始资源观察为16个按需WebP预览、0个`/photos/`原图；DOM有40个图片按钮但24个远端预览仍未请求。点击第5张时，点击到P0请求开始8.6ms、占位图显示117.1ms、原图网络完成124.6ms、decode完成140.0ms、最终显示142.7ms；P0先于P1开始，P3在当前图显示后才创建。下一张已为`ready`并发生优先级升级，点击到显示68.9ms，调度日志没有第二次同URL`request-start`。资源观察窗口共5个唯一原图URL，最大普通预加载并发2、最大缓存5；连续前进7次最终索引/图片一致，旧窗口任务被标记`outside-window`，控制台无error，但受Chrome控制动作时延影响，该结果不代表亚秒级快速连点。关闭后队列、缓存和活动请求均为0，等待3秒新增原图URL为0。该Chrome接口不提供DevTools Disable cache、HAR/请求实例明细、网络节流或可靠堆内存趋势，因此冷缓存、浏览器层重复传输、亚秒级快速连点、Save-Data/慢网及长期内存仍标记未验证。
+
+### v86 merge validation (2026-07-14)
+
+- Isolated media-cleanup/API test: duplicate start 409; stop reached `stopped` with `incomplete=true`; bad confirmation 400; LAN delete 403; localhost deleted only 6 reported non-media candidates and 3 true-empty directories. The late file and reparse target were preserved, and the GUID TEMP root ended with `Test-Path=False`.
+- Controlled Chrome against an isolated v86 runtime with 12 generated test images: WebP preview appeared before the original, current image fetch priority was high, navigation reached image 8 without stale replacement, image 12 wrapped to image 1, close cleared the image source, and reopen replaced the preview with image 5 original. Console warning/error count was zero.
+- At 390x844, both the open lightbox and media-cleanup settings page had no horizontal overflow. The settings page exposed scan/stop/delete controls, statistics, categories, search, sort and pagination.
+- Authorized formal read-only scan job `20260714-224723-b04c608d` completed in 173.388 seconds: 482450 files, 7288 directories, 472490 images, 2109 videos, 7851 non-media files, 269 empty directories, 5 media-free trees, 2 suspicious tiny media files and 0 errors. Deleted file/directory counts were both zero.
+- The formal site intentionally remains v85, so the new v86 media-cleanup page was not deployed or opened against the formal Runtime. Desktop Chrome and 390x844 were checked; iPad, Save-Data/slow network, Disable-cache HAR, sub-second rapid clicking, long-term memory and video/HLS interaction remain supplemental/unverified.
+
 ## Database checks
 
 - 禁止用当前应用代码“只读打开”生产源库；数据库打开逻辑会启用 WAL 并保证 schema/index。

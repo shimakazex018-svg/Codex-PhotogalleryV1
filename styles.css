@@ -1232,6 +1232,17 @@ a {
   user-select: none;
   -webkit-user-drag: none;
   transform-origin: center center;
+  opacity: 1;
+  transition: opacity 140ms ease;
+}
+
+.lightbox.showing-preview img,
+.lightbox.image-loading img {
+  opacity: 0.96;
+}
+
+.lightbox.image-error img {
+  opacity: 0.72;
 }
 
 .lightbox-close,
@@ -1252,6 +1263,12 @@ a {
 
 .lightbox.dragging img {
   cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox img {
+    transition-duration: 0.01ms;
+  }
 }
 
 .lightbox.controls-hidden .lightbox-nav,

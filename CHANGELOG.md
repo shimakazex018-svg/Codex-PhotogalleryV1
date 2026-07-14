@@ -1,14 +1,46 @@
 # Changelog
 
+## 2026-07-14 - Integrate v85 lightbox loading with media cleanup
+
+- Merged the published `origin/main` history into `codex/media-library-cleanup` without rebasing or rewriting either branch.
+- Preserved the v85 P0/P1/P3 lightbox scheduler, bounded diagnostics and thumbnail loading behavior alongside the media cleanup worker, APIs, settings route and polling lifecycle.
+- Renumbered the long-term decisions so lightbox loading remains DEC-017 and controlled media cleanup is DEC-018.
+- Raised the integrated feature-branch frontend cache version to `v86`; the formal main website remains on published `v85` until a separately authorized merge and release.
+- Revalidated the merged v86 branch in an isolated localhost runtime: the WebP placeholder preceded the original, the displayed image used high fetch priority, sequential navigation and last-to-first wrapping stayed correct, close/reopen did not allow stale replacement, and the 390x844 lightbox/settings views had no horizontal overflow or console warnings/errors.
+- Re-ran the authorized read-only production-media scan as job `20260714-224723-b04c608d`: 482,450 files and 7,288 directories completed in 173.388 seconds with zero errors, zero deleted files and zero deleted directories. Existing and new Runtime reports were retained.
+
 ## 2026-07-14 - Add media library cleanup settings
 
 - Added a single-process, sequential PowerShell scanner that reads only configured `PHOTOS_DIR` metadata, skips reparse points, reports conservative image/video formats, and exits after completion or cancellation.
 - Added bounded status/results APIs with category/search/path/size pagination and reports written directly to the existing Runtime logs directory.
 - Added explicit `DELETE`/“删除” confirmation, current-job report binding, repeated root/reparse validation, localhost/`ALLOW_REMOTE_DELETE` enforcement, and bottom-up true-empty-directory cleanup.
-- Added the `#/__settings/media-cleanup` interface, responsive results table, progress/statistics, cancellation, custom confirmation dialog, and frontend version `v80`.
+- Added the `#/__settings/media-cleanup` interface, responsive results table, progress/statistics, cancellation and custom confirmation dialog; the integrated feature branch now uses frontend version `v86`.
 - Validated isolated scan, duplicate-start rejection, stop cleanup, localhost test deletion, HTTP responsiveness, Chinese paths, mobile layout, and complete temporary-directory removal; production deletion was not performed.
 - Confirmed that a correctly formed delete request through the LAN address returns HTTP 403 when `ALLOW_REMOTE_DELETE=0`, while the same isolated localhost workflow remains available.
 - Completed one formal read-only scan from the existing Runtime `PHOTOS_DIR`: 482,450 files, 7,288 directories, 7,851 non-media candidates (4,204,588,435 bytes), 269 empty directories, 5 media-free trees, 2 suspicious tiny media files, and zero scan errors. No formal file or directory was deleted.
+
+## 2026-07-14 - Prioritize the current lightbox original
+
+- Replaced the shared FIFO lightbox path with a normalized-URL task scheduler that tracks network, decode, ready, failure and abort states and reuses in-flight promises.
+- Added an independent P0 immediate channel for the current original, a decoded P1 next image, delayed low-priority P3 predictions, bounded retry, cancellation and five-entry retention.
+- Kept the clicked WebP preview visible while the original loads and decodes, configured display attributes before `src`, and prevented stale callbacks from replacing the current image.
+- Limited detail-page preview requests to the viewport neighborhood, marked non-critical thumbnails low priority, and added opt-in bounded timing diagnostics without default console noise.
+- Preserved server cache policy, APIs, media paths, video/HLS behavior and visual layout; raised the frontend cache version to `v85`.
+
+## 2026-07-14 - Preload upcoming lightbox images
+
+- Changed image lightboxes to show the existing on-demand WebP preview immediately, then replace it with the current original image when ready.
+- Added a session-scoped preload manager with a default three-image look-ahead, maximum concurrency of two, next-image decode attempt, URL task reuse, and a five-entry previous/current/ahead cache window.
+- Added Save-Data and effective-connection downgrades, cyclic/small-gallery deduplication, one controlled retry for an explicitly viewed failed original, and generation/render-token guards.
+- Closing the lightbox or changing routes now cancels pending idle timers, clears queued work and Image references, and prevents stale callbacks from replacing the current image.
+- Preserved original media paths, HEIC compatibility previews, video `preload="none"`, video/HLS behavior, API formats, database schema, and Runtime paths; raised the frontend cache version to `v81`.
+
+## 2026-07-14 - Display mislabeled HEIC images in the selected lightbox
+
+- Confirmed that the seven `杏子yada/亮点` source files use HEIC content despite their `.jpg` names and `image/jpeg` responses, so Chrome cannot decode them directly.
+- Scoped the existing bounded WebP preview URL to this collection's lightbox only; all other collection lightboxes continue to request their original image URLs.
+- Preserved original photo paths for the lightbox `路径` action and did not modify media files, database records, server routes, styles, or other page behavior.
+- Raised the frontend cache version to `v80`.
 
 ## 2026-07-14 - Restore gallery scroll position on history navigation
 
