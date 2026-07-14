@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v79";
+const APP_VERSION = "v80";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -31,6 +31,7 @@ const SCROLL_STATE_STORAGE_KEY = "galleryScrollStatesV1";
 const SCROLL_STATE_LIMIT = 75;
 const SCROLL_SAVE_DELAY_MS = 150;
 const SCROLL_RESTORE_TIMEOUT_MS = 2500;
+const HEIC_COMPATIBILITY_COLLECTION_ID = "杏子yada/亮点";
 const IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 10'%3E%3Crect width='16' height='10' fill='%23e4e7eb'/%3E%3C/svg%3E";
 
 const state = {
@@ -63,6 +64,7 @@ const state = {
   highlightIndex: 0,
   highlightTimer: null,
   lightboxImages: [],
+  lightboxUseCompatibilityPreview: false,
   detailImages: [],
   renderedImageCount: 0,
   imageBatchObserver: null,
@@ -1132,6 +1134,10 @@ function imagePreviewUrl(src) {
   return src ? `/api/image-preview?url=${encodeURIComponent(src)}&size=768` : "";
 }
 
+function useCompatibilityLightboxPreview(collectionId = "") {
+  return collectionId === HEIC_COMPATIBILITY_COLLECTION_ID;
+}
+
 function lazyImageHtml(src, label, attributes = "") {
   if (!src) return `<div class="empty-cover">${escapeHtml(label || text.waitingImage)}</div>`;
   return `<img src="${IMAGE_PLACEHOLDER}" data-preview-src="${escapeHtml(imagePreviewUrl(src))}" alt="${escapeHtml(label || "")}" loading="lazy" decoding="async" ${attributes} />`;
@@ -2111,6 +2117,7 @@ function renderCollection(collection) {
       cover: mediaCover(collection.coverThumb || collection.cover, images, videos),
     });
     renderMediaDetail({
+      collectionId: collection.id,
       title: collection.level === 1 ? `Tag: ${collection.title}` : collection.title,
       meta: collectionMeta(collection),
       actions: favorite,
@@ -2149,6 +2156,7 @@ function renderCollection(collection) {
   const visibleVideos = showVideos ? videos : [];
   state.detailImages = visibleImages;
   state.lightboxImages = visibleImages.map((image) => image.src);
+  state.lightboxUseCompatibilityPreview = useCompatibilityLightboxPreview(collection.id);
   const mediaTotal = collection.mediaTotal || (collection.imageCount + collection.videoCount);
   const mediaLoaded = collection.mediaLoaded || (images.length + videos.length);
   state.mediaPaging = state.galleryMode === "sqlite" && showImages && mediaLoaded < mediaTotal ? {
@@ -2411,7 +2419,7 @@ function setupImageBatchLoading() {
   state.imageBatchObserver.observe(sentinel);
 }
 
-function renderMediaDetail({ title, meta, actions = "", images, videos, poster, emptyMessage, paging = null }) {
+function renderMediaDetail({ collectionId = "", title, meta, actions = "", images, videos, poster, emptyMessage, paging = null }) {
   const hasVideos = videos.length > 0;
   const filter = hasVideos ? state.mediaFilter : "all";
   const showImages = filter === "all" || filter === "images";
@@ -2420,6 +2428,7 @@ function renderMediaDetail({ title, meta, actions = "", images, videos, poster, 
   const visibleVideos = showVideos ? videos : [];
   state.detailImages = visibleImages;
   state.lightboxImages = visibleImages.map((image) => image.src);
+  state.lightboxUseCompatibilityPreview = useCompatibilityLightboxPreview(collectionId);
   state.mediaPaging = paging && showImages ? { ...paging, loading: false } : null;
 
   const message = filter === "videos" ? text.noVideosInFilter : filter === "images" ? text.noImagesInFilter : emptyMessage;
@@ -2560,7 +2569,7 @@ function openLightbox(index) {
 
 function updateLightbox() {
   const src = state.lightboxImages[state.lightboxIndex];
-  lightboxImage.src = src || "";
+  lightboxImage.src = src && state.lightboxUseCompatibilityPreview ? imagePreviewUrl(src) : src || "";
   resetLightboxZoom();
 }
 

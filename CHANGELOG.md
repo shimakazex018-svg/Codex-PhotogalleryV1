@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-14 - Display mislabeled HEIC images in the selected lightbox
+
+- Confirmed that the seven `杏子yada/亮点` source files use HEIC content despite their `.jpg` names and `image/jpeg` responses, so Chrome cannot decode them directly.
+- Scoped the existing bounded WebP preview URL to this collection's lightbox only; all other collection lightboxes continue to request their original image URLs.
+- Preserved original photo paths for the lightbox `路径` action and did not modify media files, database records, server routes, styles, or other page behavior.
+- Raised the frontend cache version to `v80`.
+
 ## 2026-07-14 - Restore gallery scroll position on history navigation
 
 - Added route-scoped scroll snapshots with stable DOM anchors, relative offsets, rendered media depth, paging cursor, and bounded in-memory/session storage retention.
