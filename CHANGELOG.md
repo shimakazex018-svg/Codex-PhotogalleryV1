@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-14 - Deploy media library cleanup v86
+
+- Fast-forwarded formal `main` from `d18a2f2` to the integrated media-cleanup history without conflicts, rebasing or commit rewriting, then restarted only the PID-matched formal Gallery process through the existing task-hosted scripts.
+- Confirmed loopback and LAN HTTP 200, frontend `v86`, the existing P0/P1/P3 lightbox behavior, search, favorites/recent sections, scroll restoration, back-to-top, poster-based `preload="none"` video loading and the responsive media-cleanup settings page.
+- Ran formal read-only scan job `20260714-232613-22183b82` against the configured `PHOTOS_DIR`: 482,450 files and 7,288 directories completed in 102.126 seconds with zero errors, zero deleted files and zero deleted directories; the single PowerShell worker exited automatically.
+- Verified bounded result pagination (`pageSize` capped at 200), category/file-name/relative-path filtering, path/size sorting and the five MediaFreeTree records. Counts requiring manual review are Unknown 24, Archive 4, MetadataOrSidecar 3,318 and Document 4,309.
+- Kept `ALLOW_REMOTE_DELETE=0`; a duplicate scan start returned 409 and a LAN delete request returned 403 before confirmation or report processing. No localhost delete request was made.
+
 ## 2026-07-14 - Integrate v85 lightbox loading with media cleanup
 
 - Merged the published `origin/main` history into `codex/media-library-cleanup` without rebasing or rewriting either branch.
