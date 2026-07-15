@@ -468,6 +468,7 @@ a {
 .media-cleanup-header h1 { margin: 0 0 8px; }
 .media-cleanup-header p { margin: 0; color: var(--muted); }
 .media-cleanup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.media-cleanup-actions button { min-height: 44px; }
 .media-cleanup-actions button, .media-cleanup-filters button, .media-cleanup-pagination button, .media-cleanup-dialog button { border: 1px solid var(--line); border-radius: 10px; padding: 9px 13px; background: var(--surface); color: inherit; cursor: pointer; }
 .media-cleanup-actions button:disabled, .media-cleanup-pagination button:disabled { opacity: .45; cursor: default; }
 .media-cleanup-actions .danger, .media-cleanup-dialog .danger { background: #a92f2f; border-color: #a92f2f; color: #fff; }
@@ -1521,4 +1522,3 @@ a {
     font-size: 38px;
   }
 }
-
