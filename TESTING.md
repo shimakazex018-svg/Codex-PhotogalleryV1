@@ -71,6 +71,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-media-cle
 
 通过标准：`MEDIA_CLEANUP_RECYCLE_TEST=PASS`、`TEMP_ROOT_EXISTS=False`，同盘与强制copy路径均通过，`.partial`残留0，legacy delete 410，LAN写操作403，localhost回收/恢复成功。
 
+2026-07-15 v91正式只读验收：Node PID 4068由Host PID 25460托管，监听PID一致；loopback/LAN HTTP 200并加载v91。设置页显示`E:\A_秀人`、`D:\GalleryRuntime\trash`、跨盘模式、批准job、7851候选、3.9GiB、819GiB可用和5.9GiB门槛。390×844无全局横向溢出，操作按钮44px，控制台0 warning/error。只读扫描job`20260715-133504-77ec5bd2`完成482450文件、7288目录、7851非媒体、0错误，移动/恢复计数0；正式回收根不存在且trash中`.partial=0`。
+
 同时检查：
 
 ```powershell

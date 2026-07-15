@@ -3,6 +3,7 @@
 ## 2026-07-15 - Refresh media-cleanup touch targets v91
 
 - Raised the media-cleanup action controls to a 44px minimum touch height and bumped both static resource cache markers after the first browser pass showed the old v90 stylesheet remained cached.
+- Deployed through the PID-validated scheduled-task scripts, completed the formal read-only scan `20260715-133504-77ec5bd2` with 482,450 files, 7,288 directories, 7,851 non-media candidates and zero errors, and confirmed zero formal moves, restores, cleanup directories or partial files.
 
 ## 2026-07-15 - Replace media-cleanup permanent deletion with recoverable recycle v90
 

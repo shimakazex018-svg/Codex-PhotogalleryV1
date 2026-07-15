@@ -90,3 +90,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-media-cle
 测试只使用`$env:TEMP\Codex-PhotogalleryV1-MediaCleanup-<GUID>`和随机HTTP端口，覆盖同盘、强制copy、TXT/PDF/JSON/ZIP/7Z/TAR、中文/空格、0字节非媒体、只读、目标冲突、ChangedSinceScan、扫描后新增、Missing、复制失败、源删除失败、幂等、空目录、恢复冲突、legacy 410、LAN 403与localhost成功。通过时`.partial=0`且最终`TEMP_ROOT_EXISTS=False`。
 
 正式`E:\A_秀人`在v91开发、隔离验证和部署验收期间零移动。部署后的正式扫描仍只读；Codex不得触发正式recycle/restore，用户必须在localhost核对路径和容量后手工输入确认文本。
+
+## 2026-07-15 v91正式只读回归
+
+jobId`20260715-133504-77ec5bd2`在246.612秒完成：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、空目录269、叶非媒体目录132、无媒体树5、可疑小媒体2、ReparsePoint 0、错误0、`incomplete=false`。新版本只生成9个扫描报告，不再生成旧deletion报告；worker完成后退出。该job只用于扫描回归，不替换正式批准回收job。回归后批准job回收目录不存在、trash内`.partial=0`、移动/恢复/目录清理计数均为0。
