@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-15 - Refresh media-cleanup touch targets v91
+
+- Raised the media-cleanup action controls to a 44px minimum touch height and bumped both static resource cache markers after the first browser pass showed the old v90 stylesheet remained cached.
+
 ## 2026-07-15 - Replace media-cleanup permanent deletion with recoverable recycle v90
 
 - Removed the v86 candidate `File.Delete` execution path and made legacy `POST /api/media-cleanup/delete` return HTTP 410.

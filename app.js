@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v90";
+const APP_VERSION = "v91";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;

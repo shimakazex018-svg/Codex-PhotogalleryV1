@@ -11,11 +11,11 @@
 
 PowerShell顺序枚举并把扫描报告流式写入现有`DATA_DIR/logs`，文件前缀为`media-cleanup-<jobId>`。非媒体记录为`kind=non-media`；0字节媒体、可疑小媒体、目录、ReparsePoint和错误只报告，不是回收候选。停止任务会得到`incomplete=true`，不能执行回收。
 
-正式批准报告为`20260714-232613-22183b82`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、0错误、`incomplete=false`。v90只允许该job进入正式回收/恢复接口；测试可通过进程级`MEDIA_CLEANUP_ALLOWED_JOB_ID`指定隔离job。
+正式批准报告为`20260714-232613-22183b82`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、0错误、`incomplete=false`。v91只允许该job进入正式回收/恢复接口；测试可通过进程级`MEDIA_CLEANUP_ALLOWED_JOB_ID`指定隔离job。
 
 ## v86永久删除的废弃
 
-v86 worker的Delete模式曾对候选直接调用`[System.IO.File]::Delete($candidate)`，无法恢复。v90删除该模式和前端DELETE确认：
+v86 worker的Delete模式曾对候选直接调用`[System.IO.File]::Delete($candidate)`，无法恢复。v91删除该模式和前端DELETE确认：
 
 - `POST /api/media-cleanup/delete`固定返回HTTP 410；
 - 新接口为`POST /api/media-cleanup/recycle`，确认文本`MOVE`或“移入回收站”；
@@ -89,4 +89,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-media-cle
 
 测试只使用`$env:TEMP\Codex-PhotogalleryV1-MediaCleanup-<GUID>`和随机HTTP端口，覆盖同盘、强制copy、TXT/PDF/JSON/ZIP/7Z/TAR、中文/空格、0字节非媒体、只读、目标冲突、ChangedSinceScan、扫描后新增、Missing、复制失败、源删除失败、幂等、空目录、恢复冲突、legacy 410、LAN 403与localhost成功。通过时`.partial=0`且最终`TEMP_ROOT_EXISTS=False`。
 
-正式`E:\A_秀人`在v90开发和隔离验证期间零移动。部署后的正式扫描仍只读；Codex不得触发正式recycle/restore，用户必须在localhost核对路径和容量后手工输入确认文本。
+正式`E:\A_秀人`在v91开发、隔离验证和部署验收期间零移动。部署后的正式扫描仍只读；Codex不得触发正式recycle/restore，用户必须在localhost核对路径和容量后手工输入确认文本。

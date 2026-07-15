@@ -4,12 +4,12 @@
 
 ## Last Completed Task
 
-已完成`v90`媒体清理安全改造：v86永久删除链被项目回收站取代，新增manifest幂等、跨盘copy-verify-delete、恢复和localhost写边界。隔离执行/API测试通过；正式部署、重启和只读回归尚待完成。
+已完成并部署`v91`媒体清理安全改造：v86永久删除链被项目回收站取代，新增manifest幂等、跨盘copy-verify-delete、恢复和localhost写边界。隔离执行/API测试和正式只读界面/API验收通过。
 
 ## Current State
 
-- 源码前端版本为`v90`，正式运行站点仍是`v89`，提交/推送/重启前不得把源码状态误报为已部署。
-- 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=D:\GalleryRuntime\trash`，来自`D:\GalleryRuntime\config\gallery.env`，两者跨盘；v90复用该目录，不创建新磁盘根目录。
+- 源码和正式前端版本均为`v91`；静态资源缓存标记同步提升，44px操作按钮已在390×844实测。
+- 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=D:\GalleryRuntime\trash`，来自`D:\GalleryRuntime\config\gallery.env`，两者跨盘；v91复用该目录，不创建新磁盘根目录。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
 - 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
 - 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
@@ -34,7 +34,7 @@
 
 ## Known Issues
 
-- v90正式部署前没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。部署后仍必须由用户在localhost输入`MOVE`或“移入回收站”。
+- v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
 
 - 实体iPad/iPhone、Disable cache/HAR、长期内存等仍需人工补测；本次iPad/iPhone结果为对应浏览器视口模拟。
@@ -44,7 +44,7 @@
 
 ## Recommended Next Task
 
-完成v90提交、普通push、按现有脚本精确重启和浏览器验收；之后执行一次正式只读扫描，但不要由Codex触发正式回收。用户在localhost核对容量/路径后再手工确认。
+执行一次正式只读扫描回归但不要由Codex触发正式回收；用户随后在localhost核对容量/路径并手工确认。
 
 ## Notes for Next Codex Session
 
