@@ -180,6 +180,8 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 同一隔离脚本还预置一组已完成媒体清理报告，验证重启恢复`recoveredFromDisk=true`、结果可分页读取、`canDelete=false`，并确认恢复报告即使收到正确确认文本也返回409且不执行删除。
 
+2026-07-15正式v89只读验收：PID匹配的48102 Node从18704重启为3468；loopback/LAN均HTTP 200并加载v89资源。报告`20260714-232613-22183b82`在重启后恢复，结果首屏50/7851且`canDelete=false`；访问日志SQLite为374条迁移记录加12条重启前实时记录，默认50、最大100、前两页无重复。浏览器390×844无横向溢出，未触发扫描、删除、回收或移动。
+
 ## Browser checks
 
 ### Back-to-top control

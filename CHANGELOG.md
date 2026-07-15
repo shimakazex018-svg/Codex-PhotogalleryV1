@@ -4,7 +4,8 @@
 
 - Restored the newest valid completed/stopped media-cleanup report from `DATA_DIR/logs` when Node starts, so a formal restart no longer hides the last read-only scan results.
 - Marked recovered reports as read-only: `canDelete=false`, the frontend delete button stays disabled, and direct delete requests return 409 until a new scan completes in the current process.
-- Extended the isolated Runtime smoke test to cover recovered status, result pagination and the delete rejection boundary. Formal v89 restart remains pending.
+- Extended the isolated Runtime smoke test to cover recovered status, result pagination and the delete rejection boundary.
+- Formally pushed `fe1a4fa` to `origin/main` and restarted only the PID-matched 48102 Node process from PID 18704 to PID 3468. Loopback/LAN returned HTTP 200 with v89 assets; the saved report `20260714-232613-22183b82` recovered with 7,851 pageable results and deletion disabled.
 
 ## 2026-07-15 - Move saved galleries into settings and paginate access logs v88
 
@@ -13,7 +14,7 @@
 - Added the idempotent SQLite `access_logs` table and `(time DESC, id DESC)` index. Legacy daily NDJSON is streamed in batches using a content hash and retained as a backup.
 - Changed `GET /api/access-log` to real server pagination (`page`, default `pageSize=50`, maximum 100) with stable ordering and totals.
 - Added UTC-based 365-day retention at startup and every 24 hours; failures are diagnostic and non-fatal, and cleanup never runs `VACUUM`.
-- Added isolated coverage for 0/1/49/50/51/100/101 rows, migration, pagination, parameter caps, ordering, POST, retention boundary and index creation. Formal Runtime deployment and physical iPad/iPhone checks remain pending.
+- Added isolated coverage for 0/1/49/50/51/100/101 rows, migration, pagination, parameter caps, ordering, POST, retention boundary and index creation. Formal Runtime deployment is complete; physical iPad/iPhone checks remain pending.
 - Verified the isolated UI before the final `v88` cache-marker bump at 1440×900, 1024×768, 768×1024 and 390×844: no page overflow or clipped settings labels, correct saved/history surfaces, 50-row page navigation, and no console warnings/errors. The settings-only stack breakpoint is 820px so iPad portrait keeps a usable content width.
 
 ## 2026-07-14 - Deploy media library cleanup v86
