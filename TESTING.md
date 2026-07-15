@@ -178,6 +178,8 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 脚本覆盖0、1、49、50、51、100、101条边界；默认50条分页、最大100条、非法参数、越界页回落、`time DESC, id DESC`无重复稳定顺序、旧文件幂等导入且原文件保留、POST写入、时间索引，以及`time < cutoff`只删除边界前记录。脚本按精确子进程句柄停止隔离服务并删除整个TEMP根目录；不得把`DATA_DIR`或`PHOTOS_DIR`指向正式Runtime。
 
+同一隔离脚本还预置一组已完成媒体清理报告，验证重启恢复`recoveredFromDisk=true`、结果可分页读取、`canDelete=false`，并确认恢复报告即使收到正确确认文本也返回409且不执行删除。
+
 ## Browser checks
 
 ### Back-to-top control

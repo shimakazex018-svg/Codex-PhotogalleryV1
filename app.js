@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v88";
+const APP_VERSION = "v89";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -2333,7 +2333,7 @@ function mediaCleanupPageHtml() {
         <div class="media-cleanup-actions">
           <button id="mediaCleanupStart" type="button" ${active ? "disabled" : ""}>开始扫描</button>
           <button id="mediaCleanupStop" type="button" ${status.status !== "scanning" ? "disabled" : ""}>停止扫描</button>
-          <button id="mediaCleanupDelete" class="danger" type="button" ${status.status !== "completed" ? "disabled" : ""}>删除候选文件</button>
+          <button id="mediaCleanupDelete" class="danger" type="button" ${!status.canDelete ? "disabled" : ""}>删除候选文件</button>
         </div>
       </div>
       <div class="media-cleanup-root"><strong>当前媒体根目录</strong><code>${escapeHtml(status.rootPath || "读取中…")}</code></div>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-15 - Recover media-cleanup history after restart v89
+
+- Restored the newest valid completed/stopped media-cleanup report from `DATA_DIR/logs` when Node starts, so a formal restart no longer hides the last read-only scan results.
+- Marked recovered reports as read-only: `canDelete=false`, the frontend delete button stays disabled, and direct delete requests return 409 until a new scan completes in the current process.
+- Extended the isolated Runtime smoke test to cover recovered status, result pagination and the delete rejection boundary. Formal v89 restart remains pending.
+
 ## 2026-07-15 - Move saved galleries into settings and paginate access logs v88
 
 - Added `#/__settings/favorites` and `#/__settings/history` in the existing settings layout; reused the saved-card data, lazy preview, global columns/cover mode, navigation and immediate favorite removal behavior.

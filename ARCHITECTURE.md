@@ -52,6 +52,7 @@ Browser SPA
 - `#/__settings/duplicates`：图片查重。
 - `#/__settings/access-log`：访问日志。
 - `#/__settings/media-cleanup`：媒体库清理扫描、报告和删除确认。
+- Node启动时只恢复`DATA_DIR/logs`中最新有效媒体清理摘要用于历史只读查看；恢复的报告不能执行删除，只有当前进程中新完成的扫描可进入删除确认。
 - `#/__duplicates`：旧查重兼容入口。
 - 灯箱不是独立路由，由 overlay 和内存状态控制。
 

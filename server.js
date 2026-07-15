@@ -85,6 +85,7 @@ let mediaCleanupTask = {
   finishedAt: "",
   errorMessage: "",
   summary: null,
+  restored: false,
 };
 let mediaCleanupChild = null;
 const mediaCleanupWorkerPath = path.join(rootDir, "scripts", "media-library-cleanup-worker.ps1");
@@ -1689,6 +1690,35 @@ function readCleanupJson(filePath) {
   }
 }
 
+function restoreLatestMediaCleanupTask() {
+  if (!fs.existsSync(logsDir) || mediaCleanupChild) return null;
+  const candidates = fs
+    .readdirSync(logsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^media-cleanup-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}-summary\.json$/.test(entry.name))
+    .map((entry) => {
+      const fullPath = path.join(logsDir, entry.name);
+      return { fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const candidate of candidates) {
+    const summary = readCleanupJson(candidate.fullPath);
+    const id = String(summary?.jobId || "");
+    const paths = mediaCleanupPaths(id);
+    if (!paths || !["completed", "delete-completed", "stopped"].includes(summary?.status) || !fs.existsSync(paths.records)) continue;
+    mediaCleanupTask = {
+      id,
+      status: summary.status,
+      startedAt: String(summary.startedAt || ""),
+      finishedAt: String(summary.finishedAt || ""),
+      errorMessage: String(summary.errorMessage || ""),
+      summary,
+      restored: true,
+    };
+    return mediaCleanupTask;
+  }
+  return null;
+}
+
 function mediaCleanupSnapshot() {
   const paths = mediaCleanupPaths(mediaCleanupTask.id);
   const progress = paths ? readCleanupJson(paths.progress) : null;
@@ -1705,7 +1735,8 @@ function mediaCleanupSnapshot() {
     errorMessage: mediaCleanupTask.errorMessage,
     progress,
     summary: mediaCleanupTask.summary || summary,
-    canDelete: mediaCleanupTask.status === "completed",
+    canDelete: mediaCleanupTask.status === "completed" && !mediaCleanupTask.restored,
+    recoveredFromDisk: Boolean(mediaCleanupTask.restored),
     localDeleteOnly: !allowRemoteDelete,
   };
 }
@@ -1762,7 +1793,7 @@ function startMediaCleanupScan() {
   }
   if (!fs.existsSync(mediaCleanupWorkerPath)) throw new Error("Media cleanup worker is missing.");
   const id = cleanupJobId();
-  mediaCleanupTask = { id, status: "scanning", startedAt: new Date().toISOString(), finishedAt: "", errorMessage: "", summary: null };
+  mediaCleanupTask = { id, status: "scanning", startedAt: new Date().toISOString(), finishedAt: "", errorMessage: "", summary: null, restored: false };
   spawnMediaCleanup("Scan", id);
   return mediaCleanupSnapshot();
 }
@@ -1792,7 +1823,7 @@ function startMediaCleanupDelete(request, payload) {
     error.statusCode = 400;
     throw error;
   }
-  if (id !== mediaCleanupTask.id || mediaCleanupTask.status !== "completed" || !mediaCleanupTask.summary || mediaCleanupTask.summary.incomplete) {
+  if (id !== mediaCleanupTask.id || mediaCleanupTask.status !== "completed" || mediaCleanupTask.restored || !mediaCleanupTask.summary || mediaCleanupTask.summary.incomplete) {
     const error = new Error("Only the current completed scan can be deleted.");
     error.statusCode = 409;
     throw error;
@@ -2416,6 +2447,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   runScanOnce();
 } else {
   ensureFolders();
+  restoreLatestMediaCleanupTask();
   scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
 

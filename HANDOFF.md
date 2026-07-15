@@ -4,11 +4,11 @@
 
 ## Last Completed Task
 
-在当前`main`直接完成前端`v88`小范围调整：把首页收藏和最近观看迁入设置子页；访问日志从按日NDJSON写入迁移到现有SQLite，并增加真正服务端分页、365天低频保留和旧文件幂等导入。正式数据库和用户媒体未在实现/隔离测试阶段修改。
+正式发布`v88`后发现Node重启会让磁盘上的媒体清理历史报告从设置页消失，已完成`v89`最小修复：启动时恢复最新有效报告用于只读查看，并禁止恢复报告删除。正式v89重启尚待执行。
 
 ## Current State
 
-- 源码前端版本为`v88`；正式Runtime会直接返回当前工作区静态文件，但Node进程尚未重启，因此新SQLite访问日志后端尚未正式生效，前端临时兼容旧接口为单页100条。
+- 源码前端版本为`v89`；正式访问日志SQLite迁移和分页已生效，媒体清理历史恢复后端待正式重启。
 - 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
 - 首页只保留轮播和正常图册列表，不再渲染收藏/最近观看，也不在启动时请求`/api/favorites`或`/api/recent`。收藏和最近写入API、SQLite`user_marks`及localStorage兜底保持不变。
 - `gallery.db`新增幂等`access_logs`表和`idx_access_logs_time_id`索引；GET分页默认50、最大100，按`time DESC, id DESC`稳定排序。

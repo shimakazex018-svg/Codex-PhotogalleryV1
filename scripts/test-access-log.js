@@ -116,6 +116,21 @@ async function main() {
     const legacy = Array.from({ length: 101 }, (_, index) => JSON.stringify(accessEntry(index, new Date(base + index * 1000).toISOString())));
     legacy.push("malformed historical line");
     fs.writeFileSync(path.join(logsDir, "access-2026-07-01.log"), `${legacy.join("\n")}\n`, "utf8");
+    const cleanupJobId = "20260715-120000-deadbeef";
+    const cleanupPrefix = path.join(logsDir, `media-cleanup-${cleanupJobId}`);
+    fs.writeFileSync(`${cleanupPrefix}-summary.json`, JSON.stringify({
+      jobId: cleanupJobId,
+      status: "completed",
+      rootPath: photosDir,
+      startedAt: "2026-07-15T12:00:00.000Z",
+      finishedAt: "2026-07-15T12:00:01.000Z",
+      totalFiles: 1,
+      scannedDirectories: 1,
+      nonMediaCount: 1,
+      nonMediaBytes: 4,
+      incomplete: false,
+    }), "utf8");
+    fs.writeFileSync(`${cleanupPrefix}-records.ndjson`, `${JSON.stringify({ kind: "non-media", category: "Document", relativePath: "note.txt", fullPath: path.join(photosDir, "note.txt"), sizeBytes: 4 })}\n`, "utf8");
 
     const port = await getFreePort();
     const isolatedEnv = {
@@ -136,6 +151,20 @@ async function main() {
     child.stderr.on("data", (chunk) => { output += chunk.toString(); });
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForServer(`${baseUrl}/api/config`, child);
+
+    const cleanupStatus = await fetch(`${baseUrl}/api/media-cleanup/status`).then((response) => response.json());
+    assert.equal(cleanupStatus.id, cleanupJobId);
+    assert.equal(cleanupStatus.status, "completed");
+    assert.equal(cleanupStatus.recoveredFromDisk, true);
+    assert.equal(cleanupStatus.canDelete, false);
+    const cleanupResults = await fetch(`${baseUrl}/api/media-cleanup/results?jobId=${cleanupJobId}&page=1&pageSize=50`).then((response) => response.json());
+    assert.equal(cleanupResults.total, 1);
+    const recoveredDelete = await fetch(`${baseUrl}/api/media-cleanup/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: cleanupJobId, confirmation: "DELETE" }),
+    });
+    assert.equal(recoveredDelete.status, 409);
 
     const page1 = await fetch(`${baseUrl}/api/access-log?page=1&pageSize=50`).then((response) => response.json());
     const page2 = await fetch(`${baseUrl}/api/access-log?page=2&pageSize=50`).then((response) => response.json());
