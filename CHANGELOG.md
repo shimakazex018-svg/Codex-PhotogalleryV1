@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-15 - Replace media-cleanup permanent deletion with recoverable recycle v90
+
+- Removed the v86 candidate `File.Delete` execution path and made legacy `POST /api/media-cleanup/delete` return HTTP 410.
+- Added localhost-only `POST /api/media-cleanup/recycle` and `/restore` for the approved completed report. Client requests contain only jobId and confirmation text; roots, candidates and manifest paths are server-resolved.
+- Reused configured `TRASH_DIR` and preserved source-relative paths under `media-cleanup/<jobId>/files`; added append-only manifest, atomic summary and recycle log.
+- Added scan-time revalidation, conflict suffixes, idempotent retry, same-volume rename, single-concurrency cross-volume copy/size-verify/atomic-finalize/source-delete, `CopiedButSourceRetained`, and no-overwrite restore.
+- Added target-space preflight and bottom-up true-empty source-directory cleanup while skipping ReparsePoint and the media root.
+- Updated the settings page with trash path, same/cross-volume mode, capacity, progress/result metrics, MOVE/RESTORE confirmation and manifest location without loading the full manifest.
+- Added isolated same-volume, forced-copy, failure-injection and HTTP API coverage. Tests ended with zero `.partial` files and `TEMP_ROOT_EXISTS=False`; formal `E:\A_秀人` remained untouched.
+
 ## 2026-07-15 - Recover media-cleanup history after restart v89
 
 - Restored the newest valid completed/stopped media-cleanup report from `DATA_DIR/logs` when Node starts, so a formal restart no longer hides the last read-only scan results.

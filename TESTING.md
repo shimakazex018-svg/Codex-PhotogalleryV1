@@ -54,12 +54,22 @@ if ($errors) { $errors; exit 1 }
 ## Media library cleanup isolated validation
 
 - 只在 `$env:TEMP\Codex-PhotogalleryV1-MediaCleanup-<GUID>` 创建媒体、Runtime 和报告。
-- 覆盖图片、视频、ZIP/TXT、无扩展名、系统垃圾、空目录、叶非媒体目录、多层无媒体树、0 字节媒体、可疑小媒体、中文与空格路径；ReparsePoint 仅在可安全创建时验证。
+- 覆盖图片、视频、TXT/PDF/JSON/ZIP/7Z/TAR、0字节非媒体、只读文件、中文与空格路径、目标冲突、扫描后修改、扫描后新增、缺失文件；ReparsePoint仅在可安全创建时验证。
 - 验证第二个 start 返回 409，stop 进入 `stopping` 后到 `stopped`，`incomplete=true`，取消标记和 `.tmp` 为 0。
-- API 验证扫描期间首页 HTTP 200、结果分页/搜索/排序、错误确认 400、localhost 删除只处理报告候选、媒体保留、空目录自底向上清理。
-- 浏览器验证 `#/__settings/media-cleanup` 的状态、统计、分页、按钮互斥、自定义确认对话框、控制台和 390×844 布局。
+- API验证旧delete为410、错误确认400、LAN recycle/restore为403、localhost仅处理批准报告；图片/视频和报告外新增文件保留。
+- 回收验证同盘rename与强制copy-verify-delete；复制失败和源删除失败均保留源，`.partial`最终为0，重复job不制造副本，真空目录自底向上清理。
+- 恢复验证原相对路径重建、恢复冲突不覆盖、manifest保留。
+- 浏览器验证 `#/__settings/media-cleanup` 的状态、容量、回收路径、进度、按钮互斥、自定义确认对话框、控制台和 390×844 布局；不得加载完整manifest。
 - `finally` 精确停止测试 Node，删除整个 GUID 目录，并要求 `Test-Path -LiteralPath $root` 为 `False`；否则测试失败。
-- 正式媒体第一阶段只允许扫描/查看/报告，禁止调用删除 API。
+- 正式媒体部署验收只允许扫描/查看/报告；Codex禁止调用recycle/restore，正式回收由用户在localhost手工确认。
+
+当前隔离执行/API测试：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-media-cleanup-recycle.ps1 -NodePath <node-exe>
+```
+
+通过标准：`MEDIA_CLEANUP_RECYCLE_TEST=PASS`、`TEMP_ROOT_EXISTS=False`，同盘与强制copy路径均通过，`.partial`残留0，legacy delete 410，LAN写操作403，localhost回收/恢复成功。
 
 同时检查：
 

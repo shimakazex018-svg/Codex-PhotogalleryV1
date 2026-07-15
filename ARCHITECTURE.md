@@ -13,7 +13,7 @@ Browser SPA
             ├─ filesystem -> PHOTOS_DIR
             ├─ generated files -> DATA_DIR
             ├─ duplicates-worker.js -> SQLite + PHOTOS_DIR
-            ├─ scripts/media-library-cleanup-worker.ps1 -> PHOTOS_DIR metadata + DATA_DIR/logs reports
+            ├─ scripts/media-library-cleanup-worker.ps1 -> PHOTOS_DIR metadata + DATA_DIR/logs reports + TRASH_DIR manifest
             └─ FFmpeg / FFprobe
 ```
 
@@ -29,7 +29,7 @@ Browser SPA
 | `server.js` | HTTP 服务、静态资源、API 路由、扫描任务、媒体/缩略图/HLS、日志和文件操作 |
 | `gallery-db.js` | SQLite schema、索引、查询、用户标记和查重数据访问 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
-| `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、受控候选删除和空目录清理 |
+| `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、可恢复回收/恢复和空目录清理 |
 | `make-hls.ps1` | 手工 HLS 生成工具 |
 | `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |
 | `scripts/check-environment.ps1` | V1.4.2 只读环境预检，不启动网站 |
@@ -51,8 +51,8 @@ Browser SPA
 - `#/__settings/history`：观看历史。
 - `#/__settings/duplicates`：图片查重。
 - `#/__settings/access-log`：访问日志。
-- `#/__settings/media-cleanup`：媒体库清理扫描、报告和删除确认。
-- Node启动时只恢复`DATA_DIR/logs`中最新有效媒体清理摘要用于历史只读查看；恢复的报告不能执行删除，只有当前进程中新完成的扫描可进入删除确认。
+- `#/__settings/media-cleanup`：媒体库清理扫描、报告、项目回收站与恢复确认。
+- Node启动时恢复`DATA_DIR/logs`中最新有效媒体清理摘要用于历史查看；写操作只接受服务端批准的完整、零错误job，客户端不能提交路径。
 - `#/__duplicates`：旧查重兼容入口。
 - 灯箱不是独立路由，由 overlay 和内存状态控制。
 
@@ -99,7 +99,8 @@ Browser SPA
 | POST | `/api/duplicates/recycle-auto` | 自动选择并回收重复媒体 |
 | GET/POST | `/api/access-log` | SQLite访问日志分页与写入；GET使用`page/pageSize` |
 | POST/GET | `/api/media-cleanup/scan/start`、`/api/media-cleanup/scan/stop`、`/api/media-cleanup/status` | 清理扫描生命周期 |
-| GET/POST | `/api/media-cleanup/results`、`/api/media-cleanup/delete` | 流式分页结果和本机确认删除 |
+| GET | `/api/media-cleanup/results` | 流式分页扫描结果 |
+| POST | `/api/media-cleanup/recycle`、`/api/media-cleanup/restore` | localhost确认回收/恢复；旧`/delete`返回410 |
 | POST | `/api/open-photo-path` | 打开媒体路径 |
 | GET | `/api/refresh-index` | 后端索引刷新入口 |
 | GET | `/api/index/changes` | 目录变化摘要 |
@@ -108,7 +109,7 @@ Browser SPA
 
 所有 API 当前没有账号/Session/Token 鉴权。删除重复媒体接口有本机/`ALLOW_REMOTE_DELETE` 控制，但这不等价于完整认证系统。
 
-媒体清理任务独立于 SQLite 索引扫描。Node 同时只持有一个 worker 句柄，PowerShell 顺序枚举并约每 5000 个对象原子更新进度；报告直接流式写入 `DATA_DIR/logs`。Node 查询 NDJSON 时仅保留当前排序页所需的有界候选（offset 最大 50000、pageSize 最大 200），响应删除绝对路径。删除请求不接收路径，只解析当前 completed 报告，并复用 `ALLOW_REMOTE_DELETE`/localhost 边界。
+媒体清理任务独立于 SQLite 索引扫描。Node 同时只持有一个 worker 句柄，PowerShell 顺序枚举并约每 5000 个对象原子更新进度；扫描报告直接流式写入 `DATA_DIR/logs`。Node 查询 NDJSON 时仅保留当前排序页所需的有界候选（offset 最大 50000、pageSize 最大 200），响应不暴露绝对路径。回收只解析批准报告中的`kind=non-media`并逐项复核；同盘rename，跨盘copy到`.partial`、校验、原子改名后才删除源。manifest、summary和recycle.log写入`TRASH_DIR/media-cleanup/<jobId>`；恢复同样不接受客户端路径且不覆盖原位置。
 
 ## Database architecture
 

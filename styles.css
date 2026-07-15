@@ -473,7 +473,9 @@ a {
 .media-cleanup-actions .danger, .media-cleanup-dialog .danger { background: #a92f2f; border-color: #a92f2f; color: #fff; }
 .media-cleanup-root, .media-cleanup-state { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .media-cleanup-root code { overflow-wrap: anywhere; }
+.media-cleanup-root span { color: var(--muted); }
 .media-cleanup-state span { color: var(--muted); overflow-wrap: anywhere; }
+.media-cleanup-notice { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--line) 70%, #c68b2d); border-radius: 12px; background: color-mix(in srgb, var(--surface) 92%, #f4c36c); line-height: 1.65; overflow-wrap: anywhere; }
 .media-cleanup-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
 .media-cleanup-metrics span { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .media-cleanup-metrics small { color: var(--muted); }
@@ -1519,5 +1521,4 @@ a {
     font-size: 38px;
   }
 }
-
 

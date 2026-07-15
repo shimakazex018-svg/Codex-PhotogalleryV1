@@ -91,6 +91,7 @@ let mediaCleanupChild = null;
 const mediaCleanupWorkerPath = path.join(rootDir, "scripts", "media-library-cleanup-worker.ps1");
 const mediaCleanupPageSizeMax = 200;
 const mediaCleanupOffsetMax = 50000;
+const mediaCleanupAllowedRecycleJobId = process.env.MEDIA_CLEANUP_ALLOWED_JOB_ID || "20260714-232613-22183b82";
 const accessLogRetentionDays = 365;
 const accessLogMaintenanceIntervalMs = 24 * 60 * 60 * 1000;
 let accessLogInitialization = Promise.resolve();
@@ -1675,10 +1676,14 @@ function mediaCleanupPaths(id) {
     prefix,
     summary: `${prefix}-summary.json`,
     records: `${prefix}-records.ndjson`,
-    deletionRecords: `${prefix}-deletion.ndjson`,
     progress: `${prefix}-progress.json`,
     cancel: `${prefix}-cancel.request`,
     nonMedia: `${prefix}-non-media.csv`,
+    recycleRoot: path.join(trashDir, "media-cleanup", safeId),
+    recycleFiles: path.join(trashDir, "media-cleanup", safeId, "files"),
+    manifest: path.join(trashDir, "media-cleanup", safeId, "manifest.ndjson"),
+    recycleSummary: path.join(trashDir, "media-cleanup", safeId, "summary.json"),
+    recycleLog: path.join(trashDir, "media-cleanup", safeId, "recycle.log"),
   };
 }
 
@@ -1704,7 +1709,7 @@ function restoreLatestMediaCleanupTask() {
     const summary = readCleanupJson(candidate.fullPath);
     const id = String(summary?.jobId || "");
     const paths = mediaCleanupPaths(id);
-    if (!paths || !["completed", "delete-completed", "stopped"].includes(summary?.status) || !fs.existsSync(paths.records)) continue;
+    if (!paths || !["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(summary?.status) || !fs.existsSync(paths.records)) continue;
     mediaCleanupTask = {
       id,
       status: summary.status,
@@ -1723,9 +1728,26 @@ function mediaCleanupSnapshot() {
   const paths = mediaCleanupPaths(mediaCleanupTask.id);
   const progress = paths ? readCleanupJson(paths.progress) : null;
   const summary = paths ? readCleanupJson(paths.summary) : null;
-  if (summary && !["scanning", "stopping", "deleting"].includes(mediaCleanupTask.status)) {
+  if (summary && !["scanning", "stopping", "recycling", "restoring"].includes(mediaCleanupTask.status)) {
     mediaCleanupTask.summary = summary;
   }
+  const eligiblePaths = mediaCleanupPaths(mediaCleanupAllowedRecycleJobId);
+  const eligibleScanSummary = eligiblePaths ? readCleanupJson(eligiblePaths.summary) : null;
+  const eligibleRecycleSummary = eligiblePaths ? readCleanupJson(eligiblePaths.recycleSummary) : null;
+  let availableBytes = 0;
+  try {
+    const stats = fs.statfsSync(trashDir, { bigint: true });
+    availableBytes = Number(stats.bavail * stats.bsize);
+  } catch (error) {}
+  const candidateBytes = Number(eligibleScanSummary?.nonMediaBytes || 0);
+  const requiredBytes = Math.ceil(Math.max(candidateBytes + (2 * 1024 ** 3), candidateBytes * 1.1));
+  const eligibleComplete = Boolean(eligibleScanSummary
+    && eligibleScanSummary.jobId === mediaCleanupAllowedRecycleJobId
+    && ["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial"].includes(eligibleScanSummary.status)
+    && !eligibleScanSummary.incomplete
+    && Number(eligibleScanSummary.errorCount || 0) === 0
+    && fs.existsSync(eligiblePaths.records));
+  const manifestExists = Boolean(eligiblePaths && fs.existsSync(eligiblePaths.manifest));
   return {
     id: mediaCleanupTask.id,
     status: mediaCleanupTask.status,
@@ -1735,9 +1757,25 @@ function mediaCleanupSnapshot() {
     errorMessage: mediaCleanupTask.errorMessage,
     progress,
     summary: mediaCleanupTask.summary || summary,
-    canDelete: mediaCleanupTask.status === "completed" && !mediaCleanupTask.restored,
+    canDelete: false,
+    canRecycle: eligibleComplete && availableBytes >= requiredBytes && !mediaCleanupChild,
+    canRestore: manifestExists && Number(eligibleRecycleSummary?.restorableFileCount || 0) > 0 && !mediaCleanupChild,
     recoveredFromDisk: Boolean(mediaCleanupTask.restored),
-    localDeleteOnly: !allowRemoteDelete,
+    localDeleteOnly: true,
+    trashPath: trashDir,
+    sameVolume: path.parse(photosDir).root.toLowerCase() === path.parse(trashDir).root.toLowerCase(),
+    allowedRecycleJobId: mediaCleanupAllowedRecycleJobId,
+    eligibleRecycleJob: eligibleComplete ? {
+      id: mediaCleanupAllowedRecycleJobId,
+      candidateCount: Number(eligibleScanSummary.nonMediaCount || 0),
+      candidateBytes,
+      availableBytes,
+      requiredBytes,
+      spaceSufficient: availableBytes >= requiredBytes,
+      manifestPath: eligiblePaths.manifest,
+      recyclePath: eligiblePaths.recycleRoot,
+      operationSummary: eligibleRecycleSummary,
+    } : null,
   };
 }
 
@@ -1754,7 +1792,8 @@ function spawnMediaCleanup(mode, id) {
     "-Mode", mode, "-RootPath", photosDir, "-LogsPath", logsDir, "-JobId", id,
   ];
   if (mode === "Scan") args.push("-CancelPath", paths.cancel);
-  if (mode === "Delete") args.push("-CandidatePath", paths.records);
+  if (mode === "Recycle") args.push("-CandidatePath", paths.records, "-TrashPath", trashDir);
+  if (mode === "Restore") args.push("-TrashPath", trashDir);
   const child = spawn("powershell.exe", args, {
     cwd: rootDir,
     windowsHide: true,
@@ -1774,7 +1813,7 @@ function spawnMediaCleanup(mode, id) {
     const summary = readCleanupJson(paths.summary);
     mediaCleanupTask.summary = summary;
     mediaCleanupTask.finishedAt = new Date().toISOString();
-    if (code === 0 && summary && ["completed", "stopped", "delete-completed"].includes(summary.status)) {
+    if (code === 0 && summary && ["completed", "stopped", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial"].includes(summary.status)) {
       mediaCleanupTask.status = summary.status;
       mediaCleanupTask.errorMessage = "";
     } else {
@@ -1786,7 +1825,7 @@ function spawnMediaCleanup(mode, id) {
 }
 
 function startMediaCleanupScan() {
-  if (mediaCleanupChild || ["scanning", "stopping", "deleting"].includes(mediaCleanupTask.status)) {
+  if (mediaCleanupChild || ["scanning", "stopping", "recycling", "restoring"].includes(mediaCleanupTask.status)) {
     const error = new Error("A media cleanup task is already running.");
     error.statusCode = 409;
     throw error;
@@ -1810,29 +1849,44 @@ function stopMediaCleanupScan() {
   return mediaCleanupSnapshot();
 }
 
-function startMediaCleanupDelete(request, payload) {
-  if (!isLocalRequest(request) && !allowRemoteDelete) {
-    const error = new Error("Deleting files is only available from this server PC.");
+function startMediaCleanupOperation(request, payload, mode) {
+  if (!isLocalRequest(request)) {
+    const error = new Error(`${mode === "Restore" ? "Restoring" : "Recycling"} files is only available from this server PC.`);
     error.statusCode = 403;
     throw error;
   }
   const id = String(payload.jobId || "");
   const confirmation = String(payload.confirmation || "").trim();
-  if (confirmation !== "DELETE" && confirmation !== "删除") {
-    const error = new Error("Type DELETE or 删除 to confirm.");
+  const confirmations = mode === "Restore" ? ["RESTORE", "恢复"] : ["MOVE", "移入回收站"];
+  if (!confirmations.includes(confirmation)) {
+    const error = new Error(`Type ${confirmations[0]} or ${confirmations[1]} to confirm.`);
     error.statusCode = 400;
     throw error;
   }
-  if (id !== mediaCleanupTask.id || mediaCleanupTask.status !== "completed" || mediaCleanupTask.restored || !mediaCleanupTask.summary || mediaCleanupTask.summary.incomplete) {
-    const error = new Error("Only the current completed scan can be deleted.");
+  if (mediaCleanupChild) {
+    const error = new Error("A media cleanup task is already running.");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (id !== mediaCleanupAllowedRecycleJobId) {
+    const error = new Error("This deployment only allows the approved cleanup report.");
     error.statusCode = 409;
     throw error;
   }
   const paths = mediaCleanupPaths(id);
-  if (!paths || !fs.existsSync(paths.records)) throw new Error("Candidate report is missing.");
-  mediaCleanupTask.status = "deleting";
-  mediaCleanupTask.errorMessage = "";
-  spawnMediaCleanup("Delete", id);
+  const scanSummary = paths ? readCleanupJson(paths.summary) : null;
+  if (!paths || !scanSummary || scanSummary.jobId !== id || !["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial"].includes(scanSummary.status) || scanSummary.incomplete || Number(scanSummary.errorCount || 0) !== 0 || !fs.existsSync(paths.records)) {
+    const error = new Error("The approved completed candidate report is missing or invalid.");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (mode === "Restore" && !fs.existsSync(paths.manifest)) {
+    const error = new Error("Recycle manifest is missing.");
+    error.statusCode = 409;
+    throw error;
+  }
+  mediaCleanupTask = { id, status: mode === "Restore" ? "restoring" : "recycling", startedAt: new Date().toISOString(), finishedAt: "", errorMessage: "", summary: scanSummary, restored: false };
+  spawnMediaCleanup(mode, id);
   return mediaCleanupSnapshot();
 }
 
@@ -1851,7 +1905,7 @@ async function queryMediaCleanupResults(requestUrl) {
   const id = requestUrl.searchParams.get("jobId") || mediaCleanupTask.id;
   const paths = mediaCleanupPaths(id);
   const kind = String(requestUrl.searchParams.get("kind") || "non-media").toLowerCase();
-  const recordsFile = kind === "deletion" ? paths && paths.deletionRecords : paths && paths.records;
+  const recordsFile = paths && paths.records;
   if (!paths || !recordsFile || !fs.existsSync(recordsFile)) {
     const error = new Error("Cleanup results were not found.");
     error.statusCode = 404;
@@ -2194,13 +2248,19 @@ function handleRequest(request, response) {
   }
 
   if (requestUrl.pathname === "/api/media-cleanup/delete") {
+    sendJsonError(response, 410, "Permanent media cleanup deletion has been removed. Use /api/media-cleanup/recycle.");
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-cleanup/recycle" || requestUrl.pathname === "/api/media-cleanup/restore") {
     if (request.method !== "POST") {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
     readRequestBody(request, (body) => {
       try {
-        sendJson(response, startMediaCleanupDelete(request, JSON.parse(body || "{}")));
+        const mode = requestUrl.pathname.endsWith("/restore") ? "Restore" : "Recycle";
+        sendJson(response, startMediaCleanupOperation(request, JSON.parse(body || "{}"), mode));
       } catch (error) {
         sendJsonError(response, error.statusCode || 500, error.message);
       }

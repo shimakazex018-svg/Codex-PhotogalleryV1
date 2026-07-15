@@ -4,11 +4,14 @@
 
 ## Last Completed Task
 
-正式发布`v88`后发现Node重启会让磁盘上的媒体清理历史报告从设置页消失，已完成并正式发布`v89`最小修复：启动时恢复最新有效报告用于只读查看，并禁止恢复报告删除。
+已完成`v90`媒体清理安全改造：v86永久删除链被项目回收站取代，新增manifest幂等、跨盘copy-verify-delete、恢复和localhost写边界。隔离执行/API测试通过；正式部署、重启和只读回归尚待完成。
 
 ## Current State
 
-- 源码和正式前端版本均为`v89`；正式访问日志SQLite迁移、分页和媒体清理历史恢复均已生效。
+- 源码前端版本为`v90`，正式运行站点仍是`v89`，提交/推送/重启前不得把源码状态误报为已部署。
+- 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=D:\GalleryRuntime\trash`，来自`D:\GalleryRuntime\config\gallery.env`，两者跨盘；v90复用该目录，不创建新磁盘根目录。
+- 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
+- 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
 - 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
 - 首页只保留轮播和正常图册列表，不再渲染收藏/最近观看，也不在启动时请求`/api/favorites`或`/api/recent`。收藏和最近写入API、SQLite`user_marks`及localStorage兜底保持不变。
 - `gallery.db`新增幂等`access_logs`表和`idx_access_logs_time_id`索引；GET分页默认50、最大100，按`time DESC, id DESC`稳定排序。
@@ -17,6 +20,10 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- `scripts/test-media-cleanup-recycle.ps1`通过：同盘rename、强制copy-verify-delete、中文/空格/只读/0字节、冲突改名、ChangedSinceScan、Missing、复制失败、源删除失败、幂等和恢复冲突。
+- 隔离API通过：旧delete 410、错误确认400、LAN recycle/restore 403、localhost回收/恢复成功；`.partial`残留0，TEMP根最终不存在。
+- `server.js`、`app.js`、`gallery-db.js`、`duplicates-worker.js`语法检查通过；PowerShell worker解析通过。
 
 - `scripts/test-access-log.js`隔离测试通过：0/1/49/50/51/100/101条边界，旧NDJSON迁移，50条分页，100条上限，非法/越界页，稳定倒序无重复，POST写入，保留边界和时间索引。
 - 测试只使用唯一TEMP目录和隔离HTTP端口，按子进程句柄停止服务，最终TEMP根目录不存在；未连接正式数据库或媒体。
@@ -27,6 +34,9 @@
 
 ## Known Issues
 
+- v90正式部署前没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。部署后仍必须由用户在localhost输入`MOVE`或“移入回收站”。
+- 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
+
 - 实体iPad/iPhone、Disable cache/HAR、长期内存等仍需人工补测；本次iPad/iPhone结果为对应浏览器视口模拟。
 - 旧NDJSON原文件为升级安全而保留；它们已冻结、不再增长，但未来如需删除必须先确认备份/审计策略。
 - 页码分页使用OFFSET；当前一年约3.4万条规模可接受，达到百万级或出现深页性能问题后再评估游标分页。
@@ -34,7 +44,7 @@
 
 ## Recommended Next Task
 
-优先在实体iPad/iPhone上补做设置页与媒体清理报告的只读响应式验收；若访问日志规模未来达到百万级或深页出现性能问题，再评估游标分页。不要为补测触发正式媒体扫描或删除。
+完成v90提交、普通push、按现有脚本精确重启和浏览器验收；之后执行一次正式只读扫描，但不要由Codex触发正式回收。用户在localhost核对容量/路径后再手工确认。
 
 ## Notes for Next Codex Session
 

@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-020：媒体清理只进入项目回收站并以manifest恢复
+
+### Decision
+媒体清理不再永久删除非媒体候选。写操作只接受localhost与服务端批准的完整零错误job；同盘使用不覆盖rename，跨盘使用单并发copy到`.partial`、关闭并校验大小、原子改名、复核后才删除源文件。每项结果追加到`TRASH_DIR/media-cleanup/<jobId>/manifest.ndjson`，并支持不覆盖原位置的恢复。旧`/api/media-cleanup/delete`固定返回410。
+
+### Reason
+v86的`File.Delete`无法恢复，且正式`PHOTOS_DIR`与`TRASH_DIR`跨盘，简单rename会失败。扫描后文件变化、复制中断、目标冲突和重复提交都需要可审计、可续跑的状态模型。
+
+### Impact
+回收前实时检查目标盘容量并逐项复核路径、ReparsePoint、大小、mtime和媒体扩展名。目标冲突使用`.__recycle_<shortID>`，不覆盖；恢复冲突记录`RestoreConflict`。浏览器只读取聚合状态和分页扫描结果，不加载完整manifest。`ALLOW_REMOTE_DELETE=0`保持不变，recycle/restore无论该变量为何值都只允许localhost。
+
+### Status
+有效，前端`v90`实施；隔离同盘、强制跨盘、故障注入、幂等、API边界和恢复测试通过，正式媒体尚未移动。
+
 ## DEC-019：访问日志迁入现有SQLite并保留365天
 
 ### Decision
@@ -17,7 +31,7 @@
 ## DEC-018：媒体库清理使用独立单线程报告 worker
 
 ### Decision
-媒体清理不复用 SQLite 索引扫描，也不修改数据库 schema。Node 只负责单任务生命周期、API 和有界分页；PowerShell 单线程枚举 `PHOTOS_DIR` 元数据并把报告直接写入现有 `DATA_DIR/logs`。删除只接受当前 completed `jobId` 和确认文本，路径由报告解析，并继续服从 localhost/`ALLOW_REMOTE_DELETE` 边界。
+媒体清理不复用 SQLite 索引扫描，也不修改数据库 schema。Node 只负责单任务生命周期、API 和有界分页；PowerShell 单线程枚举 `PHOTOS_DIR` 元数据并把报告直接写入现有 `DATA_DIR/logs`。原v86删除只接受当前 completed `jobId` 和确认文本；该永久删除语义已由DEC-020替代。
 
 ### Reason
 47 万对象不能同步阻塞 Node、一次性进入 Node/浏览器内存或触发媒体解码/哈希；独立进程能在完成、停止和失败后释放 CPU/句柄，同时把误删边界固定在服务端。
@@ -26,7 +40,7 @@
 新增正式 PowerShell worker、设置页和 `/api/media-cleanup/*`。报告会占用 Runtime logs 容量，后续需要根据真实扫描体积确定保留策略；第一阶段正式验收只读扫描，不删除。
 
 ### Status
-有效；媒体清理功能已集成并正式运行。`v89`增加重启后最新历史报告只读恢复，恢复报告不具备删除资格，只有当前进程新完成的扫描可以删除。
+部分被DEC-020替代；独立单线程扫描与有界报告架构继续有效，永久删除语义废弃。
 
 ## DEC-017：灯箱使用有界预加载和独立P0当前图通道
 

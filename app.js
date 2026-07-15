@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v89";
+const APP_VERSION = "v90";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -2278,7 +2278,7 @@ function stopMediaCleanupPolling() {
 }
 
 function mediaCleanupActive(status = state.mediaCleanupStatus?.status) {
-  return ["scanning", "stopping", "deleting"].includes(status);
+  return ["scanning", "stopping", "recycling", "restoring"].includes(status);
 }
 
 async function loadMediaCleanupStatus() {
@@ -2288,7 +2288,7 @@ async function loadMediaCleanupStatus() {
 
 async function loadMediaCleanupResults(page = 1) {
   const status = state.mediaCleanupStatus || {};
-  if (!status.id || !["completed", "delete-completed", "stopped"].includes(status.status)) return;
+  if (!status.id || !["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(status.status)) return;
   state.mediaCleanupLoading = true;
   const query = new URLSearchParams({
     jobId: status.id,
@@ -2313,7 +2313,9 @@ function cleanupMetric(label, value) {
 
 function mediaCleanupPageHtml() {
   const status = state.mediaCleanupStatus || {};
-  const summary = status.summary || status.progress || {};
+  const summary = { ...(status.summary || {}), ...(status.progress || {}) };
+  const approvedJob = status.eligibleRecycleJob || {};
+  const operation = approvedJob.operationSummary || (status.id === approvedJob.id ? summary : {});
   const results = state.mediaCleanupResults || { items: [], total: 0, page: 1, pageSize: 50 };
   const active = mediaCleanupActive(status.status);
   const totalPages = Math.max(Math.ceil(Number(results.total || 0) / Number(results.pageSize || 50)), 1);
@@ -2324,20 +2326,22 @@ function mediaCleanupPageHtml() {
     ["zero-byte-media", "", "0字节媒体"],
     ["suspicious-media", "", "可疑小媒体"],
     ["error", "", "错误"],
-    ["deletion", "", "删除记录"],
   ];
   return `
     <section class="media-cleanup-page">
       <div class="media-cleanup-header">
-        <div><h1>媒体库清理</h1><p>只读取文件元数据进行低负载扫描；扫描完成前不会删除任何内容。</p></div>
+        <div><h1>媒体库清理</h1><p>扫描只读取元数据；执行时只把已批准报告中的非媒体候选移入项目回收站，不提供永久删除。</p></div>
         <div class="media-cleanup-actions">
           <button id="mediaCleanupStart" type="button" ${active ? "disabled" : ""}>开始扫描</button>
           <button id="mediaCleanupStop" type="button" ${status.status !== "scanning" ? "disabled" : ""}>停止扫描</button>
-          <button id="mediaCleanupDelete" class="danger" type="button" ${!status.canDelete ? "disabled" : ""}>删除候选文件</button>
+          <button id="mediaCleanupRecycle" class="danger" type="button" ${!status.canRecycle ? "disabled" : ""}>全部移入回收站</button>
+          <button id="mediaCleanupRestore" type="button" ${!status.canRestore ? "disabled" : ""}>恢复本次回收</button>
         </div>
       </div>
       <div class="media-cleanup-root"><strong>当前媒体根目录</strong><code>${escapeHtml(status.rootPath || "读取中…")}</code></div>
-      <div class="media-cleanup-state"><strong>状态：${escapeHtml(status.status || "idle")}</strong><span>${escapeHtml(status.errorMessage || summary.currentPath || "")}</span></div>
+      <div class="media-cleanup-root"><strong>项目回收目录</strong><code>${escapeHtml(status.trashPath || "读取中…")}</code><span>${status.sameVolume ? "同盘 rename" : "跨盘 copy-verify-delete"}</span></div>
+      <div class="media-cleanup-state"><strong>状态：${escapeHtml(status.status || "idle")}</strong><span>${escapeHtml(status.errorMessage || operation.currentPath || summary.currentPath || "")}</span></div>
+      <div class="media-cleanup-notice">批准报告：<code>${escapeHtml(approvedJob.id || status.allowedRecycleJobId || "不可用")}</code>。${approvedJob.id && !approvedJob.spaceSufficient ? "目标盘空间不足，回收按钮已禁用。" : "候选文件不会立即永久删除；"}图片、视频、0字节媒体、可疑小媒体和 ReparsePoint 均不移动。恢复时绝不覆盖原位置已有文件。</div>
       <div class="media-cleanup-metrics">
         ${cleanupMetric("文件", summary.totalFiles ?? summary.scannedFiles)}
         ${cleanupMetric("目录", summary.scannedDirectories)}
@@ -2352,7 +2356,22 @@ function mediaCleanupPageHtml() {
         ${cleanupMetric("ReparsePoint", summary.reparsePointCount)}
         ${cleanupMetric("错误", summary.errorCount)}
         ${cleanupMetric("耗时", summary.elapsedMilliseconds ? `${(summary.elapsedMilliseconds / 1000).toFixed(1)} 秒` : "-")}
+        ${cleanupMetric("待回收", approvedJob.candidateCount || 0)}
+        ${cleanupMetric("已处理", operation.processedFileCount || 0)}
+        ${cleanupMetric("剩余", Math.max(Number(approvedJob.candidateCount || 0) - Number(operation.processedFileCount || 0), 0))}
+        ${cleanupMetric("待回收容量", formatBytes(approvedJob.candidateBytes || 0))}
+        ${cleanupMetric("目标盘可用", formatBytes(approvedJob.availableBytes || 0))}
+        ${cleanupMetric("最低要求", formatBytes(approvedJob.requiredBytes || 0))}
+        ${cleanupMetric("已移动", operation.movedFileCount || 0)}
+        ${cleanupMetric("已跳过", operation.skippedFileCount || 0)}
+        ${cleanupMetric("扫描后变化", operation.changedSinceScanCount || 0)}
+        ${cleanupMetric("失败", operation.failedFileCount || 0)}
+        ${cleanupMetric("已清理空目录", operation.cleanedDirectoryCount || 0)}
+        ${cleanupMetric("可恢复", operation.restorableFileCount || 0)}
+        ${cleanupMetric("已恢复", operation.restoredFileCount || 0)}
+        ${cleanupMetric("恢复冲突", operation.restoreConflictCount || 0)}
       </div>
+      ${approvedJob.recyclePath ? `<div class="media-cleanup-root"><strong>本次回收位置</strong><code>${escapeHtml(approvedJob.recyclePath)}</code></div><div class="media-cleanup-root"><strong>Manifest</strong><code>${escapeHtml(approvedJob.manifestPath || "")}</code></div>` : ""}
       <div class="media-cleanup-tabs">
         ${tabs.map(([kind, category, label]) => `<button type="button" data-cleanup-kind="${kind}" data-cleanup-category="${category}" class="${state.mediaCleanupKind === kind && state.mediaCleanupCategory === category ? "active" : ""}">${label}</button>`).join("")}
       </div>
@@ -2376,10 +2395,18 @@ function mediaCleanupPageHtml() {
       <div class="media-cleanup-pagination"><button id="mediaCleanupPrev" type="button" ${Number(results.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${results.page || 1} / ${totalPages}（${results.total || 0} 条）</span><button id="mediaCleanupNext" type="button" ${Number(results.page || 1) >= totalPages ? "disabled" : ""}>下一页</button></div>
       <div class="media-cleanup-modal" id="mediaCleanupModal" hidden>
         <div class="media-cleanup-dialog" role="dialog" aria-modal="true" aria-labelledby="mediaCleanupDialogTitle">
-          <h2 id="mediaCleanupDialogTitle">确认删除非媒体候选</h2>
-          <p>将按本次报告顺序删除 ${summary.nonMediaCount || 0} 个候选，预计释放 ${formatBytes(summary.nonMediaBytes || 0)}。图片、视频、0字节媒体、可疑小媒体和 ReparsePoint 不会删除；随后只清理真正空目录。</p>
-          <label>请输入 DELETE 或 删除<input id="mediaCleanupConfirmation" autocomplete="off" /></label>
-          <div><button id="mediaCleanupCancelDelete" type="button">取消</button><button id="mediaCleanupConfirmDelete" class="danger" type="button" disabled>确认删除</button></div>
+          <h2 id="mediaCleanupDialogTitle">确认移入项目回收站</h2>
+          <p>将处理批准报告中的 ${approvedJob.candidateCount || 0} 个非媒体候选，共 ${formatBytes(approvedJob.candidateBytes || 0)}。逐项复核后保留原相对路径移入项目回收目录；成功后只清理真正空的源目录，可根据 manifest 恢复。</p>
+          <label>请输入 MOVE 或 移入回收站<input id="mediaCleanupConfirmation" autocomplete="off" /></label>
+          <div><button id="mediaCleanupCancelRecycle" type="button">取消</button><button id="mediaCleanupConfirmRecycle" class="danger" type="button" disabled>确认移入回收站</button></div>
+        </div>
+      </div>
+      <div class="media-cleanup-modal" id="mediaCleanupRestoreModal" hidden>
+        <div class="media-cleanup-dialog" role="dialog" aria-modal="true" aria-labelledby="mediaCleanupRestoreTitle">
+          <h2 id="mediaCleanupRestoreTitle">确认恢复本次回收</h2>
+          <p>只从服务器解析的 manifest 恢复 ${operation.restorableFileCount || 0} 个文件。原位置已有文件时记录 RestoreConflict，绝不覆盖。</p>
+          <label>请输入 RESTORE 或 恢复<input id="mediaCleanupRestoreConfirmation" autocomplete="off" /></label>
+          <div><button id="mediaCleanupCancelRestore" type="button">取消</button><button id="mediaCleanupConfirmRestore" type="button" disabled>确认恢复</button></div>
         </div>
       </div>
     </section>
@@ -2394,7 +2421,7 @@ function scheduleMediaCleanupPolling() {
     try {
       const previous = state.mediaCleanupStatus?.status;
       await loadMediaCleanupStatus();
-      if (previous !== state.mediaCleanupStatus?.status && ["completed", "delete-completed", "stopped"].includes(state.mediaCleanupStatus?.status)) await loadMediaCleanupResults(1);
+      if (previous !== state.mediaCleanupStatus?.status && ["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(state.mediaCleanupStatus?.status)) await loadMediaCleanupResults(1);
     } catch (error) {}
     renderSettingsPage();
   }, 1000);
@@ -2408,11 +2435,16 @@ function bindMediaCleanupPage() {
   document.querySelector("#mediaCleanupApply")?.addEventListener("click", async () => { state.mediaCleanupCategory=document.querySelector("#mediaCleanupCategory").value; state.mediaCleanupSearch=document.querySelector("#mediaCleanupSearch").value.trim(); state.mediaCleanupSort=document.querySelector("#mediaCleanupSort").value; state.mediaCleanupDirection=document.querySelector("#mediaCleanupDirection").value; await loadMediaCleanupResults(1); renderSettingsPage(); });
   document.querySelector("#mediaCleanupPrev")?.addEventListener("click", async () => { await loadMediaCleanupResults(Math.max(1, Number(state.mediaCleanupResults.page || 1)-1)); renderSettingsPage(); });
   document.querySelector("#mediaCleanupNext")?.addEventListener("click", async () => { await loadMediaCleanupResults(Number(state.mediaCleanupResults.page || 1)+1); renderSettingsPage(); });
-  const modal=document.querySelector("#mediaCleanupModal"); const input=document.querySelector("#mediaCleanupConfirmation"); const confirmButton=document.querySelector("#mediaCleanupConfirmDelete");
-  document.querySelector("#mediaCleanupDelete")?.addEventListener("click", () => { modal.hidden=false; input.focus(); });
-  document.querySelector("#mediaCleanupCancelDelete")?.addEventListener("click", () => { modal.hidden=true; input.value=""; confirmButton.disabled=true; });
-  input?.addEventListener("input", () => { confirmButton.disabled = !["DELETE","删除"].includes(input.value.trim()); });
-  confirmButton?.addEventListener("click", async () => { confirmButton.disabled=true; await postJson("/api/media-cleanup/delete", { jobId: state.mediaCleanupStatus.id, confirmation: input.value.trim() }); modal.hidden=true; await loadMediaCleanupStatus(); renderSettingsPage(); });
+  const modal=document.querySelector("#mediaCleanupModal"); const input=document.querySelector("#mediaCleanupConfirmation"); const confirmButton=document.querySelector("#mediaCleanupConfirmRecycle");
+  document.querySelector("#mediaCleanupRecycle")?.addEventListener("click", () => { modal.hidden=false; input.focus(); });
+  document.querySelector("#mediaCleanupCancelRecycle")?.addEventListener("click", () => { modal.hidden=true; input.value=""; confirmButton.disabled=true; });
+  input?.addEventListener("input", () => { confirmButton.disabled = !["MOVE","移入回收站"].includes(input.value.trim()); });
+  confirmButton?.addEventListener("click", async () => { confirmButton.disabled=true; await postJson("/api/media-cleanup/recycle", { jobId: state.mediaCleanupStatus.eligibleRecycleJob?.id, confirmation: input.value.trim() }); modal.hidden=true; await loadMediaCleanupStatus(); renderSettingsPage(); });
+  const restoreModal=document.querySelector("#mediaCleanupRestoreModal"); const restoreInput=document.querySelector("#mediaCleanupRestoreConfirmation"); const restoreButton=document.querySelector("#mediaCleanupConfirmRestore");
+  document.querySelector("#mediaCleanupRestore")?.addEventListener("click", () => { restoreModal.hidden=false; restoreInput.focus(); });
+  document.querySelector("#mediaCleanupCancelRestore")?.addEventListener("click", () => { restoreModal.hidden=true; restoreInput.value=""; restoreButton.disabled=true; });
+  restoreInput?.addEventListener("input", () => { restoreButton.disabled = !["RESTORE","恢复"].includes(restoreInput.value.trim()); });
+  restoreButton?.addEventListener("click", async () => { restoreButton.disabled=true; await postJson("/api/media-cleanup/restore", { jobId: state.mediaCleanupStatus.eligibleRecycleJob?.id, confirmation: restoreInput.value.trim() }); restoreModal.hidden=true; await loadMediaCleanupStatus(); renderSettingsPage(); });
 }
 
 function renderSettingsPage() {
@@ -2495,7 +2527,7 @@ async function ensureSettingsPage() {
   }
   if (settingsSection() === "media-cleanup") {
     await loadMediaCleanupStatus();
-    if (state.mediaCleanupStatus?.id && ["completed", "delete-completed", "stopped"].includes(state.mediaCleanupStatus.status) && !state.mediaCleanupResults.items.length) await loadMediaCleanupResults(1);
+    if (state.mediaCleanupStatus?.id && ["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(state.mediaCleanupStatus.status) && !state.mediaCleanupResults.items.length) await loadMediaCleanupResults(1);
   }
   renderSettingsPage();
 }

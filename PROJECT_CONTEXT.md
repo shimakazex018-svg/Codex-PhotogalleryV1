@@ -6,9 +6,9 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v89`（`app.js` 中的 `APP_VERSION`）；正式 Node 已加载媒体清理历史恢复修复。
+- 前端版本标记：`v90`（`app.js` 中的 `APP_VERSION`）；媒体清理候选改为可恢复的项目回收站流程。
 - 当前稳定发布标签：`v1.3-release`。
-- 当前分支：`main`；SQLite访问日志迁移、分页与媒体清理历史报告重启恢复均已正式生效。
+- 当前分支：`main`；SQLite访问日志迁移、分页与媒体清理历史报告重启恢复已生效，v90回收/恢复流程待正式重启部署。
 
 ## Current implementation state
 
@@ -42,7 +42,7 @@
 - 首页轮播；
 - 后台目录扫描；
 - 图片 SHA-256 查重、标记和回收站移动；
-- 设置页媒体库清理：单 PowerShell 子进程扫描、可停止进度、分页报告和 localhost 显式确认删除；
+- 设置页媒体库清理：单 PowerShell 子进程扫描、可停止进度、分页报告，以及 localhost 显式确认回收/恢复；永久删除 API 已移除；
 - 2026-07-14 正式 `PHOTOS_DIR` 最新只读扫描jobId为`20260714-232613-22183b82`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、0错误；删除文件和目录均为0。
 - SQLite访问日志、服务端分页和365天自动保留；
 - 可选手工 HLS 生成与静态访问。
@@ -64,6 +64,7 @@
 | 日志 | `DATA_DIR/logs` | 不提交 |
 | 媒体清理报告 | `DATA_DIR/logs/media-cleanup-<jobId>-*` | 不提交 |
 | 回收目录 | `TRASH_DIR`，默认媒体根同级回收目录 | 不提交 |
+| 媒体清理回收 | `TRASH_DIR/media-cleanup/<jobId>/files`、manifest与摘要 | 不提交 |
 
 当前仓库的 `data/` 和 `photos/` 只有 `.gitkeep`；不存在受 Git 管理的生产数据库、媒体、缩略图、HLS、日志或 cache。
 
