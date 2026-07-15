@@ -71,7 +71,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-media-cle
 
 通过标准：`MEDIA_CLEANUP_RECYCLE_TEST=PASS`、`TEMP_ROOT_EXISTS=False`，同盘与强制copy路径均通过，`.partial`残留0，legacy delete 410，LAN写操作403，localhost回收/恢复成功。
 
-2026-07-15 v91正式只读验收：Node PID 4068由Host PID 25460托管，监听PID一致；loopback/LAN HTTP 200并加载v91。设置页显示`E:\A_秀人`、`D:\GalleryRuntime\trash`、跨盘模式、批准job、7851候选、3.9GiB、819GiB可用和5.9GiB门槛。390×844无全局横向溢出，操作按钮44px，控制台0 warning/error。只读扫描job`20260715-133504-77ec5bd2`完成482450文件、7288目录、7851非媒体、0错误，移动/恢复计数0；正式回收根不存在且trash中`.partial=0`。
+2026-07-15 v91正式同盘回收根验收：配置来自`D:\GalleryRuntime\config\gallery.env`，`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`。目标为真实空目录、非ReparsePoint、互不嵌套且写入/改名/删除权限通过；Node PID 2064由Host PID 14552托管，监听PID一致，loopback/LAN HTTP 200并加载v91。设置页显示同盘rename、批准job、7851候选、3.9GiB、5.1TiB可用和5.9GiB门槛；回收按钮启用、恢复按钮禁用，无全局横向溢出，控制台0 warning/error。正式MOVE/RESTORE均未发送，批准job目录、manifest和worker均不存在，媒体移动/恢复计数为0。
 
 同时检查：
 

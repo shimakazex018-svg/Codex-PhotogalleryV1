@@ -25,7 +25,7 @@
 - 当前代码通过进程环境变量读取配置，不自动加载 `.env`。
 - 当前启动入口：`node server.js`、`start-server-48101.cmd`、`start-site.cmd`、`start-site.ps1`。
 - `start-server-48101.cmd` 会固定设置端口并把 `DATA_DIR` 指向项目内 `data`。
-- 正式Runtime当前由配置注入`48102`并监听IPv4 `0.0.0.0`；无配置直接运行源码仍使用历史默认`48101`。
+- 正式Runtime当前由`D:\GalleryRuntime\config\gallery.env`注入`48102`并监听IPv4 `0.0.0.0`；`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，同盘回收使用`File.Move`。无配置直接运行源码仍使用历史默认`48101`。
 - 正式 runtime 已建立在代码仓库外，并通过新 PowerShell 脚本管理。
 - V2.0.1正式Runtime已配置`D:\GalleryRuntime\image-previews`，按需预览生成开启，旧thumbnail生成保持关闭。
 

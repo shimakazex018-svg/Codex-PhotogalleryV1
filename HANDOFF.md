@@ -4,12 +4,12 @@
 
 ## Last Completed Task
 
-已完成并部署`v91`媒体清理安全改造：v86永久删除链被项目回收站取代，新增manifest幂等、跨盘copy-verify-delete、恢复和localhost写边界。隔离执行/API测试和正式只读界面/API验收通过。
+已将正式媒体回收根调整为`E:\回收站`并完成v91只读验收；媒体根与回收根同盘，实际回收将走`File.Move`。本次没有发送正式回收/恢复请求，也没有移动媒体。
 
 ## Current State
 
 - 源码和正式前端版本均为`v91`；静态资源缓存标记同步提升，44px操作按钮已在390×844实测。
-- 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=D:\GalleryRuntime\trash`，来自`D:\GalleryRuntime\config\gallery.env`，两者跨盘；v91复用该目录，不创建新磁盘根目录。
+- 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
 - 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
 - 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
@@ -24,9 +24,9 @@
 - `scripts/test-media-cleanup-recycle.ps1`通过：同盘rename、强制copy-verify-delete、中文/空格/只读/0字节、冲突改名、ChangedSinceScan、Missing、复制失败、源删除失败、幂等和恢复冲突。
 - 隔离API通过：旧delete 410、错误确认400、LAN recycle/restore 403、localhost回收/恢复成功；`.partial`残留0，TEMP根最终不存在。
 - `server.js`、`app.js`、`gallery-db.js`、`duplicates-worker.js`语法检查通过；PowerShell worker解析通过。
-- v91正式Node最终PID为4068、Host PID为25460，任务/监听/父子PID一致，loopback与LAN HTTP 200并加载v91。390×844按钮44px、无全局溢出，控制台0 warning/error；114图灯箱原图切换和关闭释放通过。
+- 回收根切换后正式Node PID为2064、Host PID为14552，任务/监听/父子PID一致，loopback与LAN HTTP 200并加载v91。媒体清理页显示新路径、同盘rename、批准job、7851候选；回收按钮启用、恢复按钮禁用，无全局溢出，控制台0 warning/error。
 - 正式只读回归job `20260715-133504-77ec5bd2`在246.612秒完成：482450文件、7288目录、472490图片、2109视频、7851非媒体、0错误、`incomplete=false`；worker退出，移动/恢复/空目录清理均为0。
-- 批准job回收根仍不存在，正式trash内`.partial=0`；旧delete 410、错误确认400、LAN recycle/restore 403，未发送有效localhost MOVE。
+- `E:\回收站`为空，批准job回收根和manifest均不存在，worker为0；本次未发送任何正式recycle/restore请求，媒体移动和恢复均为0。
 
 - `scripts/test-access-log.js`隔离测试通过：0/1/49/50/51/100/101条边界，旧NDJSON迁移，50条分页，100条上限，非法/越界页，稳定倒序无重复，POST写入，保留边界和时间索引。
 - 测试只使用唯一TEMP目录和隔离HTTP端口，按子进程句柄停止服务，最终TEMP根目录不存在；未连接正式数据库或媒体。

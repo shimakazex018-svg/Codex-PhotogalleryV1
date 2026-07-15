@@ -34,7 +34,7 @@ v86 worker的Delete模式曾对候选直接调用`[System.IO.File]::Delete($cand
   recycle.log
 ```
 
-正式配置来自`D:\GalleryRuntime\config\gallery.env`：`PHOTOS_DIR=E:\A_秀人`，`TRASH_DIR=D:\GalleryRuntime\trash`，两者跨盘。正式回收目录已存在；Git不跟踪其中内容。
+正式配置来自`D:\GalleryRuntime\config\gallery.env`：`PHOTOS_DIR=E:\A_秀人`，`TRASH_DIR=E:\回收站`，两者同盘，因此正式回收与恢复使用`File.Move`。目录已完成安全/权限检查，但正式MOVE尚未执行，也没有创建批准job的manifest；Git不跟踪其中内容。
 
 manifest每次状态变化追加一行，至少包含jobId、recordId、原完整/相对路径、计划/实际回收路径、分类、大小、扫描/实际mtime、原属性、status、错误、冲突原因、移动/恢复时间。状态包括`Pending`、`Moved`、`Missing`、`ChangedSinceScan`、`ConflictRenamed`、`CopiedButSourceRetained`、`Failed`、`Restored`和`RestoreConflict`。
 

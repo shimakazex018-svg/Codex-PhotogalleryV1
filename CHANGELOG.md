@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-15 - Move the formal recycle root to the media volume
+
+- Changed only the external Runtime `TRASH_DIR` from `D:\GalleryRuntime\trash` to `E:\回收站`; `PHOTOS_DIR=E:\A_秀人` and all other settings remain unchanged.
+- Confirmed the target is a real, empty, non-reparse directory outside the media root with create/write/rename/delete permission, then restarted only the PID-validated formal Host/Node through the existing scripts.
+- Verified loopback/LAN HTTP 200 with v91, same-volume mode, the approved job and unchanged 7,851 candidates. No formal recycle or restore request was sent, no manifest/job directory was created, and no media file was moved.
+
 ## 2026-07-15 - Refresh media-cleanup touch targets v91
 
 - Raised the media-cleanup action controls to a 44px minimum touch height and bumped both static resource cache markers after the first browser pass showed the old v90 stylesheet remained cached.
