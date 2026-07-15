@@ -97,6 +97,23 @@ function openDatabase(dbFile) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS access_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      time TEXT NOT NULL,
+      ip TEXT,
+      host TEXT,
+      user_agent TEXT,
+      type TEXT,
+      title TEXT,
+      model TEXT,
+      work TEXT,
+      hash TEXT,
+      path_parts TEXT NOT NULL DEFAULT '[]',
+      source_key TEXT UNIQUE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_access_logs_time_id ON access_logs(time DESC, id DESC);
+
     CREATE TABLE IF NOT EXISTS media_hashes (
       media_id TEXT PRIMARY KEY,
       collection_id TEXT NOT NULL,
@@ -570,6 +587,124 @@ function rowToUserMark(row) {
   };
 }
 
+function rowToAccessLog(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    time: row.time,
+    ip: row.ip || "",
+    host: row.host || "",
+    userAgent: row.user_agent || "",
+    type: row.type || "",
+    title: row.title || "",
+    model: row.model || "",
+    work: row.work || "",
+    hash: row.hash || "",
+    pathParts: parseJsonField(row.path_parts, []),
+  };
+}
+
+function normalizedAccessLog(entry = {}) {
+  const time = new Date(entry.time || Date.now()).toISOString();
+  return {
+    time,
+    ip: String(entry.ip || ""),
+    host: String(entry.host || ""),
+    userAgent: String(entry.userAgent || ""),
+    type: String(entry.type || ""),
+    title: String(entry.title || ""),
+    model: String(entry.model || ""),
+    work: String(entry.work || ""),
+    hash: String(entry.hash || ""),
+    pathParts: Array.isArray(entry.pathParts) ? entry.pathParts.map((part) => String(part || "")) : [],
+  };
+}
+
+function insertAccessLog(dbFile, entry) {
+  const item = normalizedAccessLog(entry);
+  return withDatabase(dbFile, (db) => {
+    const result = db.prepare(
+      `INSERT INTO access_logs (
+         time, ip, host, user_agent, type, title, model, work, hash, path_parts, source_key
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+    ).run(item.time, item.ip, item.host, item.userAgent, item.type, item.title, item.model, item.work, item.hash, json(item.pathParts));
+    return rowToAccessLog(db.prepare("SELECT * FROM access_logs WHERE id = ?").get(result.lastInsertRowid));
+  });
+}
+
+function importAccessLogs(dbFile, entries = []) {
+  const items = [];
+  for (const entry of entries || []) {
+    if (!entry || !entry.sourceKey) continue;
+    try {
+      items.push({ ...normalizedAccessLog(entry), sourceKey: String(entry.sourceKey) });
+    } catch (error) {
+      // Skip invalid historical timestamps without dropping the rest of the batch.
+    }
+  }
+  if (!items.length) return { imported: 0 };
+  return withDatabase(dbFile, (db) => {
+    const insert = db.prepare(
+      `INSERT OR IGNORE INTO access_logs (
+         time, ip, host, user_agent, type, title, model, work, hash, path_parts, source_key
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    let imported = 0;
+    db.exec("BEGIN");
+    try {
+      for (const item of items) {
+        const result = insert.run(item.time, item.ip, item.host, item.userAgent, item.type, item.title, item.model, item.work, item.hash, json(item.pathParts), item.sourceKey);
+        imported += result.changes || 0;
+      }
+      db.exec("COMMIT");
+      return { imported };
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch (rollbackError) {
+        // Preserve the original error.
+      }
+      throw error;
+    }
+  });
+}
+
+function getAccessLogsPage(dbFile, pageValue = 1, pageSizeValue = 50) {
+  const requestedPage = Math.max(Number.parseInt(pageValue, 10) || 1, 1);
+  const pageSize = Math.min(Math.max(Number.parseInt(pageSizeValue, 10) || 50, 1), 100);
+  return withDatabase(dbFile, (db) => {
+    const total = Number(db.prepare("SELECT COUNT(*) AS count FROM access_logs").get().count || 0);
+    const totalPages = total ? Math.ceil(total / pageSize) : 0;
+    const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
+    const offset = (page - 1) * pageSize;
+    const items = db
+      .prepare("SELECT * FROM access_logs ORDER BY time DESC, id DESC LIMIT ? OFFSET ?")
+      .all(pageSize, offset)
+      .map(rowToAccessLog)
+      .filter(Boolean);
+    return { items, page, pageSize, total, totalPages };
+  });
+}
+
+function deleteAccessLogsBefore(dbFile, cutoffIso) {
+  const cutoff = new Date(cutoffIso).toISOString();
+  return withDatabase(dbFile, (db) => {
+    db.exec("BEGIN");
+    try {
+      const result = db.prepare("DELETE FROM access_logs WHERE time < ?").run(cutoff);
+      db.exec("COMMIT");
+      return { deleted: result.changes || 0, cutoff };
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch (rollbackError) {
+        // Preserve the original error.
+      }
+      throw error;
+    }
+  });
+}
+
 function getUserMarks(dbFile, markType, limitValue = 50) {
   const type = String(markType || "").trim();
   const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 200);
@@ -874,6 +1009,10 @@ module.exports = {
   getUserMarks,
   upsertUserMark,
   deleteUserMark,
+  insertAccessLog,
+  importAccessLogs,
+  getAccessLogsPage,
+  deleteAccessLogsBefore,
   getDuplicateHashStats,
   getImagesNeedingHash,
   upsertMediaHash,

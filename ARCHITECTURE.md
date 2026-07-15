@@ -47,6 +47,8 @@ Browser SPA
 - `#/`：首页。
 - `#/<path...>`：任意 collection/图集路径。
 - `#/__settings`：显示设置。
+- `#/__settings/favorites`：收藏图册。
+- `#/__settings/history`：观看历史。
 - `#/__settings/duplicates`：图片查重。
 - `#/__settings/access-log`：访问日志。
 - `#/__settings/media-cleanup`：媒体库清理扫描、报告和删除确认。
@@ -94,7 +96,7 @@ Browser SPA
 | GET | `/api/duplicates` | 重复组分页 |
 | POST | `/api/duplicates/recycle` | 回收选中重复媒体 |
 | POST | `/api/duplicates/recycle-auto` | 自动选择并回收重复媒体 |
-| GET/POST | `/api/access-log` | 访问日志 |
+| GET/POST | `/api/access-log` | SQLite访问日志分页与写入；GET使用`page/pageSize` |
 | POST/GET | `/api/media-cleanup/scan/start`、`/api/media-cleanup/scan/stop`、`/api/media-cleanup/status` | 清理扫描生命周期 |
 | GET/POST | `/api/media-cleanup/results`、`/api/media-cleanup/delete` | 流式分页结果和本机确认删除 |
 | POST | `/api/open-photo-path` | 打开媒体路径 |
@@ -119,8 +121,9 @@ Browser SPA
 | `scan_state` | 全局和目录扫描签名 |
 | `user_marks` | 收藏、最近和查重标记 |
 | `media_hashes` | 图片哈希及查重元数据 |
+| `access_logs` | 页面访问记录；按`time DESC, id DESC`稳定分页 |
 
-数据库打开时启用 WAL 并保证表/index 存在。数据库属于运行数据，不进入 Git。
+数据库打开时启用 WAL 并保证表/index 存在。`access_logs`使用`idx_access_logs_time_id`索引；旧按日NDJSON访问日志在启动时流式、分批、幂等导入，原文件不删除。访问日志默认保留365天，启动时检查一次并每24小时清理一次，不自动`VACUUM`。数据库属于运行数据，不进入 Git。
 
 ## Media and thumbnail architecture
 

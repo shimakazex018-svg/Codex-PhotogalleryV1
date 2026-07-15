@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-15 - Move saved galleries into settings and paginate access logs v88
+
+- Added `#/__settings/favorites` and `#/__settings/history` in the existing settings layout; reused the saved-card data, lazy preview, global columns/cover mode, navigation and immediate favorite removal behavior.
+- Removed the favorites/recent sections and their startup requests from the home page without deleting marks or changing recent/favorite write APIs.
+- Added the idempotent SQLite `access_logs` table and `(time DESC, id DESC)` index. Legacy daily NDJSON is streamed in batches using a content hash and retained as a backup.
+- Changed `GET /api/access-log` to real server pagination (`page`, default `pageSize=50`, maximum 100) with stable ordering and totals.
+- Added UTC-based 365-day retention at startup and every 24 hours; failures are diagnostic and non-fatal, and cleanup never runs `VACUUM`.
+- Added isolated coverage for 0/1/49/50/51/100/101 rows, migration, pagination, parameter caps, ordering, POST, retention boundary and index creation. Formal Runtime deployment and physical iPad/iPhone checks remain pending.
+- Verified the isolated UI before the final `v88` cache-marker bump at 1440×900, 1024×768, 768×1024 and 390×844: no page overflow or clipped settings labels, correct saved/history surfaces, 50-row page navigation, and no console warnings/errors. The settings-only stack breakpoint is 820px so iPad portrait keeps a usable content width.
+
 ## 2026-07-14 - Deploy media library cleanup v86
 
 - Fast-forwarded formal `main` from `d18a2f2` to the integrated media-cleanup history without conflicts, rebasing or commit rewriting, then restarted only the PID-matched formal Gallery process through the existing task-hosted scripts.

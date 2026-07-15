@@ -90,6 +90,9 @@ let mediaCleanupChild = null;
 const mediaCleanupWorkerPath = path.join(rootDir, "scripts", "media-library-cleanup-worker.ps1");
 const mediaCleanupPageSizeMax = 200;
 const mediaCleanupOffsetMax = 50000;
+const accessLogRetentionDays = 365;
+const accessLogMaintenanceIntervalMs = 24 * 60 * 60 * 1000;
+let accessLogInitialization = Promise.resolve();
 
 function ensureFolders() {
   fs.mkdirSync(photosDir, { recursive: true });
@@ -116,7 +119,7 @@ function cleanupOldLogs(maxAgeDays = 14) {
     if (!fs.existsSync(logsDir)) return;
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
     for (const entry of fs.readdirSync(logsDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".log")) continue;
+      if (!entry.isFile() || !entry.name.endsWith(".log") || /^access-\d{4}-\d{2}-\d{2}\.log$/.test(entry.name)) continue;
       const logPath = path.join(logsDir, entry.name);
       const stats = fs.statSync(logPath);
       if (stats.mtimeMs < cutoff) fs.rmSync(logPath, { force: true });
@@ -138,10 +141,6 @@ function logEvent(event, details = {}) {
   }
 }
 
-function accessLogPath(day = new Date().toISOString().slice(0, 10)) {
-  return path.join(logsDir, `access-${day}.log`);
-}
-
 function clientAddress(request) {
   const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
   return forwarded || request.socket.remoteAddress || "";
@@ -161,33 +160,86 @@ function appendAccessLog(request, entry) {
     hash: String(entry.hash || ""),
     pathParts: Array.isArray(entry.pathParts) ? entry.pathParts.map((part) => String(part || "")) : [],
   };
-  fs.mkdirSync(logsDir, { recursive: true });
-  cleanupOldLogs();
-  fs.appendFileSync(accessLogPath(now.toISOString().slice(0, 10)), `${JSON.stringify(payload)}\n`, "utf8");
-  return payload;
+  return galleryDb.insertAccessLog(galleryDbFile, payload);
 }
 
-function readAccessLogs(limitValue = 100) {
-  const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 500);
-  if (!fs.existsSync(logsDir)) return [];
+async function importLegacyAccessLogs() {
+  if (!fs.existsSync(logsDir)) return { imported: 0, malformed: 0 };
+  const cutoffMs = Date.now() - accessLogRetentionDays * 24 * 60 * 60 * 1000;
   const files = fs
     .readdirSync(logsDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^access-\d{4}-\d{2}-\d{2}\.log$/.test(entry.name))
-    .map((entry) => path.join(logsDir, entry.name))
-    .sort((a, b) => b.localeCompare(a));
-  const items = [];
-  for (const file of files) {
-    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).reverse();
-    for (const line of lines) {
+    .sort((a, b) => a.name.localeCompare(b.name));
+  let imported = 0;
+  let malformed = 0;
+  for (const entry of files) {
+    const filePath = path.join(logsDir, entry.name);
+    const reader = readline.createInterface({ input: fs.createReadStream(filePath, { encoding: "utf8" }), crlfDelay: Infinity });
+    let batch = [];
+    let lineNumber = 0;
+    for await (const rawLine of reader) {
+      lineNumber += 1;
+      const line = rawLine.replace(/^\uFEFF/, "").trim();
+      if (!line) continue;
       try {
-        items.push(JSON.parse(line.replace(/^\uFEFF/, "")));
+        const payload = JSON.parse(line);
+        const timeMs = Date.parse(payload.time || "");
+        if (Number.isNaN(timeMs)) {
+          malformed += 1;
+          continue;
+        }
+        if (timeMs < cutoffMs) continue;
+        batch.push({
+          ...payload,
+          sourceKey: crypto.createHash("sha256").update(`${entry.name}\0${lineNumber}\0${line}`).digest("hex"),
+        });
       } catch (error) {
-        // Ignore malformed historical log lines.
+        malformed += 1;
       }
-      if (items.length >= limit) return items;
+      if (batch.length >= 250) {
+        imported += galleryDb.importAccessLogs(galleryDbFile, batch).imported;
+        batch = [];
+      }
     }
+    if (batch.length) imported += galleryDb.importAccessLogs(galleryDbFile, batch).imported;
   }
-  return items;
+  return { imported, malformed };
+}
+
+function cleanupExpiredAccessLogs() {
+  const cutoff = new Date(Date.now() - accessLogRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  return galleryDb.deleteAccessLogsBefore(galleryDbFile, cutoff);
+}
+
+async function initializeAccessLogStorage() {
+  try {
+    const migration = await importLegacyAccessLogs();
+    if (migration.imported || migration.malformed) logEvent("access-log-migration", migration);
+  } catch (error) {
+    console.error("Access log migration failed:", error);
+    logEvent("access-log-migration-failed", { error: error.message });
+  }
+  try {
+    const cleanup = cleanupExpiredAccessLogs();
+    if (cleanup.deleted) logEvent("access-log-cleanup", { ...cleanup, retentionDays: accessLogRetentionDays });
+  } catch (error) {
+    console.error("Access log cleanup failed:", error);
+    logEvent("access-log-cleanup-failed", { error: error.message, retentionDays: accessLogRetentionDays });
+  }
+}
+
+function scheduleAccessLogMaintenance() {
+  accessLogInitialization = initializeAccessLogStorage();
+  const timer = setInterval(() => {
+    try {
+      const cleanup = cleanupExpiredAccessLogs();
+      if (cleanup.deleted) logEvent("access-log-cleanup", { ...cleanup, retentionDays: accessLogRetentionDays });
+    } catch (error) {
+      console.error("Access log cleanup failed:", error);
+      logEvent("access-log-cleanup-failed", { error: error.message, retentionDays: accessLogRetentionDays });
+    }
+  }, accessLogMaintenanceIntervalMs);
+  timer.unref();
 }
 
 function hasExtension(fileName, extensions) {
@@ -2048,14 +2100,20 @@ function handleRequest(request, response) {
 
   if (requestUrl.pathname === "/api/access-log") {
     if (request.method === "GET") {
-      sendJson(response, { items: readAccessLogs(requestUrl.searchParams.get("limit") || 100) });
+      accessLogInitialization.then(() => {
+        const page = requestUrl.searchParams.get("page") || 1;
+        const pageSize = requestUrl.searchParams.get("pageSize") || requestUrl.searchParams.get("limit") || 50;
+        sendJson(response, galleryDb.getAccessLogsPage(galleryDbFile, page, pageSize));
+      }).catch((error) => sendJsonError(response, 500, error.message));
       return;
     }
     if (request.method === "POST") {
       readRequestBody(request, (body) => {
         try {
           const payload = JSON.parse(body || "{}");
-          sendJson(response, { ok: true, item: appendAccessLog(request, payload) });
+          accessLogInitialization
+            .then(() => sendJson(response, { ok: true, item: appendAccessLog(request, payload) }))
+            .catch((error) => sendJsonError(response, 500, error.message));
         } catch (error) {
           sendJsonError(response, 400, error.message);
         }
@@ -2358,6 +2416,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   runScanOnce();
 } else {
   ensureFolders();
+  scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
 
   http.createServer(handleRequest).listen(port, host, () => {

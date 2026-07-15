@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-019：访问日志迁入现有SQLite并保留365天
+
+### Decision
+新访问记录写入`gallery.db`的`access_logs`表，GET接口使用`COUNT + LIMIT/OFFSET`页码分页并以`time DESC, id DESC`稳定排序。旧`access-YYYY-MM-DD.log`按内容哈希流式幂等导入且保留原文件。清理统一按UTC ISO时间，启动时执行一次、之后每24小时执行一次，默认保留365天且不自动`VACUUM`。
+
+### Reason
+正式Runtime现有374条、151354字节，近4日日均约93.5条/37838字节；按当前速度一年约34128条/13.8MB，365天对SQLite很小。继续对NDJSON整文件读取无法提供真正服务端分页，且旧14天通用`.log`清理会混用不同日志语义。
+
+### Impact
+新增幂等`access_logs`表和`idx_access_logs_time_id`索引；`/api/access-log`默认50条、最大100条并返回`items/page/pageSize/total/totalPages`。历史文件不删除，新访问日志不再追加NDJSON。
+
+### Status
+有效，前端`v88`实施；隔离边界、迁移、分页、索引、POST和保留清理测试通过，正式Node后端尚未重启部署。
+
 ## DEC-018：媒体库清理使用独立单线程报告 worker
 
 ### Decision

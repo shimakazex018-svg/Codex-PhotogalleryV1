@@ -168,6 +168,16 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 `/api/scan`、查重扫描、回收、HLS 和打开路径有副作用或资源成本，不属于默认 smoke。
 
+## Access log isolated validation
+
+访问日志schema、旧NDJSON迁移、分页和保留清理只使用脚本创建的唯一TEMP Runtime：
+
+```powershell
+<node-exe> .\scripts\test-access-log.js
+```
+
+脚本覆盖0、1、49、50、51、100、101条边界；默认50条分页、最大100条、非法参数、越界页回落、`time DESC, id DESC`无重复稳定顺序、旧文件幂等导入且原文件保留、POST写入、时间索引，以及`time < cutoff`只删除边界前记录。脚本按精确子进程句柄停止隔离服务并删除整个TEMP根目录；不得把`DATA_DIR`或`PHOTOS_DIR`指向正式Runtime。
+
 ## Browser checks
 
 ### Back-to-top control
@@ -188,12 +198,16 @@ For changes to the floating back-to-top control, verify:
 - 多级目录和媒体详情；
 - 搜索；
 - 设置页、查重页、访问日志页；
-- 收藏和最近观看；
+- 设置页收藏图册和观看历史；
 - 图片灯箱和键盘操作；
 - 视频只在交互后加载；
 - 控制台无新增错误；
 - 移动端/窄屏没有明显布局破坏；
 - 大列表没有一次性加载全部视频或图片 DOM。
+
+前端`v88`检查清单：首页不显示收藏/最近观看且不请求`/api/recent`或`/api/favorites`；`#/__settings/favorites`可取消收藏并即时更新；`#/__settings/history`按最近时间倒序；访问日志首/上/附近页码/下/末状态与加载提示正确；1440×900、1024×768、768×1024、390×844没有页面级横向溢出。收藏/历史卡片必须继续使用懒加载预览，不得创建`video`播放器。
+
+2026-07-15隔离验证（最终仅追加`v88`缓存标记）：受控浏览器确认首页无收藏/历史区域，设置导航6项顺序正确，取消收藏即时显示空状态，观看历史显示访问时间；访问日志第一页和第二页均50条、活动页和首/上按钮状态正确。1440×900、1024×768、768×1024、390×844均无页面级横向溢出或菜单文字截断，768竖屏设置内容区712px，390窄屏收藏卡片未被取消按钮挤压且页面无`video`节点，控制台warning/error为0。实体设备仍未验证。
 
 ### Scroll restoration regression
 

@@ -23,7 +23,7 @@ const text = {
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
 };
 
-const APP_VERSION = "v86";
+const APP_VERSION = "v88";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -55,6 +55,12 @@ const state = {
   duplicateDeleteMarks: [],
   accessLogs: [],
   accessLogsLoading: false,
+  accessLogsLoaded: false,
+  accessLogError: "",
+  accessLogPage: 1,
+  accessLogPageSize: 50,
+  accessLogTotal: 0,
+  accessLogTotalPages: 0,
   mediaCleanupStatus: null,
   mediaCleanupResults: { items: [], total: 0, page: 1, pageSize: 50 },
   mediaCleanupKind: "non-media",
@@ -74,6 +80,9 @@ const state = {
   workSort: localStorage.getItem("galleryWorkSort") || "name",
   recentViews: readRecentViews(),
   favorites: readFavorites(),
+  recentViewsLoaded: false,
+  favoritesLoaded: false,
+  userMarksError: "",
   searchQuery: "",
   highlightIndex: 0,
   highlightTimer: null,
@@ -774,6 +783,8 @@ function settingsHashRoute() {
 
 function settingsSection() {
   const route = location.hash.replace(/^#\/?/, "");
+  if (route.includes("favorites")) return "favorites";
+  if (route.includes("history")) return "history";
   if (route.includes("access-log")) return "access-log";
   if (route.includes("media-cleanup")) return "media-cleanup";
   return route.includes("duplicates") ? "duplicates" : "display";
@@ -825,22 +836,32 @@ async function deleteJson(url) {
   return response.json();
 }
 
-async function loadUserMarks(signal = null) {
+async function loadFavoriteMarks(signal = null) {
   try {
-    const [recentPayload, favoritesPayload] = await Promise.all([
-      fetchJson("/api/recent", { signal }),
-      fetchJson("/api/favorites", { signal }),
-    ]);
-    const recentItems = Array.isArray(recentPayload.items) ? recentPayload.items.filter((item) => item && item.hash && item.title).slice(0, 10) : [];
+    const favoritesPayload = await fetchJson("/api/favorites", { signal });
     const favoriteItems = Array.isArray(favoritesPayload.items) ? favoritesPayload.items.filter((item) => item && item.id && item.hash && item.title).slice(0, 100) : [];
-    state.recentViews = recentItems;
     state.favorites = favoriteItems;
-    saveRecentViews();
     saveFavorites();
+    state.userMarksError = "";
   } catch (error) {
     if (error.name === "AbortError") throw error;
-    // localStorage remains the offline fallback if the SQLite mark API is unavailable.
+    state.userMarksError = "无法从服务端读取收藏，当前显示本机缓存。";
   }
+  state.favoritesLoaded = true;
+}
+
+async function loadRecentMarks(signal = null) {
+  try {
+    const recentPayload = await fetchJson("/api/recent", { signal });
+    const recentItems = Array.isArray(recentPayload.items) ? recentPayload.items.filter((item) => item && item.hash && item.title).slice(0, 10) : [];
+    state.recentViews = recentItems;
+    saveRecentViews();
+    state.userMarksError = "";
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    state.userMarksError = "无法从服务端读取观看历史，当前显示本机缓存。";
+  }
+  state.recentViewsLoaded = true;
 }
 
 function saveRecentViewToServer(item) {
@@ -906,15 +927,24 @@ async function recycleDuplicateMedia(ids, mode = "selected") {
   return result;
 }
 
-async function loadAccessLogs() {
+async function loadAccessLogs(page = state.accessLogPage || 1, signal = state.pageAbortController?.signal) {
   state.accessLogsLoading = true;
+  state.accessLogError = "";
   try {
-    const payload = await fetchJson("/api/access-log?limit=100");
+    const payload = await fetchJson(`/api/access-log?page=${encodeURIComponent(page)}&pageSize=${state.accessLogPageSize}`, { signal });
     state.accessLogs = Array.isArray(payload.items) ? payload.items : [];
+    const hasServerPagination = [payload.page, payload.pageSize, payload.total, payload.totalPages].every((value) => Number.isFinite(Number(value)));
+    state.accessLogPage = hasServerPagination ? Number(payload.page || 1) : 1;
+    state.accessLogPageSize = hasServerPagination ? Number(payload.pageSize || 50) : Math.max(state.accessLogs.length, 1);
+    state.accessLogTotal = hasServerPagination ? Number(payload.total || 0) : state.accessLogs.length;
+    state.accessLogTotalPages = hasServerPagination ? Number(payload.totalPages || 0) : (state.accessLogs.length ? 1 : 0);
   } catch (error) {
+    if (error.name === "AbortError") throw error;
     state.accessLogs = [];
+    state.accessLogError = "访问日志加载失败，请稍后重试。";
   } finally {
     state.accessLogsLoading = false;
+    if (!signal?.aborted) state.accessLogsLoaded = true;
   }
 }
 
@@ -1669,6 +1699,20 @@ function favoriteButtonHtml(item) {
   `;
 }
 
+function syncFavoriteButtonStates() {
+  view.querySelectorAll("[data-favorite-id]").forEach((button) => {
+    const active = isFavorited(button.dataset.favoriteId);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.textContent = active ? "已收藏" : "收藏";
+  });
+}
+
+function currentRouteNeedsFavoriteState() {
+  const route = location.hash.replace(/^#\/?/, "");
+  return Boolean(route && !route.startsWith("__"));
+}
+
 function toggleFavorite(item) {
   if (isFavorited(item.id)) {
     state.favorites = state.favorites.filter((entry) => entry.id !== item.id);
@@ -1681,13 +1725,28 @@ function toggleFavorite(item) {
   render();
 }
 
+function storedItemTimestamp(item, field) {
+  const numeric = Number(item?.[field] || 0);
+  if (numeric) return numeric;
+  const parsed = Date.parse(item?.updatedAt || item?.createdAt || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function favoriteItemsForDisplay() {
+  return stableSorted(state.favorites || [], (a, b) => {
+    if (state.modelSort === "mtime") return storedItemTimestamp(b, "favoritedAt") - storedItemTimestamp(a, "favoritedAt");
+    if (state.modelSort === "name") return compareText(a.title, b.title);
+    return 0;
+  });
+}
+
 function renderFavorites() {
   if (!state.favorites.length) return "";
   return `
     <section class="favorite-section" aria-label="\u6536\u85cf">
       <div class="section-heading">\u6536\u85cf</div>
       <div class="compact-grid">
-        ${state.favorites
+        ${favoriteItemsForDisplay()
           .map(
             (item) => `
               <div class="favorite-card" ${scrollAnchorAttribute("favorite", item.id)}>
@@ -1776,11 +1835,12 @@ function bindFavoriteButtons() {
 
 function renderRecentViews() {
   if (!state.recentViews.length) return "";
+  const recentItems = stableSorted(state.recentViews, (a, b) => storedItemTimestamp(b, "visitedAt") - storedItemTimestamp(a, "visitedAt"));
   return `
     <section class="recent-section" aria-label="\u6700\u8fd1\u89c2\u770b">
       <div class="section-heading">\u6700\u8fd1\u89c2\u770b</div>
       <div class="compact-grid">
-        ${state.recentViews
+        ${recentItems
           .map(
             (item) => `
               <a class="compact-card compact-link" href="${item.hash}" ${scrollAnchorAttribute("recent", item.hash)}>
@@ -1788,6 +1848,7 @@ function renderRecentViews() {
                 <div class="compact-info">
                   <h2>${escapeHtml(item.title)}</h2>
                   ${item.meta ? `<p>${escapeHtml(item.meta)}</p>` : ""}
+                  ${item.visitedAt || item.updatedAt ? `<p>${escapeHtml(formatAccessTime(item.visitedAt || item.updatedAt))}</p>` : ""}
                 </div>
               </a>
             `,
@@ -2129,14 +2190,53 @@ function formatAccessTime(value) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+function accessLogPageTokens(currentPage, totalPages) {
+  if (totalPages <= 0) return [];
+  const pages = new Set([1, totalPages]);
+  for (let page = Math.max(1, currentPage - 2); page <= Math.min(totalPages, currentPage + 2); page += 1) pages.add(page);
+  const ordered = [...pages].sort((a, b) => a - b);
+  const tokens = [];
+  ordered.forEach((page, index) => {
+    if (index && page - ordered[index - 1] > 1) tokens.push("ellipsis");
+    tokens.push(page);
+  });
+  return tokens;
+}
+
+function favoriteSettingsPageHtml() {
+  return `
+    <section class="stored-collections-page">
+      <h1>收藏图册</h1>
+      <p>收藏数据与图册页共用；取消收藏后会立即更新当前列表。</p>
+      ${state.userMarksError ? `<div class="inline-error">${escapeHtml(state.userMarksError)}</div>` : ""}
+      ${state.favorites.length ? renderFavorites() : `<div class="empty-state">还没有收藏图册。</div>`}
+    </section>
+  `;
+}
+
+function historySettingsPageHtml() {
+  return `
+    <section class="stored-collections-page">
+      <h1>观看历史</h1>
+      <p>按最近访问时间倒序显示最近观看过的图册。</p>
+      ${state.userMarksError ? `<div class="inline-error">${escapeHtml(state.userMarksError)}</div>` : ""}
+      ${state.recentViews.length ? renderRecentViews() : `<div class="empty-state">还没有观看记录。</div>`}
+    </section>
+  `;
+}
+
 function accessLogPageHtml() {
   const rows = state.accessLogs || [];
+  const page = state.accessLogPage || 1;
+  const totalPages = state.accessLogTotalPages || 0;
+  const tokens = accessLogPageTokens(page, totalPages);
   return `
     <section class="access-log-page">
       <h1>\u8bbf\u95ee\u65e5\u5fd7</h1>
       <p>\u8bb0\u5f55\u8fdb\u5165\u6a21\u7279\u3001\u56fe\u96c6\u548c\u8bbe\u7f6e\u9875\u7684\u9875\u9762\u7ea7\u8bbf\u95ee\u3002</p>
       <button class="access-log-refresh" id="accessLogRefreshButton" type="button">\u5237\u65b0\u65e5\u5fd7</button>
       ${state.accessLogsLoading ? `<div class="empty-state">${text.refreshing}</div>` : ""}
+      ${!state.accessLogsLoading && state.accessLogError ? `<div class="inline-error">${escapeHtml(state.accessLogError)}</div>` : ""}
       ${!state.accessLogsLoading && rows.length ? `
         <div class="access-log-table">
           <div class="access-log-row access-log-head">
@@ -2157,7 +2257,17 @@ function accessLogPageHtml() {
           `).join("")}
         </div>
       ` : ""}
-      ${!state.accessLogsLoading && !rows.length ? `<div class="empty-state">\u8fd8\u6ca1\u6709\u8bbf\u95ee\u8bb0\u5f55\u3002</div>` : ""}
+      ${!state.accessLogsLoading && !state.accessLogError && !rows.length ? `<div class="empty-state">\u8fd8\u6ca1\u6709\u8bbf\u95ee\u8bb0\u5f55\u3002</div>` : ""}
+      <nav class="access-log-pagination" aria-label="访问日志分页">
+        <button type="button" data-access-log-page="1" ${page <= 1 || !totalPages ? "disabled" : ""}>首页</button>
+        <button type="button" data-access-log-page="${Math.max(1, page - 1)}" ${page <= 1 || !totalPages ? "disabled" : ""}>上一页</button>
+        <div class="access-log-page-numbers">
+          ${tokens.map((token) => token === "ellipsis" ? `<span aria-hidden="true">…</span>` : `<button type="button" data-access-log-page="${token}" class="${token === page ? "active" : ""}" ${token === page ? "aria-current=\"page\" disabled" : ""}>${token}</button>`).join("")}
+        </div>
+        <button type="button" data-access-log-page="${Math.min(totalPages || 1, page + 1)}" ${!totalPages || page >= totalPages ? "disabled" : ""}>下一页</button>
+        <button type="button" data-access-log-page="${Math.max(1, totalPages)}" ${!totalPages || page >= totalPages ? "disabled" : ""}>末页</button>
+        <span class="access-log-page-summary">第 ${totalPages ? page : 0} / ${totalPages} 页，共 ${state.accessLogTotal || 0} 条</span>
+      </nav>
     </section>
   `;
 }
@@ -2308,18 +2418,21 @@ function bindMediaCleanupPage() {
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  recordAccessLog({ type: "settings", title: section === "duplicates" ? "\u56fe\u7247\u67e5\u91cd" : section === "access-log" ? "\u8bbf\u95ee\u65e5\u5fd7" : section === "media-cleanup" ? "媒体库清理" : "\u663e\u793a\u8bbe\u7f6e", model: "", work: "", pathParts: ["__settings", section] });
+  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", "media-cleanup": "媒体库清理", "access-log": "访问日志" };
+  recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <strong>\u8bbe\u7f6e</strong>`;
   view.innerHTML = `
     <section class="settings-page">
       <aside class="settings-sidebar">
+        <a class="${section === "favorites" ? "active" : ""}" href="#/__settings/favorites">收藏图册</a>
+        <a class="${section === "history" ? "active" : ""}" href="#/__settings/history">观看历史</a>
         <a class="${section === "display" ? "active" : ""}" href="#/__settings">\u663e\u793a\u8bbe\u7f6e</a>
         <a class="${section === "duplicates" ? "active" : ""}" href="#/__settings/duplicates">\u56fe\u7247\u67e5\u91cd</a>
         <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
       </aside>
       <div class="settings-content">
-        ${section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : `
+        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -2332,12 +2445,29 @@ function renderSettingsPage() {
   const toolbarSettings = document.querySelector("#toolbarSettings");
   if (mount && toolbarSettings) mount.appendChild(toolbarSettings);
   if (section === "duplicates") bindDuplicatePage();
+  if (section === "favorites") bindFavoriteButtons();
   if (section === "media-cleanup") bindMediaCleanupPage();
   if (section === "access-log") {
     document.querySelector("#accessLogRefreshButton")?.addEventListener("click", async () => {
-      await loadAccessLogs();
+      const loading = loadAccessLogs(state.accessLogPage || 1);
       renderSettingsPage();
+      try {
+        await loading;
+        if (settingsSection() === "access-log") renderSettingsPage();
+      } catch (error) {
+        if (error.name !== "AbortError" && settingsSection() === "access-log") renderSettingsPage();
+      }
     });
+    document.querySelectorAll("[data-access-log-page]").forEach((button) => button.addEventListener("click", async () => {
+      const loading = loadAccessLogs(Number(button.dataset.accessLogPage || 1));
+      renderSettingsPage();
+      try {
+        await loading;
+        if (settingsSection() === "access-log") renderSettingsPage();
+      } catch (error) {
+        if (error.name !== "AbortError" && settingsSection() === "access-log") renderSettingsPage();
+      }
+    }));
   }
 }
 
@@ -2351,11 +2481,17 @@ function restoreToolbarSettings() {
 }
 
 async function ensureSettingsPage() {
+  if (settingsSection() === "favorites" && !state.favoritesLoaded) {
+    await loadFavoriteMarks(state.pageAbortController?.signal);
+  }
+  if (settingsSection() === "history" && !state.recentViewsLoaded) {
+    await loadRecentMarks(state.pageAbortController?.signal);
+  }
   if (settingsSection() === "duplicates" && !state.duplicateGroups.length && !state.duplicateLoading) {
     await Promise.all([loadDuplicateStatus(), loadDuplicateDeleteMarks(), loadDuplicates(0)]);
   }
-  if (settingsSection() === "access-log" && !state.accessLogs.length && !state.accessLogsLoading) {
-    await loadAccessLogs();
+  if (settingsSection() === "access-log" && !state.accessLogsLoaded && !state.accessLogsLoading) {
+    await loadAccessLogs(1);
   }
   if (settingsSection() === "media-cleanup") {
     await loadMediaCleanupStatus();
@@ -2595,12 +2731,9 @@ function renderModels() {
 
   view.innerHTML = `
     ${renderHighlightCarousel()}
-    ${renderFavorites()}
-    ${renderRecentViews()}
     ${renderModelGrid(sortModels(state.gallery.models))}
   `;
   setupHighlightCarousel();
-  bindFavoriteButtons();
 }
 
 function renderWorks(model) {
@@ -3078,7 +3211,9 @@ function render() {
 
   if (settingsHashRoute()) {
     renderEmpty(text.refreshing);
-    ensureSettingsPage();
+    ensureSettingsPage().catch((error) => {
+      if (error.name !== "AbortError") renderEmpty(text.cannotRead);
+    });
     return;
   }
 
@@ -3384,6 +3519,13 @@ window.addEventListener("hashchange", () => {
   prepareScrollNavigation(intent);
   beginPageNavigation();
   render();
+  if (currentRouteNeedsFavoriteState() && !state.favoritesLoaded) {
+    loadFavoriteMarks(state.pageAbortController.signal)
+      .then(syncFavoriteButtonStates)
+      .catch((error) => {
+        if (error.name !== "AbortError") syncFavoriteButtonStates();
+      });
+  }
 });
 closeLightbox.addEventListener("click", hideLightbox);
 prevImage.addEventListener("click", () => stepLightbox(-1));
@@ -3433,8 +3575,11 @@ initScrollRestoration();
 (async () => {
   beginPageNavigation();
   try {
-    await loadUserMarks(state.pageAbortController.signal);
     await loadGallery(false);
+    if (currentRouteNeedsFavoriteState() && !state.favoritesLoaded) {
+      await loadFavoriteMarks(state.pageAbortController.signal);
+      syncFavoriteButtonStates();
+    }
   } catch (error) {
     if (error.name !== "AbortError") throw error;
   }

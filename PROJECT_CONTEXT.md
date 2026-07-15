@@ -6,9 +6,9 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v86`（`app.js` 中的 `APP_VERSION`）。
+- 前端版本标记：`v88`（`app.js` 中的 `APP_VERSION`）；正式 Runtime 会直接读取当前工作区静态文件，但 Node 后端尚未重启加载本次实现。
 - 当前稳定发布标签：`v1.3-release`。
-- 当前分支：`main`；媒体库清理功能已进入正式main并部署为`v86`。
+- 当前分支：`main`；工作区静态资源已可由正式 Runtime 返回`v88`，正式 Node 后端仍是重启前进程，SQLite访问日志迁移与分页接口尚未正式生效。
 
 ## Current implementation state
 
@@ -37,14 +37,14 @@
 - 图片缩略图、懒加载和分批渲染；
 - 视频 poster、按需加载和 HTTP Range；
 - SQLite 索引、搜索和分页媒体查询；
-- 收藏、最近观看和用户标记；
+- 设置页收藏图册、观看历史和用户标记；
 - hash路由的会话级滚动位置恢复，包含搜索词、稳定锚点和有界媒体深度恢复；
 - 首页轮播；
 - 后台目录扫描；
 - 图片 SHA-256 查重、标记和回收站移动；
 - 设置页媒体库清理：单 PowerShell 子进程扫描、可停止进度、分页报告和 localhost 显式确认删除；
 - 2026-07-14 正式 `PHOTOS_DIR` 最新只读扫描jobId为`20260714-232613-22183b82`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、0错误；删除文件和目录均为0。
-- 访问日志；
+- SQLite访问日志、服务端分页和365天自动保留；
 - 可选手工 HLS 生成与静态访问。
 
 ## Current data and generated paths
@@ -72,7 +72,8 @@
 - 数据库：SQLite。
 - 访问方式：Node 内置 `node:sqlite` 的 `DatabaseSync`。
 - schema 由 `gallery-db.js` 运行时使用 `CREATE TABLE/INDEX IF NOT EXISTS` 保证。
-- 当前表：`collections`、`media`、`covers`、`scan_state`、`user_marks`、`media_hashes`。
+- 当前表：`collections`、`media`、`covers`、`scan_state`、`user_marks`、`media_hashes`、`access_logs`。
+- 旧`access-YYYY-MM-DD.log`会按内容哈希幂等导入`access_logs`且原文件保留；新访问记录只写SQLite。
 - 当前打开逻辑会启用 WAL 和 `synchronous=NORMAL`。
 - 没有独立数据库 migration 文件。
 

@@ -4,42 +4,41 @@
 
 ## Last Completed Task
 
-将`codex/media-library-cleanup`以`--ff-only`快进到正式`main`，通过现有任务托管脚本精确重启正式网站并部署前端`v86`；随后从设置页对配置的`PHOTOS_DIR`完成一次正式只读扫描和结果页验收，全程未执行正式删除。
+在当前`main`直接完成前端`v88`小范围调整：把首页收藏和最近观看迁入设置子页；访问日志从按日NDJSON写入迁移到现有SQLite，并增加真正服务端分页、365天低频保留和旧文件幂等导入。正式数据库和用户媒体未在实现/隔离测试阶段修改。
 
 ## Current State
 
-- 正式`main`已部署并普通推送`v86`；功能Worktree和远程`codex/media-library-cleanup`继续保留，功能分支历史已完全进入`main`。
-- 正式网站由任务计划程序Host托管，Node PID为`18852`，监听IPv4 `0.0.0.0:48102`；loopback和LAN均HTTP 200。
-- 灯箱保留规范化URL任务键、P0当前原图独立通道、P1下一张提前decode、P3预测图延后、普通并发2、缓存5、Save-Data/网络降级、WebP即时占位和generation/render token防竞态。
-- 媒体清理保留单PowerShell子进程、单任务互斥、停止、状态轮询、有界分页/搜索/分类/排序、报告绑定删除、显式确认、localhost/`ALLOW_REMOTE_DELETE`限制、ReparsePoint拒绝和自底向上真空目录清理。
-- `render()`进入任何新页面前停止媒体清理轮询；hash路由仍统一调用`beginPageNavigation()`取消页面请求，灯箱关闭和路由切换继续停止旧图片任务。
-- 媒体清理报告写入Runtime logs且不进入Git；正式扫描报告保留，正式删除从未执行。
-- 最新正式只读扫描jobId `20260714-232613-22183b82`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、269空目录、132叶非媒体目录、5无媒体树、0字节媒体0、可疑小媒体2、错误0，耗时102.126秒；`incomplete=false`，删除文件/目录均为0。
+- 源码前端版本为`v88`；正式Runtime会直接返回当前工作区静态文件，但Node进程尚未重启，因此新SQLite访问日志后端尚未正式生效，前端临时兼容旧接口为单页100条。
+- 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
+- 首页只保留轮播和正常图册列表，不再渲染收藏/最近观看，也不在启动时请求`/api/favorites`或`/api/recent`。收藏和最近写入API、SQLite`user_marks`及localStorage兜底保持不变。
+- `gallery.db`新增幂等`access_logs`表和`idx_access_logs_time_id`索引；GET分页默认50、最大100，按`time DESC, id DESC`稳定排序。
+- 启动时流式、每250条一批导入旧`access-YYYY-MM-DD.log`，内容哈希防重复，原文件保留。新访问只写SQLite。
+- 访问日志按UTC ISO时间保留365天：启动时检查一次，之后每24小时检查；仅删除`time < cutoff`，失败记录诊断且不阻止服务，不执行`VACUUM`。
+- 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
 
-- 合并前正式v85：loopback和LAN首页HTTP 200；真实Chrome加载`app.js?v=85`与`styles.css?v=85`，灯箱打开/关闭正常，显示原图`fetchPriority=high`，默认无调试数据，控制台无warning/error。
-- v86隔离媒体清理/API回归通过：重复启动409，停止为`stopped`且`incomplete=true`，错误确认400，LAN删除403，localhost只删除6个报告候选并清理3个真空目录；迟到文件与ReparsePoint目标保留，唯一TEMP测试目录最终`Test-Path=False`。
-- v86真实Chrome隔离回归通过：12张测试图集先显示WebP占位再替换原图，当前图`fetchPriority=high`；连续前进到第8张、末张回首张、关闭清空src、重开第5张均无错图，控制台无warning/error。390x844灯箱和媒体清理页`scrollWidth<=innerWidth`。
-- 正式v86部署验收：浏览器实际加载`app.js?v=86`和`styles.css?v=86`；首页、搜索、收藏/最近区、目录、灯箱当前原图高优先级与下一张、回顶和Back锚点恢复可用，控制台warning/error为0。视频保持poster和`preload="none"`，交互后才绑定源并完成解码准备。
-- 正式设置页显示服务端根`E:\A_秀人`；390x844无页面级横向溢出。正式只读扫描期间首页200、图片Range 206、仅一个worker；完成后worker为0、删除为0。
-- 正式结果页/API验证：7851条按50条分页，服务端pageSize上限200；Unknown 24、Archive 4、MetadataOrSidecar 3318、Document 4309；文件名/相对路径搜索、路径/大小排序、MediaFreeTree 5和错误0均通过。
-- 语法、PowerShell解析、完整diff和Git同步状态在提交前完成最终复核。
+- `scripts/test-access-log.js`隔离测试通过：0/1/49/50/51/100/101条边界，旧NDJSON迁移，50条分页，100条上限，非法/越界页，稳定倒序无重复，POST写入，保留边界和时间索引。
+- 测试只使用唯一TEMP目录和隔离HTTP端口，按子进程句柄停止服务，最终TEMP根目录不存在；未连接正式数据库或媒体。
+- 隔离浏览器在最终仅追加`v88`缓存标记前通过：首页无收藏/历史区域；设置菜单6项顺序正确；收藏取消即时空状态；历史显示最近时间；访问日志第1/2页均为50条且页码状态正确；控制台无warning/error。
+- 响应式实测1440×900、1024×768、768×1024、390×844均无页面级横向溢出或菜单文字截断；768竖屏设置内容区为712px，390窄屏收藏卡片使用完整网格宽度且无video节点。
+- `server.js`、`app.js`、`gallery-db.js`、`duplicates-worker.js`、访问日志测试脚本语法及`git diff --check`通过；完整diff/status在提交前复核。
+- 正式Node后端和实体iPad/iPhone尚未验证；正式HTTP已返回工作区静态`v88`，但后端仍返回旧版100条无分页字段响应，不能把隔离结果当作正式后端部署验收。
 
 ## Known Issues
 
-- Disable cache/HAR、Save-Data/慢网、亚秒级快速连点、长期内存和实体iPhone/iPad仍属于补充验收。
-- 媒体清理报告尚无自动保留和容量告警策略；当前禁止自动删除报告。
-- 结果深分页offset有50000条安全上限；更大集合应先使用分类或搜索缩小范围。
-- 项目没有登录、角色权限或完整API鉴权；正式远程删除必须继续关闭。
+- 实体iPad/iPhone、Disable cache/HAR、长期内存等仍需人工补测；本次iPad/iPhone结果为对应浏览器视口模拟。
+- 旧NDJSON原文件为升级安全而保留；它们已冻结、不再增长，但未来如需删除必须先确认备份/审计策略。
+- 页码分页使用OFFSET；当前一年约3.4万条规模可接受，达到百万级或出现深页性能问题后再评估游标分页。
+- 项目没有登录、角色权限或完整API鉴权；访问日志可能含IP和User-Agent，部署范围必须继续受控。
 
 ## Recommended Next Task
 
-人工审阅Unknown、Archive、最大体积候选、MetadataOrSidecar、Document、MediaFreeTree和SuspiciousTinyMedia；未取得下一轮单独授权前，不执行正式删除，也不清理正式报告或功能Worktree。
+如获正式重启和数据库迁移授权，使用现有任务托管脚本重启Node，并核对旧374条导入一次、正式分页响应、HTTP 200、`app.js?v=88`/`styles.css?v=88`及数据库备份边界；重启前先复核当前`status-gallery.ps1`报告的degraded状态和监听PID识别异常。
 
 ## Notes for Next Codex Session
 
 1. 严格按`AGENTS.md`顺序读取项目上下文。
-2. 正式代码和Runtime数据分离；测试根目录只能放在唯一TEMP目录。
-3. 正式媒体只允许只读扫描；DELETE测试只能针对隔离报告和TEMP根目录。
-4. 功能分支已完全进入正式main，但Worktree和远程分支仍保留；删除它们必须另行确认。
+2. 正式部署前不要用应用代码“只读打开”正式数据库；隔离测试继续使用唯一TEMP目录。
+3. 正式旧NDJSON文件不得在本次升级时删除；迁移依靠`source_key`保持重复启动幂等。
+4. 视频poster、`preload="none"`、按需加载和现有媒体清理边界均未改变。
