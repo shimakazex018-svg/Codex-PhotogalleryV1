@@ -33,6 +33,7 @@ const ffprobePath = process.env.FFPROBE_PATH || (path.basename(ffmpegPath).toLow
 const allowRemoteDelete = process.env.ALLOW_REMOTE_DELETE === "1" || process.env.ALLOW_REMOTE_DELETE === "true";
 const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
 const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
+const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
 const imagePreviewMaxEdge = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_MAX_EDGE) || 768, 320), 1600);
 const imagePreviewQuality = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_QUALITY) || 78, 40), 95);
 const duplicateRecycleLimit = 50000;
@@ -1187,7 +1188,7 @@ function sendDbResponse(response, callback) {
   }
 }
 
-function handleIndexApi(requestUrl, response) {
+function handleIndexApi(requestUrl, response, requestReceivedAt = performance.now()) {
   if (requestUrl.pathname === "/api/index/stats") {
     sendDbResponse(response, () => ({
       type: "sqlite",
@@ -1256,7 +1257,44 @@ function handleIndexApi(requestUrl, response) {
   }
 
   if (requestUrl.pathname === "/api/search") {
-    sendDbResponse(response, () => galleryDb.search(galleryDbFile, requestUrl.searchParams.get("q") || "", requestUrl.searchParams.get("limit") || ""));
+    const parameterParseStartedAt = performance.now();
+    const query = requestUrl.searchParams.get("q") || "";
+    const limit = requestUrl.searchParams.get("limit") || "";
+    const includePerformance = searchPerfLoggingEnabled && requestUrl.searchParams.get("perf") === "1";
+    const parameterParseMs = performance.now() - parameterParseStartedAt;
+    try {
+      const payload = galleryDb.search(galleryDbFile, query, limit, { includePerformance: searchPerfLoggingEnabled });
+      const databasePerformance = payload.performance || {};
+      if (!includePerformance) delete payload.performance;
+      const serializationStartedAt = performance.now();
+      const body = JSON.stringify(payload);
+      const jsonSerializationMs = performance.now() - serializationStartedAt;
+      const apiTotalMs = performance.now() - requestReceivedAt;
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Server-Timing": `search;dur=${apiTotalMs.toFixed(3)}`,
+      });
+      response.end(body);
+      if (searchPerfLoggingEnabled) {
+        console.log(JSON.stringify({
+          event: "search-performance",
+          receivedAt: new Date().toISOString(),
+          queryLength: String(query).length,
+          parameterParseMs: Math.round(parameterParseMs * 1000) / 1000,
+          ...databasePerformance,
+          jsonSerializationMs: Math.round(jsonSerializationMs * 1000) / 1000,
+          apiTotalMs: Math.round(apiTotalMs * 1000) / 1000,
+          collectionCount: payload.collections.length,
+          mediaCount: payload.media.length,
+          resultCount: payload.collections.length + payload.media.length,
+          hasMore: payload.hasMore,
+        }));
+      }
+    } catch (error) {
+      console.error("SQLite search failed:", error);
+      sendJsonError(response, 500, error.message);
+    }
     return true;
   }
 
@@ -2146,6 +2184,7 @@ function sendFile(request, response, filePath) {
 }
 
 function handleRequest(request, response) {
+  const requestReceivedAt = performance.now();
   const requestUrl = new URL(request.url, `http://${request.headers.host}`);
 
   if (requestUrl.pathname === "/api/config") {
@@ -2353,7 +2392,7 @@ function handleRequest(request, response) {
     return;
   }
 
-  if (handleIndexApi(requestUrl, response)) {
+  if (handleIndexApi(requestUrl, response, requestReceivedAt)) {
     return;
   }
 

@@ -38,6 +38,7 @@ function openDatabase(dbFile) {
 
     CREATE INDEX IF NOT EXISTS idx_collections_parent ON collections(parent_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_collections_title ON collections(title);
+    CREATE INDEX IF NOT EXISTS idx_collections_title_nocase ON collections(title COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_collections_mtime ON collections(mtime);
 
     CREATE TABLE IF NOT EXISTS media (
@@ -493,32 +494,188 @@ function getVideoSourceByPoster(dbFile, posterUrl) {
   });
 }
 
-function search(dbFile, query, limitValue = 50) {
+const searchCollectionColumns = `
+  c.id, c.parent_id, c.title, c.folder, c.path_parts, c.level,
+  c.cover, c.cover_thumb, c.image_count, c.video_count,
+  c.total_image_count, c.total_video_count, c.descendant_count, c.mtime,
+  (SELECT COUNT(*) FROM collections child WHERE child.parent_id = c.id) AS child_count
+`;
+
+const searchMediaColumns = `
+  id, collection_id, type, title, file_name, src,
+  thumb, detail_thumb, carousel_thumb, poster
+`;
+
+const searchSql = Object.freeze({
+  collectionExact: `
+    SELECT ${searchCollectionColumns}
+    FROM collections c
+    WHERE c.title = ? COLLATE NOCASE
+    LIMIT ?
+  `,
+  collectionPrefix: `
+    SELECT ${searchCollectionColumns}
+    FROM collections c
+    WHERE c.title >= ? COLLATE NOCASE
+      AND c.title < ? COLLATE NOCASE
+    ORDER BY c.title COLLATE NOCASE
+    LIMIT ?
+  `,
+  collectionContains: `
+    SELECT ${searchCollectionColumns}
+    FROM collections c
+    WHERE c.title LIKE ? ESCAPE '\\' COLLATE NOCASE
+       OR c.id LIKE ? ESCAPE '\\' COLLATE NOCASE
+    LIMIT ?
+  `,
+  mediaContains: `
+    SELECT ${searchMediaColumns}
+    FROM media
+    WHERE title LIKE ? ESCAPE '\\' COLLATE NOCASE
+       OR file_name LIKE ? ESCAPE '\\' COLLATE NOCASE
+       OR src LIKE ? ESCAPE '\\' COLLATE NOCASE
+    LIMIT ?
+  `,
+});
+
+function escapeLike(value) {
+  return String(value).replace(/[\\%_]/g, "\\$&");
+}
+
+function appendUniqueRows(target, seen, rows, maximum) {
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    target.push(row);
+    if (target.length >= maximum) break;
+  }
+}
+
+function roundedMilliseconds(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function search(dbFile, query, limitValue = 50, options = {}) {
+  const totalStartedAt = performance.now();
   const q = String(query || "").trim();
-  const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 200);
-  if (!q) return { query: q, collections: [], media: [] };
-  const like = `%${q}%`;
+  const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 60);
+  if (q.length < 2) return { query: q, collections: [], media: [], hasMore: false, minimumQueryLength: 2 };
+
+  const escaped = escapeLike(q);
+  const prefixUpperBound = `${q}\uffff`;
+  const contains = `%${escaped}%`;
+  const fetchLimit = limit + 1;
+  const openStartedAt = performance.now();
+  const db = openDatabase(dbFile);
+  const databaseOpenMs = performance.now() - openStartedAt;
+  let collectionSqlMs = 0;
+  let mediaSqlMs = 0;
+  let sortMs = 0;
+  let transformMs = 0;
+
+  try {
+    const collectionRows = [];
+    const collectionIds = new Set();
+    let prefixMatchCount = 0;
+
+    let sqlStartedAt = performance.now();
+    const exactRows = db.prepare(searchSql.collectionExact).all(q, fetchLimit);
+    collectionSqlMs += performance.now() - sqlStartedAt;
+    appendUniqueRows(collectionRows, collectionIds, exactRows, fetchLimit);
+
+    if (!exactRows.length && collectionRows.length < fetchLimit) {
+      sqlStartedAt = performance.now();
+      const prefixRows = db.prepare(searchSql.collectionPrefix).all(q, prefixUpperBound, fetchLimit - collectionRows.length);
+      collectionSqlMs += performance.now() - sqlStartedAt;
+      prefixMatchCount = prefixRows.length;
+      appendUniqueRows(collectionRows, collectionIds, prefixRows, fetchLimit);
+    }
+
+    if (!exactRows.length && prefixMatchCount === 0 && collectionRows.length < fetchLimit) {
+      sqlStartedAt = performance.now();
+      const containsRows = db.prepare(searchSql.collectionContains).all(contains, contains, fetchLimit - collectionRows.length);
+      collectionSqlMs += performance.now() - sqlStartedAt;
+      appendUniqueRows(collectionRows, collectionIds, containsRows, fetchLimit);
+    }
+
+    const collectionHasMore = collectionRows.length > limit;
+    const limitedCollectionRows = collectionRows.slice(0, limit);
+    const exactCollectionMatch = exactRows.length > 0;
+    const preferredCollectionMatch = exactCollectionMatch || prefixMatchCount > 0;
+    const mediaLimit = preferredCollectionMatch ? 0 : Math.max(limit - limitedCollectionRows.length, 0);
+    let mediaRows = [];
+
+    if (mediaLimit > 0) {
+      sqlStartedAt = performance.now();
+      mediaRows = db.prepare(searchSql.mediaContains).all(contains, contains, contains, mediaLimit + 1);
+      mediaSqlMs += performance.now() - sqlStartedAt;
+
+      const normalizedQuery = q.toLocaleLowerCase("en-US");
+      const sortStartedAt = performance.now();
+      mediaRows = mediaRows
+        .map((row, index) => ({
+          row,
+          index,
+          rank: `${row.title || ""} ${row.file_name || ""}`.toLocaleLowerCase("en-US").includes(normalizedQuery) ? 0 : 1,
+        }))
+        .sort((a, b) => a.rank - b.rank || a.index - b.index)
+        .map(({ row }) => row);
+      sortMs += performance.now() - sortStartedAt;
+    }
+
+    const mediaHasMore = mediaRows.length > mediaLimit;
+    const transformStartedAt = performance.now();
+    const collections = limitedCollectionRows.map(rowToCollection);
+    const media = mediaRows.slice(0, mediaLimit).map(rowToMedia);
+    transformMs += performance.now() - transformStartedAt;
+    const payload = {
+      query: q,
+      collections,
+      media,
+      hasMore: collectionHasMore || mediaHasMore,
+      limit,
+      exactCollectionMatch,
+      preferredCollectionMatch,
+    };
+
+    if (options.includePerformance) {
+      payload.performance = {
+        databaseOpenMs: roundedMilliseconds(databaseOpenMs),
+        collectionSqlMs: roundedMilliseconds(collectionSqlMs),
+        mediaSqlMs: roundedMilliseconds(mediaSqlMs),
+        countSqlMs: 0,
+        sortMs: roundedMilliseconds(sortMs),
+        transformMs: roundedMilliseconds(transformMs),
+        databaseTotalMs: roundedMilliseconds(performance.now() - totalStartedAt),
+      };
+    }
+    return payload;
+  } finally {
+    db.close();
+  }
+}
+
+function getSearchDiagnostics(dbFile, query = "test") {
+  const q = String(query || "test").trim() || "test";
+  const escaped = escapeLike(q);
+  return withDatabase(dbFile, (db) => ({
+    indexes: {
+      collections: db.prepare("PRAGMA index_list('collections')").all(),
+      media: db.prepare("PRAGMA index_list('media')").all(),
+    },
+    plans: {
+      collectionExact: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.collectionExact}`).all(q, 61),
+      collectionPrefix: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.collectionPrefix}`).all(q, `${q}\uffff`, 61),
+      collectionContains: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.collectionContains}`).all(`%${escaped}%`, `%${escaped}%`, 61),
+      mediaContains: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.mediaContains}`).all(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, 61),
+    },
+  }));
+}
+
+function optimizeDatabase(dbFile) {
   return withDatabase(dbFile, (db) => {
-    const collections = db
-      .prepare(
-        `SELECT c.*, (SELECT COUNT(*) FROM collections child WHERE child.parent_id = c.id) AS child_count
-         FROM collections c
-         WHERE c.title LIKE ? OR c.id LIKE ?
-         ORDER BY c.level, c.title
-         LIMIT ?`
-      )
-      .all(like, like, limit)
-      .map(rowToCollection);
-    const media = db
-      .prepare(
-        `SELECT * FROM media
-         WHERE title LIKE ? OR file_name LIKE ? OR src LIKE ?
-         ORDER BY type, title
-         LIMIT ?`
-      )
-      .all(like, like, like, limit)
-      .map(rowToMedia);
-    return { query: q, collections, media };
+    db.exec("PRAGMA optimize;");
+    return { optimized: true };
   });
 }
 
@@ -1005,6 +1162,8 @@ module.exports = {
   getImageSourceByThumbnail,
   getVideoSourceByPoster,
   search,
+  getSearchDiagnostics,
+  optimizeDatabase,
   getHighlightCandidates,
   getUserMarks,
   upsertUserMark,

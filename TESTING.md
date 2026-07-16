@@ -180,6 +180,19 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 `/api/scan`、查重扫描、回收、HLS 和打开路径有副作用或资源成本，不属于默认 smoke。
 
+## Search performance validation
+
+正式库只允许使用`DatabaseSync(..., {readOnly:true})`执行索引清单、计数和`EXPLAIN QUERY PLAN`；任何index创建、`PRAGMA optimize`或修改后基准必须使用SQLite在线备份的一致性副本。
+
+```powershell
+<node-exe> .\scripts\benchmark-search.js --db <isolated-gallery.db> --optimize
+<node-exe> .\scripts\test-search-api.js --db <isolated-gallery.db> --port <isolated-port>
+```
+
+通过标准：精确与前缀计划使用`idx_collections_title_nocase`，修改后无`USE TEMP B-TREE FOR ORDER BY/DISTINCT`；总结果不超过60，单字符返回0，结构化性能日志数量与请求数一致。允许媒体包含fallback显示`SCAN media`，但必须明确记录。浏览器用`?searchPerf=1`验证250ms防抖、旧请求取消/乱序保护、最多60卡片、全部懒加载WebP预览、0原图卡片URL、0video节点和0控制台warning/error。
+
+完整基线、SQL、计划和对比见`docs/SEARCH_PERFORMANCE_BASELINE_V95.md`。
+
 ## Access log isolated validation
 
 访问日志schema、旧NDJSON迁移、分页和保留清理只使用脚本创建的唯一TEMP Runtime：

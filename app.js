@@ -21,9 +21,10 @@ const text = {
   modelMissing: "\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u6a21\u7279\uff0c\u53ef\u80fd\u662f\u6587\u4ef6\u5939\u540d\u79f0\u5df2\u7ecf\u6539\u8fc7\u3002",
   workMissing: "\u6ca1\u6709\u627e\u5230\u8fd9\u4e2a\u4f5c\u54c1\uff0c\u53ef\u80fd\u662f\u4f5c\u54c1\u6587\u4ef6\u5939\u540d\u79f0\u5df2\u7ecf\u6539\u8fc7\u3002",
   noSearchResults: "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
+  searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v91";
+const APP_VERSION = "v95";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -36,6 +37,12 @@ const SCROLL_STATE_STORAGE_KEY = "galleryScrollStatesV1";
 const SCROLL_STATE_LIMIT = 75;
 const SCROLL_SAVE_DELAY_MS = 150;
 const SCROLL_RESTORE_TIMEOUT_MS = 2500;
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_RESULT_LIMIT = 60;
+const SEARCH_MIN_QUERY_LENGTH = 2;
+const SEARCH_CACHE_TTL_MS = 30000;
+const SEARCH_PERF_DEBUG = new URLSearchParams(window.location.search).get("searchPerf") === "1"
+  || localStorage.getItem("gallerySearchPerf") === "1";
 const HEIC_COMPATIBILITY_COLLECTION_ID = "杏子yada/亮点";
 const IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 10'%3E%3Crect width='16' height='10' fill='%23e4e7eb'/%3E%3C/svg%3E";
 
@@ -96,6 +103,9 @@ const state = {
   lazyImageObserver: null,
   pageAbortController: null,
   searchAbortController: null,
+  searchDebounceTimer: null,
+  searchRequestSequence: 0,
+  searchCache: new Map(),
   routeGeneration: 0,
   lightboxIndex: 0,
   lightboxScale: 1,
@@ -431,8 +441,11 @@ function beginPageNavigation() {
   cancelScrollRestoration();
   state.pageAbortController?.abort();
   state.searchAbortController?.abort();
+  clearTimeout(state.searchDebounceTimer);
   state.pageAbortController = new AbortController();
   state.searchAbortController = null;
+  state.searchDebounceTimer = null;
+  state.searchRequestSequence += 1;
   state.sqliteLoading = null;
   state.routeGeneration += 1;
 }
@@ -658,6 +671,11 @@ function setSearchQuery(value) {
   const previousQuery = state.searchQuery;
   const nextQuery = normalizeSearch(value);
   if (previousQuery === nextQuery) return;
+  clearTimeout(state.searchDebounceTimer);
+  state.searchDebounceTimer = null;
+  state.searchAbortController?.abort();
+  state.searchAbortController = null;
+  state.searchRequestSequence += 1;
   saveCurrentScrollPosition(true);
   state.searchQuery = nextQuery;
   replaceHistorySearchQuery(nextQuery);
@@ -1027,26 +1045,69 @@ async function loadSqliteCollection(parts) {
   return collection;
 }
 
+function applySqliteSearchPayload(query, payload, requestStartedAt = 0) {
+  if (state.searchQuery !== query) return;
+  const responseReceivedAt = performance.now();
+  const collections = (payload.collections || []).map(cacheSqliteCollection).filter(Boolean);
+  const media = (payload.media || []).map((item) => ({ ...item, galleryMedia: sqliteMediaToGalleryMedia(item) }));
+  state.sqliteSearch = {
+    query,
+    loading: false,
+    completed: true,
+    collections,
+    media,
+    hasMore: Boolean(payload.hasMore),
+  };
+  render();
+  if (SEARCH_PERF_DEBUG && requestStartedAt) {
+    const measurement = {
+      query,
+      frontendResponseMs: Math.round((responseReceivedAt - requestStartedAt) * 1000) / 1000,
+      frontendFirstRenderMs: Math.round((performance.now() - requestStartedAt) * 1000) / 1000,
+      resultCount: collections.length + media.length,
+      server: payload.performance || null,
+    };
+    view.dataset.searchResponseMs = String(measurement.frontendResponseMs);
+    view.dataset.searchFirstRenderMs = String(measurement.frontendFirstRenderMs);
+    window.__gallerySearchPerf = [...(window.__gallerySearchPerf || []).slice(-19), measurement];
+    console.info("search-performance", measurement);
+  }
+}
+
 function requestSqliteSearch() {
   const query = state.searchQuery;
-  if (!query || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
+  if (query.length < SEARCH_MIN_QUERY_LENGTH || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
+  const cached = state.searchCache.get(query);
+  if (cached && Date.now() - cached.storedAt < SEARCH_CACHE_TTL_MS) {
+    applySqliteSearchPayload(query, cached.payload);
+    return;
+  }
+  if (cached) state.searchCache.delete(query);
+
   state.sqliteSearch.loading = true;
-  state.searchAbortController?.abort();
-  state.searchAbortController = new AbortController();
-  fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=80`, { signal: state.searchAbortController.signal })
+  const requestSequence = ++state.searchRequestSequence;
+  clearTimeout(state.searchDebounceTimer);
+  state.searchDebounceTimer = setTimeout(() => {
+    state.searchDebounceTimer = null;
+    if (state.searchQuery !== query || requestSequence !== state.searchRequestSequence) return;
+    state.searchAbortController?.abort();
+    state.searchAbortController = new AbortController();
+    const requestStartedAt = performance.now();
+    const perfParameter = SEARCH_PERF_DEBUG ? "&perf=1" : "";
+    fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}${perfParameter}`, { signal: state.searchAbortController.signal })
     .then((payload) => {
-      if (state.searchQuery !== query) return;
-      const collections = (payload.collections || []).map(cacheSqliteCollection).filter(Boolean);
-      const media = (payload.media || []).map((item) => ({ ...item, galleryMedia: sqliteMediaToGalleryMedia(item) }));
-      state.sqliteSearch = { query, loading: false, collections, media };
-      render();
+      if (state.searchQuery !== query || requestSequence !== state.searchRequestSequence) return;
+      state.searchCache.set(query, { storedAt: Date.now(), payload });
+      if (state.searchCache.size > 20) state.searchCache.delete(state.searchCache.keys().next().value);
+      applySqliteSearchPayload(query, payload, requestStartedAt);
     })
     .catch((error) => {
       if (error.name === "AbortError") return;
-      if (state.searchQuery !== query) return;
-      state.sqliteSearch = { query, loading: false, collections: [], media: [] };
+      if (state.searchQuery !== query || requestSequence !== state.searchRequestSequence) return;
+      state.sqliteSearch = { query, loading: false, completed: true, collections: [], media: [] };
       render();
     });
+  }, SEARCH_DEBOUNCE_MS);
 }
 
 function renderSqliteRoute(parts) {
@@ -2026,7 +2087,7 @@ function renderSqliteSearchResults() {
     state.sqliteSearch = { query, loading: false, collections: [], media: [] };
   }
 
-  if (!state.sqliteSearch.loading && !state.sqliteSearch.collections.length && !state.sqliteSearch.media.length) {
+  if (query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && !state.sqliteSearch.completed) {
     requestSqliteSearch();
   }
 
@@ -2035,12 +2096,13 @@ function renderSqliteSearchResults() {
   const hasResults = collections.length || media.length;
   view.innerHTML = `
     <div class="search-summary">${escapeHtml(query)} / ${collections.length} ${text.works} / ${media.length} ${text.media}</div>
+    ${query.length < SEARCH_MIN_QUERY_LENGTH ? `<div class="empty-state">${text.searchMoreCharacters}</div>` : ""}
     ${state.sqliteSearch.loading ? `<div class="empty-state">${text.refreshing}</div>` : ""}
-    ${!state.sqliteSearch.loading && hasResults ? `
+    ${query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && hasResults ? `
       ${collections.length ? `<section class="search-section"><h2>目录</h2>${renderCollectionGrid(collections)}</section>` : ""}
       ${media.length ? `<section class="search-section"><h2>媒体</h2>${renderSqliteSearchMediaGrid(media)}</section>` : ""}
     ` : ""}
-    ${!state.sqliteSearch.loading && !hasResults ? `<div class="empty-state">${text.noSearchResults}</div>` : ""}
+    ${query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && state.sqliteSearch.completed && !hasResults ? `<div class="empty-state">${text.noSearchResults}</div>` : ""}
   `;
   return true;
 }

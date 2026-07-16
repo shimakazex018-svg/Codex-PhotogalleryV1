@@ -4,11 +4,13 @@
 
 ## Last Completed Task
 
-已将正式媒体回收根调整为`E:\回收站`并完成v91只读验收；媒体根与回收根同盘，实际回收将走`File.Move`。本次没有发送正式回收/恢复请求，也没有移动媒体。
+已完成v95搜索性能基线与低风险优化：真实正式库只读计划、真实数据一致性副本SQL/API对比、隔离浏览器请求/渲染验证均完成。正式数据库、端口、进程和媒体未修改，FTS5未实施。
 
 ## Current State
 
-- 源码和正式前端版本均为`v91`；静态资源缓存标记同步提升，44px操作按钮已在390×844实测。
+- 源码前端版本为`v95`；正式运行站仍为`v91`，本次未部署或重启。
+- `/api/search`默认50/最大60总结果，图集精确/前缀优先且使用`idx_collections_title_nocase`；媒体任意包含fallback仍可能`SCAN media`。
+- 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
 - 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
@@ -21,6 +23,10 @@
 
 ## Validation
 
+- 正式库只读确认7287个collections、474470条media；原计划为`SCAN c`/`SCAN media`和两个ORDER BY临时B-tree，正式v91十二词API为6.0-16.7秒。
+- 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约12-17ms，高频/路径/数字等约10-70ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
+- 隔离浏览器精确图集收到/首批渲染19.8/21.2ms，Maleah 60卡片13.0/17.6ms；60/60懒加载、0原图卡片URL、0video、快速旧词未覆盖新词、单字符不查询、控制台0 warning/error。
+- `scripts/benchmark-search.js`和`scripts/test-search-api.js`覆盖查询计划、索引、12类关键词、60上限、短词和结构化日志；完整结果见`docs/SEARCH_PERFORMANCE_BASELINE_V95.md`。
 - `scripts/test-media-cleanup-recycle.ps1`通过：同盘rename、强制copy-verify-delete、中文/空格/只读/0字节、冲突改名、ChangedSinceScan、Missing、复制失败、源删除失败、幂等和恢复冲突。
 - 隔离API通过：旧delete 410、错误确认400、LAN recycle/restore 403、localhost回收/恢复成功；`.partial`残留0，TEMP根最终不存在。
 - `server.js`、`app.js`、`gallery-db.js`、`duplicates-worker.js`语法检查通过；PowerShell worker解析通过。
@@ -37,6 +43,8 @@
 
 ## Known Issues
 
+- 媒体标题/文件名/路径的任意中间包含和无结果搜索仍使用`LIKE '%query%'`，实际计划仍为`SCAN media`；真实数据副本约2.3秒，是否进入FTS5应作为独立阶段决定。
+- 新索引和v95尚未部署到正式Runtime；部署时首次打开会幂等创建约7k行的`idx_collections_title_nocase`，仍应先备份并在低流量窗口精确重启验证。
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
 
@@ -47,7 +55,7 @@
 
 ## Recommended Next Task
 
-执行一次正式只读扫描回归但不要由Codex触发正式回收；用户随后在localhost核对容量/路径并手工确认。
+用户确认后，先备份正式`gallery.db`，再部署v95并在低流量窗口精确重启；复跑同一12词API和浏览器搜索回归。若稀疏/无结果约2.3秒仍不可接受，再单独进入FTS5设计阶段。
 
 ## Notes for Next Codex Session
 

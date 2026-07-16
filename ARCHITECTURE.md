@@ -58,6 +58,8 @@ Browser SPA
 
 前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
 
+搜索输入使用250ms防抖；关键词变化立即中止旧`fetch`，请求序号阻止乱序覆盖，同词结果在内存缓存30秒。空词和少于2字符不请求API。结果总数最多60，卡片继续使用按需WebP预览、`loading="lazy"`且不创建video播放器。开发时可用`SEARCH_PERF_LOG=1`和页面`?searchPerf=1`记录后端分段与前端首次渲染时间，正式默认关闭。
+
 灯箱使用两阶段图片显示：点击后立即复用卡片的按需WebP预览，当前原图完成网络加载和`decode()`后再替换。规范化原图URL是任务唯一键，任务状态覆盖`idle/queued/loading/loaded/decoding/ready/failed/aborted`；已加载或进行中的网络/解码Promise可复用。当前原图使用不计入普通并发的P0立即通道并设置`fetchPriority=high`，下一张为P1并提前解码，第二/第三张预测图为P3且只在当前图显示后调度；普通预加载最大并发2，缓存窗口最多5项，并按Save-Data/2G/3G降级。关闭灯箱或换路由会取消队列和旧会话任务并提升generation，render token阻止旧回调覆盖。列表只请求按需WebP预览，视口外图片保持懒加载并使用低请求优先级；视频数组不参与灯箱调度。
 
 滚动恢复由 `app.js` 管理：`history.scrollRestoration` 使用 `manual`，内存与 `sessionStorage` 最多保留75条路由快照。快照包含稳定DOM锚点、相对视口偏移、scrollY、已渲染媒体数量和分页游标；历史/父级返回按现有24张DOM批次和40条API分页补齐到锚点，普通新导航保持顶部。搜索词写入对应的History entry，Back/Forward和刷新可恢复搜索结果上下文。
@@ -114,6 +116,8 @@ Browser SPA
 ## Database architecture
 
 `gallery-db.js` 使用 `DatabaseSync` 直接访问 SQLite。
+
+搜索按图集精确名称、图集名称前缀、图集/路径包含、媒体标题/文件名/路径包含分段执行。`idx_collections_title_nocase`支持精确与范围前缀；图集优先占用同一60条预算，精确/前缀图集命中时不继续扫描媒体。媒体fallback只选择卡片字段并以`LIMIT remaining+1`判断更多结果，不执行COUNT或全量排序。任意`%query%`媒体搜索的查询计划仍为`SCAN media`，未来若需根治再单独评审FTS5。
 
 | 表 | 作用 |
 |---|---|
