@@ -3,7 +3,7 @@
 ## DEC-023：FTS5使用显式迁移、严格模式与安全降级
 
 ### Decision
-候选v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索引ready才用FTS，其他状态仅允许图集与两字符媒体标题精确/前缀；fts5不可用时明确返回unavailable；legacy必须人工显式启用。正式结构、规范化和查询复用DEC-022；迁移默认2000条事务批次并维护`not_created/building/ready/stale/error`状态，启动不自动build。
+v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索引ready才用FTS，其他状态仅允许图集与两字符媒体标题精确/前缀；fts5不可用时明确返回unavailable；legacy必须人工显式启用。正式结构、规范化和查询复用DEC-022；迁移默认2000条事务批次并维护`not_created/building/ready/stale/error`状态，启动不自动build。
 
 ### Reason
 完整媒体LIKE在稀疏和无结果词仍约2.3至2.6秒，不能作为索引故障的静默回退。mapping和独立FTS可以稳定增删改；最小状态记录使服务在部分迁移或文件系统不确定时安全降级。
@@ -12,7 +12,7 @@
 所有搜索字段变更需要同步media/mapping/FTS事务；文件移动与SQLite不能成为同一ACID事务，失败记录错误、标记stale并依赖手工重新扫描恢复。迁移必须显式路径、SQLite backup、integrity和一致性校验；不提供自动rebuild、DROP、影子切换或补偿事务。
 
 ### Status
-B1核心实现与完整副本验证有效；正式库/进程未修改。生产级扩展和Chrome自动验收不再作为项目待办或部署门槛。
+已于2026-07-16完成正式一致性备份、474470行迁移、完整校验并以`auto`部署；生产级扩展和Chrome自动验收不再作为项目待办或部署门槛。
 
 ## DEC-022：FTS5正式候选使用稳定映射与独立trigram索引
 

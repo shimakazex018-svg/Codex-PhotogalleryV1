@@ -82,6 +82,8 @@
 
 ## Done
 
+- [x] 将FTS5 Integration V96最小方案部署到正式Runtime：一致性备份、474470行迁移、完整校验、`auto`模式、48102与六类API验收通过；未执行媒体扫描。
+
 - [x] 完成并精简FTS5 Integration V96：保留mapped trigram、短词规则、严格搜索模式、媒体事务同步、最小状态、显式迁移/备份/quick-full校验和legacy回滚；停止生产级扩展，正式部署保持未执行。
 
 - [x] 完成FTS5 Prototype V96第二阶段A：Node/SQLite实际能力、474470行完整副本多结构构建、URL解码相对路径、稳定mapping、两字媒体词、50k bigram小原型、正确性/计划/体积/资源/一致性与一冷五热基准；未接正式schema/API/扫描器或部署。

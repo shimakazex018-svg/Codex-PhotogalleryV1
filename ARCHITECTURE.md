@@ -40,7 +40,7 @@ Browser SPA
 | 根目录`* Gallery.cmd` | 只负责双击入口和结果展示，全部复用`scripts/` PowerShell核心 |
 | `scripts/install/uninstall-gallery-autostart.ps1` | 管理唯一的当前用户登录任务`Codex-PhotogalleryV1-Autostart` |
 | `scripts/run-gallery-host.ps1` | 任务计划程序的长期宿主；注入环境、记录PID并等待Node退出，使任务保持Running |
-| `scripts/migrate-search-fts5.js`、`scripts/check-search-index.js` | 只对显式数据库副本运行的dry-run、备份、迁移、quick/full校验和optimize CLI；疑似正式写入路径拒绝 |
+| `scripts/migrate-search-fts5.js`、`scripts/check-search-index.js` | 显式路径的dry-run、备份、迁移、quick/full校验和optimize CLI；正式路径默认拒绝，仅明确维护窗口可加`--allow-formal-db` |
 | `scripts/*fts5*prototype*.js`、`scripts/prototype-media-bigram.js` | 阶段A历史基准；规范化复用正式核心，实验表不被server使用 |
 | `start-*.cmd/.ps1` | 旧的 Windows 启动入口；不作为 V1.4 runtime 入口 |
 | `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
@@ -62,7 +62,7 @@ Browser SPA
 
 前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
 
-搜索输入使用250ms防抖；关键词变化立即中止旧`fetch`，请求序号阻止乱序覆盖，同词结果在内存缓存30秒。空词和少于2字符不请求API。结果总数最多60，卡片继续使用按需WebP预览、`loading="lazy"`且不创建video播放器。候选v96显示FTS降级和两字符限制提示。开发时可用`SEARCH_PERF_LOG=1`和页面`?searchPerf=1`记录后端分段与前端首次渲染时间，正式默认关闭。
+搜索输入使用250ms防抖；关键词变化立即中止旧`fetch`，请求序号阻止乱序覆盖，同词结果在内存缓存30秒。空词和少于2字符不请求API。结果总数最多60，卡片继续使用按需WebP预览、`loading="lazy"`且不创建video播放器。v96显示FTS降级和两字符限制提示。开发时可用`SEARCH_PERF_LOG=1`和页面`?searchPerf=1`记录后端分段与前端首次渲染时间，正式默认关闭。
 
 灯箱使用两阶段图片显示：点击后立即复用卡片的按需WebP预览，当前原图完成网络加载和`decode()`后再替换。规范化原图URL是任务唯一键，任务状态覆盖`idle/queued/loading/loaded/decoding/ready/failed/aborted`；已加载或进行中的网络/解码Promise可复用。当前原图使用不计入普通并发的P0立即通道并设置`fetchPriority=high`，下一张为P1并提前解码，第二/第三张预测图为P3且只在当前图显示后调度；普通预加载最大并发2，缓存窗口最多5项，并按Save-Data/2G/3G降级。关闭灯箱或换路由会取消队列和旧会话任务并提升generation，render token阻止旧回调覆盖。列表只请求按需WebP预览，视口外图片保持懒加载并使用低请求优先级；视频数组不参与灯箱调度。
 

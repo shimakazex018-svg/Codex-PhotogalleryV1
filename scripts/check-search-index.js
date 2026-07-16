@@ -3,7 +3,7 @@
 const searchFts = require("../search-fts");
 const cli = require("./search-fts-cli-lib");
 
-const dbFile = cli.requireExplicitDatabase();
+const dbFile = cli.requireExplicitDatabase({ allowFormal: process.argv.includes("--allow-formal-db") });
 const quick = process.argv.includes("--quick");
 const full = process.argv.includes("--full");
 if ([quick, full].filter(Boolean).length !== 1) throw new Error("Choose exactly one: --quick or --full");

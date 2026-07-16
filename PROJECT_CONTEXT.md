@@ -6,9 +6,9 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端候选版本标记：`v96`（`app.js` 中的 `APP_VERSION`）；正式运行站仍为v91，未部署本候选。
+- 当前前端版本标记：`v96`（`app.js` 中的`APP_VERSION`）；正式运行站已部署v96。
 - 当前稳定发布标签：`v1.3-release`。
-- 当前开发分支：`codex/fts5-integration-v96`；正式部署仍来自main/v91，本候选未合并或发布。
+- 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
 ## Current implementation state
 
@@ -36,8 +36,8 @@
 - 图片灯箱立即显示点击处WebP预览；当前原图走独立P0高优先级通道，下一张以P1提前加载并解码，其余预测原图在并发2、有界5项窗口内按网络条件加载；
 - 图片缩略图、懒加载和分批渲染；
 - 视频 poster、按需加载和 HTTP Range；
-- SQLite 索引、搜索和分页媒体查询；候选v96支持`auto/fts5/legacy-like`，2字符只搜媒体标题精确/前缀，3字符以上在ready状态使用mapped trigram FTS；auto不自动执行完整媒体LIKE。
-- FTS5 Integration V96已接入候选API、媒体事务同步、基本状态及最小CLI迁移/备份/校验；完整474470行副本通过。正式数据库尚无FTS表，正式站未重启或部署；是否部署由用户另行决定，不再追加生产级迁移或Chrome自动验收工程。
+- SQLite 索引、搜索和分页媒体查询；正式v96支持`auto/fts5/legacy-like`，2字符只搜媒体标题精确/前缀，3字符以上在ready状态使用mapped trigram FTS；auto不自动执行完整媒体LIKE。
+- FTS5 Integration V96已部署正式Runtime：正式库media/mapping/FTS均474470、状态ready，`SEARCH_BACKEND_MODE=auto`实际使用FTS5；不自动执行媒体LIKE或全库扫描。
 - 设置页收藏图册、观看历史和用户标记；
 - hash路由的会话级滚动位置恢复，包含搜索词、稳定锚点和有界媒体深度恢复；
 - 首页轮播；

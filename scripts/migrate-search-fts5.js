@@ -6,7 +6,8 @@ const { backup } = require("node:sqlite");
 const searchFts = require("../search-fts");
 const cli = require("./search-fts-cli-lib");
 
-const dbFile = cli.requireExplicitDatabase();
+const allowFormal = process.argv.includes("--allow-formal-db");
+const dbFile = cli.requireExplicitDatabase({ allowFormal });
 const batchSize = Math.min(Math.max(Number(cli.argumentValue("--batch-size", "2000")) || 2000, 100), 10000);
 const operations = ["--dry-run", "--apply", "--verify", "--optimize", "--backup"].filter((flag) => process.argv.includes(flag));
 if (operations.length !== 1) throw new Error("Choose exactly one operation: --dry-run, --backup, --apply, --verify, or --optimize");
@@ -37,7 +38,9 @@ async function createBackup() {
   if (!destinationValue) throw new Error("--backup requires --output <new-backup.db>");
   const destination = path.resolve(destinationValue);
   if (fs.existsSync(destination)) throw new Error(`Refusing to overwrite backup: ${destination}`);
-  if (searchFts.isSuspectedFormalDatabase(destination)) throw new Error(`Refusing suspected formal destination: ${destination}`);
+  if (searchFts.isSuspectedFormalDatabase(destination) && !allowFormal) {
+    throw new Error(`Refusing suspected formal destination without --allow-formal-db: ${destination}`);
+  }
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const before = cli.databaseIdentity(dbFile);
   const source = cli.openDatabase(dbFile, true);

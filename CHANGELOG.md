@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-16 - Deploy FTS5 search v96 to the formal runtime
+
+- Added an explicit `--allow-formal-db` maintenance-window override while preserving default formal-path refusal, and allowed the runtime launcher to validate and inject `SEARCH_BACKEND_MODE=auto`.
+- Created and integrity-checked a timestamped SQLite backup, migrated 474,470 media rows, verified equal media/mapping/FTS counts with zero consistency differences, and optimized the index.
+- Restarted the task-hosted formal service on port 48102 with FTS5 active; six search classes returned HTTP 200 without a `SCAN media` plan, and no filesystem scan was started.
+
 ## 2026-07-16 - Simplify FTS5 integration to the personal-site core
 
 - Kept mapped trigram search, two-character title lookup, strict search modes, bounded frontend requests, transactional media/FTS CRUD, basic status, consistency backup and legacy rollback.

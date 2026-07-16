@@ -8,7 +8,8 @@ function Read-GalleryEnvironment {
     "PORT", "DATA_DIR", "PHOTOS_DIR", "THUMBNAIL_DIR", "POSTER_DIR",
     "HLS_DIR", "TRASH_DIR", "FFMPEG_PATH", "FFPROBE_PATH", "ALLOW_REMOTE_DELETE",
     "ENABLE_IMAGE_THUMBNAIL_GENERATION", "ENABLE_IMAGE_PREVIEW_GENERATION",
-    "IMAGE_PREVIEW_DIR", "IMAGE_PREVIEW_MAX_EDGE", "IMAGE_PREVIEW_QUALITY", "HLS_CACHE_EXPIRE_DAYS"
+    "IMAGE_PREVIEW_DIR", "IMAGE_PREVIEW_MAX_EDGE", "IMAGE_PREVIEW_QUALITY", "HLS_CACHE_EXPIRE_DAYS",
+    "SEARCH_BACKEND_MODE"
   )
   $values = @{}
 
@@ -69,6 +70,9 @@ function Test-GalleryEnvironment {
   }
   if ($Config.ENABLE_IMAGE_PREVIEW_GENERATION -notin @("1", "true")) {
     throw "V2.0.1 requires ENABLE_IMAGE_PREVIEW_GENERATION=1."
+  }
+  if ($Config.SEARCH_BACKEND_MODE -notin @("auto", "fts5", "legacy-like")) {
+    throw "SEARCH_BACKEND_MODE must be auto, fts5, or legacy-like."
   }
   $previewMaxEdge = 0
   $previewQuality = 0
@@ -142,4 +146,5 @@ function Set-GalleryProcessEnvironment {
   $env:IMAGE_PREVIEW_MAX_EDGE = $Config.IMAGE_PREVIEW_MAX_EDGE
   $env:IMAGE_PREVIEW_QUALITY = $Config.IMAGE_PREVIEW_QUALITY
   $env:HLS_CACHE_EXPIRE_DAYS = $Config.HLS_CACHE_EXPIRE_DAYS
+  $env:SEARCH_BACKEND_MODE = $Config.SEARCH_BACKEND_MODE
 }

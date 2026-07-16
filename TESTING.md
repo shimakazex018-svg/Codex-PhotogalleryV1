@@ -320,7 +320,7 @@ For changes to the floating back-to-top control, verify:
 ## Database checks
 
 - 禁止用当前应用代码“只读打开”生产源库；数据库打开逻辑会启用 WAL 并保证 schema/index。
-- 迁移检查只对显式数据库副本执行。
+- 迁移检查默认只对显式数据库副本执行；已获正式维护授权时必须停服务、先备份，并为相同命令显式增加`--allow-formal-db`。
 - 迁移前记录源/目标大小、mtime 和 SHA-256。
 - SQLite 完整性检查工具/命令：待确认正式环境可用的只读工具后补充。
 - 运行后可用 `/api/index/stats` 核对 collection/media/image/video 数量。

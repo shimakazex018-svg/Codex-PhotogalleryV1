@@ -4,13 +4,13 @@
 
 ## Last Completed Task
 
-已完成FTS5 Integration V96精简清理：保留mapped trigram、两字符标题规则、严格`auto/fts5/legacy-like`模式、媒体事务同步、最小状态、显式迁移/一致性备份/quick-full校验和legacy回滚；删除生产级恢复编排、完整副本benchmark脚本及Chrome/全库压力部署门槛。正式数据库、PID 2064、48102和正式媒体未修改，v96未部署。
+已完成FTS5 Integration V96最小正式部署：时间戳一致性备份、474470行迁移、verify/optimize/full、`auto`配置、48102重启和六类API验收均通过；正式媒体未扫描或修改。
 
 ## Current State
 
-- 源码候选前端版本为`v96`；正式运行站仍为`v91`，本次未部署或重启。
+- 源码及正式运行站均为`v96`；正式Node PID为22196，监听`0.0.0.0:48102`。
 - 候选`/api/search`默认50/最大60总结果，图集流程不变；2字符只搜媒体title精确/前缀，3字符以上ready时使用mapped trigram FTS。auto不可用时安全降级，不自动`SCAN media`；legacy-like只能显式启用。
-- 正式库目前不存在FTS表。候选表为`media_search_documents`、`media_search_fts`和最小`search_fts_state`，完整说明及命令见`docs/SEARCH_FTS5_INTEGRATION_V96.md`。
+- 正式库已包含`media_search_documents`、`media_search_fts`和最小`search_fts_state`，三表状态ready；正式配置为`SEARCH_BACKEND_MODE=auto`，实际模式fts5。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
@@ -23,6 +23,11 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- 正式迁移前备份为`D:\GalleryRuntime\backups\gallery-pre-fts5-v96-20260716-162140.db`，1169928192字节、integrity ok、media 474470、collections 7287；正式库迁移后1461190656字节。
+- 正式apply 98.847秒；media/mapping/FTS均474470，缺失、孤立、重复和title/path mismatch为0。独立verify 76.227秒、full 75.688秒，SQLite与FTS integrity通过。
+- 正式六类API均HTTP 200、模式fts5、状态ready；三次中位为完整图集38.453ms、两字36.189ms、三字52.238ms、英文57.865ms、稀疏文件名31.420ms、无结果32.450ms。实际计划无`SCAN media`。
+- 首页、v96静态资源、设置相关API、根图集、图集详情、60条媒体分页和搜索缩略图均HTTP 200；scan状态idle，stderr为空。
 
 - B1完整干净副本apply 142.979秒（含逐条对照、FTS维护），迁移后1,461,190,656字节，增量291,262,464字节；峰值RSS143,560,704、WAL14,691,952。media/mapping/FTS均474470，所有缺失/孤立/重复/title/path mismatch为0，SQLite integrity ok。
 - 隔离API稀疏词冷/热中位37.020/32.007ms，无结果37.992/30.069ms；legacy对照约2.38至2.61秒。最终计划没有`SCAN media`或临时排序树。
@@ -55,10 +60,8 @@
 
 ## Known Issues
 
-- 正式运行站仍使用旧搜索并可能`SCAN media`；候选v96尚未部署或迁移正式库。
 - FTS5额外生产级扩展和浏览器自动化验收已停止，不再是项目待办或部署门槛。
 - trigram不支持两字中间包含；当前推荐只允许两字`title`精确/前缀。URL解码相对路径会有意移除`photos`固定根和编码字节串的偶然LIKE语义，同时新增自然中文路径命中。
-- 新索引和v95尚未部署到正式Runtime；部署时首次打开会幂等创建约7k行的`idx_collections_title_nocase`，仍应先备份并在低流量窗口精确重启验证。
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
 
@@ -69,7 +72,7 @@
 
 ## Recommended Next Task
 
-没有FTS生产级扩展后续任务。若用户未来明确决定部署，只执行人工备份、显式migration、quick/full校验、配置切换和普通页面手工验收；不得自动迁移或发布。
+用户在`http://192.168.31.153:48102/`完成人工Chrome搜索与页面验收；不需要修复或自动控制Chrome Extension。
 
 ## Notes for Next Codex Session
 

@@ -1,6 +1,6 @@
 # Search FTS5 Integration V96
 
-> 当前范围：个人局域网写真图集的最小 FTS5 搜索实现。正式数据库、正式媒体、PID 2064 和端口 48102 未修改，本候选未部署。
+> 当前范围：个人局域网写真图集的最小 FTS5 搜索实现。2026-07-16已完成正式数据库迁移并部署到48102；正式媒体未扫描或修改。
 
 ## 1. 保留的搜索结构
 
@@ -65,6 +65,8 @@ node scripts/check-search-index.js --db <copy.db> --quick
 node scripts/check-search-index.js --db <copy.db> --full
 ```
 
+正式维护窗口只有在已经获得明确部署授权时，才可为同一命令增加`--allow-formal-db`；默认仍拒绝正式路径。
+
 quick 检查三表数量、缺失、孤立、重复映射、SQLite quick check 和 FTS integrity；full 额外逐条比较 title/相对路径并执行 SQLite integrity check。
 
 备份使用 SQLite `backup()` 获得一致快照，不覆盖已有文件，完成后检查 integrity 和基础业务计数。恢复只保留为人工离线操作，不提供自动文件替换或远程恢复接口。
@@ -87,6 +89,8 @@ Node.js v24.14.0、SQLite 3.51.2 下已验证 FTS5、trigram、中文 Unicode、
 
 核心隔离测试覆盖：迁移、稳定 rowid、媒体新增/更新/删除、事务失败回滚、stale 安全降级、重新扫描恢复、legacy-like 回滚和完整一致性。
 
+正式部署结果：迁移前/后数据库为1,169,928,192/1,461,190,656字节；media、mapping、FTS均474,470；完整检查所有差异为0，SQLite和FTS integrity通过。`auto`实际模式为`fts5`，稀疏文件名和无结果三次中位分别为31.420ms和32.450ms，执行计划没有`SCAN media`。
+
 ## 7. 范围边界
 
-FTS5 搜索优化到本最小方案结束，不再保留额外生产级扩展或浏览器自动化验收计划。是否迁移和部署由用户未来单独决定。
+FTS5搜索优化和最小正式部署到此结束，不再保留额外生产级扩展或浏览器自动化验收计划。

@@ -11,12 +11,14 @@ function argumentValue(name, fallback = "") {
   return index >= 0 && process.argv[index + 1] !== undefined ? process.argv[index + 1] : fallback;
 }
 
-function requireExplicitDatabase() {
+function requireExplicitDatabase(options = {}) {
   const value = argumentValue("--db");
   if (!value) throw new Error("--db <database-copy-path> is required");
   const dbFile = path.resolve(value);
   if (!fs.existsSync(dbFile) || !fs.statSync(dbFile).isFile()) throw new Error(`Database does not exist: ${dbFile}`);
-  if (searchFts.isSuspectedFormalDatabase(dbFile)) throw new Error(`Refusing suspected formal database: ${dbFile}`);
+  if (searchFts.isSuspectedFormalDatabase(dbFile) && !options.allowFormal) {
+    throw new Error(`Refusing suspected formal database without --allow-formal-db: ${dbFile}`);
+  }
   return dbFile;
 }
 
