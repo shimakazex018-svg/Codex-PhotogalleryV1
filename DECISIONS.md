@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-022：FTS5正式候选使用稳定映射与独立trigram索引
+
+### Decision
+第二阶段B如获授权，媒体三字以上搜索使用`media_search_documents(fts_rowid INTEGER PRIMARY KEY, media_id TEXT UNIQUE)`加独立内部内容FTS5表，FTS字段仅为`title`和去固定`/photos/`、统一分隔符并安全URL解码的`relative_src`。查询按标题MATCH、路径MATCH共享最多61个rowid，再经mapping和`media.id`主键回表。1字不搜媒体；2字由新增`idx_media_title_nocase`做标题精确/前缀；3字以上才启用trigram。阶段A只定型，不创建正式表。
+
+### Reason
+完整474470行副本显示`file_name`100%为空、`src`100%带`/photos/`且使用URL编码。直接外部内容表需要依赖不稳定的隐藏`media.rowid`且难以可信审计；把TEXT media_id只存为FTS UNINDEXED列又无法高效更新/删除。稳定mapping只比无映射解码表增加约25.2MiB，却提供O(log n)定位和三层一致性检查。最终FTS候选增量约271.1MiB；两字NOCASE索引逻辑大小约6.8MiB；稀疏/无结果最新原型总时间约34/27ms。
+
+### Impact
+第二阶段B必须先备份和实现显式迁移、三表一致性命令、扫描/删除/移动事务同步及LIKE回滚，再切正式API。用户输入只作为双引号phrase组成固定列MATCH并整体参数化；不得用FTS LIKE短词后备。网站启动不得自动全量rebuild，bigram仍不进入正式结构。
+
+### Status
+阶段A定型有效；仅完整副本和隔离脚本验证，正式数据库、API、扫描器、前端版本和部署均未修改。
+
 ## DEC-021：搜索先做有界分段查询并保留FTS5为独立阶段
 
 ### Decision

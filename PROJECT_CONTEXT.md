@@ -37,6 +37,7 @@
 - 图片缩略图、懒加载和分批渲染；
 - 视频 poster、按需加载和 HTTP Range；
 - SQLite 索引、搜索和分页媒体查询；搜索总结果默认50/最大60，图集精确/前缀优先，任意媒体子串仍可能扫描完整`media`表；
+- FTS5 Prototype V96已在正式库一致性副本上完成能力、完整构建、短词、正确性、体积、计划和一致性验证；推荐结构为稳定`media_id`映射表加独立trigram FTS，索引`title`与解码相对路径。本结构尚未接入正式schema/API/扫描器或部署。
 - 设置页收藏图册、观看历史和用户标记；
 - hash路由的会话级滚动位置恢复，包含搜索词、稳定锚点和有界媒体深度恢复；
 - 首页轮播；
@@ -77,6 +78,7 @@
 - 旧`access-YYYY-MM-DD.log`会按内容哈希幂等导入`access_logs`且原文件保留；新访问记录只写SQLite。
 - 当前打开逻辑会启用 WAL 和 `synchronous=NORMAL`。
 - 没有独立数据库 migration 文件。
+- 仓库包含显式参数启动的FTS5离线原型脚本；脚本目标被限制在Git忽略的`tmp/fts5-prototype`，网站启动不会创建或重建FTS。
 
 ## Deprecated or disabled behavior
 

@@ -38,6 +38,7 @@ Browser SPA
 | 根目录`* Gallery.cmd` | 只负责双击入口和结果展示，全部复用`scripts/` PowerShell核心 |
 | `scripts/install/uninstall-gallery-autostart.ps1` | 管理唯一的当前用户登录任务`Codex-PhotogalleryV1-Autostart` |
 | `scripts/run-gallery-host.ps1` | 任务计划程序的长期宿主；注入环境、记录PID并等待Node退出，使任务保持Running |
+| `scripts/*fts5*.js`、`scripts/prototype-media-bigram.js` | 只对显式实验副本运行的FTS5能力、构建、语义、基准、一致性与短词原型；不被server启动或正式搜索导入 |
 | `start-*.cmd/.ps1` | 旧的 Windows 启动入口；不作为 V1.4 runtime 入口 |
 | `fix-network-access-48101.*` | 当前端口绑定的 Windows 防火墙/ZeroTier 辅助工具 |
 
@@ -118,6 +119,8 @@ Browser SPA
 `gallery-db.js` 使用 `DatabaseSync` 直接访问 SQLite。
 
 搜索按图集精确名称、图集名称前缀、图集/路径包含、媒体标题/文件名/路径包含分段执行。`idx_collections_title_nocase`支持精确与范围前缀；图集优先占用同一60条预算，精确/前缀图集命中时不继续扫描媒体。媒体fallback只选择卡片字段并以`LIMIT remaining+1`判断更多结果，不执行COUNT或全量排序。任意`%query%`媒体搜索的查询计划仍为`SCAN media`，未来若需根治再单独评审FTS5。
+
+FTS5 Prototype V96只形成下一阶段候选架构：`media_search_documents(fts_rowid, media_id UNIQUE)`稳定映射到独立内部内容trigram FTS的`rowid`，字段为`title`和去`/photos/`并URL解码的`relative_src`。原型计划为FTS虚拟表约束→mapping整数主键→media文本主键；正式运行数据流尚未采用该结构。
 
 | 表 | 作用 |
 |---|---|

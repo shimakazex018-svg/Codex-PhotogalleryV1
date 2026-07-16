@@ -193,6 +193,24 @@ Invoke-RestMethod "$baseUrl/api/duplicates/status"
 
 完整基线、SQL、计划和对比见`docs/SEARCH_PERFORMANCE_BASELINE_V95.md`。
 
+### FTS5 Prototype V96 isolated validation
+
+所有写入目标必须显式位于Git忽略的`tmp/fts5-prototype`，正式源库只允许`readOnly + query_only + node:sqlite backup()`。禁止把正式库传给`--db`。
+
+```powershell
+<node-exe> .\scripts\detect-fts5.js
+<node-exe> .\scripts\build-fts5-prototype.js --source <formal-gallery.db> --db <repo>\tmp\fts5-prototype\mapped\gallery.db --variant mapped --batch-size 2000 --replace --output <repo>\tmp\fts5-prototype\mapped\build.json
+<node-exe> .\scripts\benchmark-fts5.js --db <repo>\tmp\fts5-prototype\mapped\gallery.db --variant mapped --output <repo>\tmp\fts5-prototype\mapped\benchmark.json
+<node-exe> .\scripts\check-fts5-query-semantics.js --db <repo>\tmp\fts5-prototype\mapped\gallery.db --table media_search_fts_mapped
+<node-exe> .\scripts\prototype-media-bigram.js --source <repo>\tmp\fts5-prototype\mapped\gallery.db --db <repo>\tmp\fts5-prototype\bigram\bigram.db --sample-size 50000 --query 扫码
+<node-exe> .\scripts\inspect-fts5-short-index.js --db <repo>\tmp\fts5-prototype\mapped\gallery.db
+<node-exe> .\scripts\test-fts5-prototype.js
+```
+
+若完整LIKE正确性和一致性已单独完成，只复测索引对齐后的原型时间可使用`--skip-reference --skip-consistency`；该模式不能替代首次完整验收。
+
+通过标准：FTS5/trigram/中文与维护命令实测通过；完整副本media/documents/FTS均474470，缺失、孤立、字段不一致和失败均0；原LIKE为`SCAN media`，FTS为虚拟表MATCH约束，回表使用mapping整数主键和media文本主键；稀疏/无结果原型总时间低于100ms；WAL有界且最终截断；误指正式目标被拒绝。完整结果见`docs/SEARCH_FTS5_PROTOTYPE_V96.md`。
+
 ## Access log isolated validation
 
 访问日志schema、旧NDJSON迁移、分页和保留清理只使用脚本创建的唯一TEMP Runtime：

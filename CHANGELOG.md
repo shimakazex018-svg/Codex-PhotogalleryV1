@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-16 - Validate and define FTS5 Prototype V96
+
+- Verified the actual Node 24.14.0 / SQLite 3.51.2 runtime supports FTS5, trigram Unicode, MATCH, trigram LIKE and FTS maintenance commands; confirmed the less-than-three-code-point limitation and safe MATCH quoting behavior.
+- Built and compared external-content, independent raw-path, compact, URL-decoded and stable-mapping FTS structures on full 474,470-row online-backup copies without changing the formal database or process.
+- Selected a stable `media_id` mapping plus independent internal-content trigram index over `title` and decoded relative path. The final copy added 284,315,648 bytes, built in 89.052 seconds with 2,000-row transactions, peaked at 141,426,688-byte RSS and 14,893,832-byte WAL, and passed SQLite/FTS plus three-layer consistency checks.
+- Reduced sparse filename/no-result prototype totals from about 2.3 seconds to 34.320/26.717ms cold and 24.346/22.015ms hot medians in the final indexed run; repeated indexed cold runs remained below 81/27ms. Kept the formal `/api/search`, frontend v95, scanner and deployment unchanged.
+- Measured the case-insensitive two-character title prefix index at 7,127,040 logical bytes and 2.486 seconds; it reuses `idx_media_title_nocase` range plans instead of a media scan.
+- Validated the two-character media-only term `扫码`: four title-prefix rows via the candidate `idx_media_title_nocase`, zero trigram rows. A 50k Chinese-bigram feasibility sample found 4/4 but remains outside the recommended formal structure.
+- Added isolated capability, build, benchmark, MATCH/LIKE semantics, bigram and end-to-end safety scripts plus `docs/SEARCH_FTS5_PROTOTYPE_V96.md`.
+
 ## 2026-07-16 - Bound and instrument SQLite search v95
 
 - Measured the formal v91 search path read-only against 7,287 collections and 474,470 media rows. The original plans used collection/media scans plus temporary ORDER BY B-trees, with the 12-query loopback baseline ranging from 6.0 to 16.7 seconds.

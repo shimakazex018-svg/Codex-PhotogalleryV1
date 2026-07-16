@@ -4,12 +4,13 @@
 
 ## Last Completed Task
 
-已完成v95搜索性能基线与低风险优化：真实正式库只读计划、真实数据一致性副本SQL/API对比、隔离浏览器请求/渲染验证均完成。正式数据库、端口、进程和媒体未修改，FTS5未实施。
+已完成FTS5 Prototype V96第二阶段A：实际Node/SQLite能力、完整474470行一致性副本多结构构建、短词/正确性/体积/资源/计划/性能/一致性和bigram小原型均完成，并定型稳定mapping+独立trigram结构。正式数据库、API、扫描器、前端版本、端口和进程未修改，v96未发布。
 
 ## Current State
 
 - 源码前端版本为`v95`；正式运行站仍为`v91`，本次未部署或重启。
 - `/api/search`默认50/最大60总结果，图集精确/前缀优先且使用`idx_collections_title_nocase`；媒体任意包含fallback仍可能`SCAN media`。
+- FTS5阶段A仅新增显式离线脚本和报告；推荐第二阶段B使用`media_search_documents(fts_rowid,media_id UNIQUE)`映射到独立FTS的rowid，索引`title`和URL解码相对路径。正式库目前不存在这些表。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
@@ -23,6 +24,12 @@
 
 ## Validation
 
+- 实际Node v24.14.0/SQLite 3.51.2支持FTS5、trigram中文、MATCH、trigram LIKE及`integrity-check/optimize/rebuild`；trigram MATCH少于3个code point返回0。
+- 最终mapped完整副本：media/documents/FTS均474470，缺失、孤立、字段不一致、构建失败均0；SQLite完整性为ok。DB增量284315648字节，2000条批次构建89.052秒，FTS维护9.943秒，峰值RSS141426688字节、WAL14893832字节，结束后WAL/SHM/journal均0。
+- 计划从原`SCAN media`变为`VIRTUAL TABLE INDEX 0:M2`，回表使用documents INTEGER PRIMARY KEY和`sqlite_autoindex_media_1(id=?)`；图集精确/前缀使用`idx_collections_title_nocase`，两字标题前缀使用新增候选`idx_media_title_nocase`（逻辑7127040字节、构建2.486秒）。最新稀疏文件名冷/热中位34.320/24.346ms，无结果26.717/22.015ms；重复索引对齐跑稀疏冷最高80.311ms、`jpg`冷最高114.228ms，OS缓存未强制清空。
+- 两字媒体专属词`扫码`为图集0、media LIKE 4、title前缀4、trigram 0；候选`idx_media_title_nocase`范围计划生效。50k汉字bigram小样本为4/4、0误差、约3.23MB，但未纳入正式推荐结构。
+- 隔离`test-fts5-prototype.js`通过正式目标拒绝、mapped构建、中文标题、解码路径、两字前缀、计划和三层一致性；完整报告见`docs/SEARCH_FTS5_PROTOTYPE_V96.md`。
+- 补v95图集索引后的合并全套参考重跑在600秒上限被终止且未覆盖旧结果；`--skip-reference --skip-consistency`隔离性能重跑4秒通过。完整正确性/一致性来自同schema/同源的前一完整跑，最终重建`integrity_check=ok`。
 - 正式库只读确认7287个collections、474470条media；原计划为`SCAN c`/`SCAN media`和两个ORDER BY临时B-tree，正式v91十二词API为6.0-16.7秒。
 - 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约37-39ms，高频/路径/数字等约12-85ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
 - 隔离浏览器精确图集收到/首批渲染35.1/36.3ms，Maleah 60卡片18.2/25.9ms；60/60懒加载、0原图卡片URL、0video、快速旧词未覆盖新词、单字符不查询、控制台0 warning/error。
@@ -43,7 +50,8 @@
 
 ## Known Issues
 
-- 媒体标题/文件名/路径的任意中间包含和无结果搜索仍使用`LIKE '%query%'`，实际计划仍为`SCAN media`；真实数据副本约2.3秒，是否进入FTS5应作为独立阶段决定。
+- 正式媒体搜索仍使用`LIKE '%query%'`并可能`SCAN media`；FTS5只在副本定型，尚未迁移或接入。正式切换前必须实现三表事务同步、一致性dry-run、备份/回滚和scanner/清理/移动事件覆盖。
+- trigram不支持两字中间包含；当前推荐只允许两字`title`精确/前缀。URL解码相对路径会有意移除`photos`固定根和编码字节串的偶然LIKE语义，同时新增自然中文路径命中。
 - 新索引和v95尚未部署到正式Runtime；部署时首次打开会幂等创建约7k行的`idx_collections_title_nocase`，仍应先备份并在低流量窗口精确重启验证。
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
@@ -55,7 +63,7 @@
 
 ## Recommended Next Task
 
-用户确认后，先备份正式`gallery.db`，再部署v95并在低流量窗口精确重启；复跑同一12词API和浏览器搜索回归。若稀疏/无结果约2.3秒仍不可接受，再单独进入FTS5设计阶段。
+若用户授权第二阶段B，先设计并验证正式备份/回滚与显式migration，再实现mapped三表一致性命令和所有增量事件；只有副本dry-run通过后才切换`/api/search`并保留LIKE回滚。不要把阶段A原型表直接复制到正式库，也不要自动rebuild或发布v96。v95正式部署仍是独立决策。
 
 ## Notes for Next Codex Session
 
@@ -63,3 +71,4 @@
 2. 正式部署前不要用应用代码“只读打开”正式数据库；隔离测试继续使用唯一TEMP目录。
 3. 正式旧NDJSON文件不得在本次升级时删除；迁移依靠`source_key`保持重复启动幂等。
 4. 视频poster、`preload="none"`、按需加载和现有媒体清理边界均未改变。
+5. FTS阶段A原始副本和JSON位于Git忽略的`tmp/fts5-prototype`；它们可重建且不应提交。正式Node PID/端口未被本任务操作。
