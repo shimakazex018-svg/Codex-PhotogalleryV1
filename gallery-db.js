@@ -583,7 +583,7 @@ function search(dbFile, query, limitValue = 50, options = {}) {
     collectionSqlMs += performance.now() - sqlStartedAt;
     appendUniqueRows(collectionRows, collectionIds, exactRows, fetchLimit);
 
-    if (!exactRows.length && collectionRows.length < fetchLimit) {
+    if (collectionRows.length < fetchLimit) {
       sqlStartedAt = performance.now();
       const prefixRows = db.prepare(searchSql.collectionPrefix).all(q, prefixUpperBound, fetchLimit - collectionRows.length);
       collectionSqlMs += performance.now() - sqlStartedAt;
@@ -591,7 +591,7 @@ function search(dbFile, query, limitValue = 50, options = {}) {
       appendUniqueRows(collectionRows, collectionIds, prefixRows, fetchLimit);
     }
 
-    if (!exactRows.length && prefixMatchCount === 0 && collectionRows.length < fetchLimit) {
+    if (collectionRows.length < fetchLimit) {
       sqlStartedAt = performance.now();
       const containsRows = db.prepare(searchSql.collectionContains).all(contains, contains, fetchLimit - collectionRows.length);
       collectionSqlMs += performance.now() - sqlStartedAt;

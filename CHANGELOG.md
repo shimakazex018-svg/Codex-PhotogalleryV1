@@ -6,7 +6,7 @@
 - Split collection ranking into exact, indexed prefix and bounded contains stages; added `idx_collections_title_nocase`, selected only card fields, removed media ORDER BY, shared a maximum 60-result budget and used one extra row instead of COUNT.
 - Added development-only structured server timing for parameter parsing, collection/media SQL, count, bounded sort, transform, serialization and API total; formal default remains off.
 - Added 250ms client debounce, immediate AbortController cancellation, request-sequence protection, 30-second same-query cache and a two-character minimum. Result previews remain lazy WebP requests with no original-photo or video node creation.
-- Verified the real-data copy after `PRAGMA optimize`: exact/prefix collection API about 12-17ms, common bounded searches about 10-70ms, sparse filename/no-result about 2.3s. Browser first result rendering was 17.6-21.2ms with at most 60 cards and zero console warnings/errors.
+- Verified the real-data copy after `PRAGMA optimize`: exact/prefix collection API about 37-39ms, common bounded searches about 12-85ms, sparse filename/no-result about 2.3s. Browser first result rendering was 25.9-36.3ms with at most 60 cards and zero console warnings/errors.
 - Kept `LIKE '%query%'` media fallback and its actual `SCAN media` plan explicit; FTS5 remains a separate future review and was not implemented.
 
 ## 2026-07-15 - Move the formal recycle root to the media volume

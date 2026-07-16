@@ -134,23 +134,23 @@ API timings are measured loopback wall-clock timings. Before is formal v91; afte
 
 | Type / query | Before API ms | After SQL ms | After API ms | Results (C/M) | Plan/full scan |
 |---|---:|---:|---:|---:|---|
-| exact collection / full NO.2161 title | 14,646.3 | 0.4 | 17.3 | 1/0 | exact index only; no media scan executed |
-| collection prefix / `[XIUREN秀人网] 2020.04` | 6,012.9 | 0.6 | 11.7 | 3/0 | prefix range index only; no media scan executed |
-| middle/English / `Maleah` | 6,156.0 | 1.0 | 14.5 | 60/0 | bounded collection scan; media skipped |
-| two Chinese / `安然` | 6,941.5 | 1.1 | 12.4 | 52/0 | indexed prefix; media skipped |
-| three Chinese / `秀人网` | 6,549.8 | 0.3 | 10.5 | 2/0 | exact collection index; media skipped |
-| file name / `theaic.top 0001` | 7,958.1 | 2,303.1 | 2,314.7 | 0/4 | full media scan remains |
-| path / `photos` | 6,636.7 | 24.1 | 34.7 | 0/60 | media scan stops after 61 matches |
-| number / `2161` | 8,043.3 | 18.6 | 29.2 | 1/59 | media scan stops after remaining budget |
-| high frequency / `theaic.top` | 7,417.9 | 19.0 | 30.5 | 0/60 | media scan stops after 61 matches |
-| numeric filename / `0001` | 16,686.9 | 61.7 | 70.2 | 0/60 | media scan stops after 61 matches |
-| no result | 9,576.1 | 2,302.9 | 2,313.0 | 0/0 | complete media scan remains |
-| many media / `jpg` | 7,786.5 | 17.8 | 25.1 | 0/60 | media scan stops after 61 matches |
+| exact collection / full NO.2161 title | 14,646.3 | 18.9 | 37.3 | 1/0 | exact index then bounded collection fallback; no media scan |
+| collection prefix / `[XIUREN秀人网] 2020.04` | 6,012.9 | 25.0 | 39.2 | 12/0 | prefix index then bounded collection fallback; no media scan |
+| middle/English / `Maleah` | 6,156.0 | 1.2 | 13.8 | 60/0 | bounded collection scan; media skipped |
+| two Chinese / `安然` | 6,941.5 | 1.7 | 12.2 | 60/0 | indexed prefix plus bounded contains; media skipped |
+| three Chinese / `秀人网` | 6,549.8 | 1.3 | 15.2 | 60/0 | exact/prefix plus bounded contains; media skipped |
+| file name / `theaic.top 0001` | 7,958.1 | 2,322.5 | 2,335.4 | 0/4 | full media scan remains |
+| path / `photos` | 6,636.7 | 23.7 | 39.7 | 0/60 | media scan stops after 61 matches |
+| number / `2161` | 8,043.3 | 27.4 | 39.7 | 1/59 | media scan stops after remaining budget |
+| high frequency / `theaic.top` | 7,417.9 | 24.7 | 40.8 | 0/60 | media scan stops after 61 matches |
+| numeric filename / `0001` | 16,686.9 | 73.1 | 84.6 | 0/60 | media scan stops after 61 matches |
+| no result | 9,576.1 | 2,330.6 | 2,340.2 | 0/0 | complete media scan remains |
+| many media / `jpg` | 7,786.5 | 19.5 | 28.2 | 0/60 | media scan stops after 61 matches |
 
 Browser v95 debug measurements on the isolated service:
 
-- Exact collection: response received 19.8ms; first complete result DOM 21.2ms; 1 card.
-- `Maleah`: response received 13.0ms; first complete result DOM 17.6ms; exactly 60 cards.
+- Exact collection: response received 35.1ms; first complete result DOM 36.3ms; 1 card.
+- `Maleah`: response received 18.2ms; first complete result DOM 25.9ms; exactly 60 cards.
 - All 60 result images used `loading="lazy"` and `/api/image-preview`; zero card `/photos/` original URLs and zero `<video>` nodes.
 - A 100ms old-query/new-query sequence ended with only the new query; one-character `a` rendered the explicit minimum-length message and no cards.
 - Browser console warnings/errors: 0.

@@ -24,8 +24,8 @@
 ## Validation
 
 - 正式库只读确认7287个collections、474470条media；原计划为`SCAN c`/`SCAN media`和两个ORDER BY临时B-tree，正式v91十二词API为6.0-16.7秒。
-- 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约12-17ms，高频/路径/数字等约10-70ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
-- 隔离浏览器精确图集收到/首批渲染19.8/21.2ms，Maleah 60卡片13.0/17.6ms；60/60懒加载、0原图卡片URL、0video、快速旧词未覆盖新词、单字符不查询、控制台0 warning/error。
+- 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约37-39ms，高频/路径/数字等约12-85ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
+- 隔离浏览器精确图集收到/首批渲染35.1/36.3ms，Maleah 60卡片18.2/25.9ms；60/60懒加载、0原图卡片URL、0video、快速旧词未覆盖新词、单字符不查询、控制台0 warning/error。
 - `scripts/benchmark-search.js`和`scripts/test-search-api.js`覆盖查询计划、索引、12类关键词、60上限、短词和结构化日志；完整结果见`docs/SEARCH_PERFORMANCE_BASELINE_V95.md`。
 - `scripts/test-media-cleanup-recycle.ps1`通过：同盘rename、强制copy-verify-delete、中文/空格/只读/0字节、冲突改名、ChangedSinceScan、Missing、复制失败、源删除失败、幂等和恢复冲突。
 - 隔离API通过：旧delete 410、错误确认400、LAN recycle/restore 403、localhost回收/恢复成功；`.partial`残留0，TEMP根最终不存在。
