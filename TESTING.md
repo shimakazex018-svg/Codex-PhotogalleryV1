@@ -10,16 +10,14 @@ node scripts/migrate-search-fts5.js --db <copy.db> --backup --output <versioned-
 node scripts/migrate-search-fts5.js --db <copy.db> --apply --batch-size 2000
 node scripts/migrate-search-fts5.js --db <copy.db> --verify
 node scripts/migrate-search-fts5.js --db <copy.db> --optimize
+node scripts/check-search-index.js --db <copy.db> --quick
 node scripts/check-search-index.js --db <copy.db> --full
 node scripts/test-search-fts-integration.js
-node scripts/test-search-fts-full-copy-incremental.js --db <migrated-copy.db>
-node scripts/benchmark-search-fts5-integration.js --db <migrated-copy.db> --output <tmp-result.json>
-node scripts/benchmark-search-api-fts5.js --base-url http://127.0.0.1:<isolated-port> --output <tmp-result.json>
 ```
 
 通过标准：三表计数一致；缺失/孤立/重复/title/path mismatch为0；FTS和SQLite integrity通过；两字符计划只用`idx_media_title_nocase`；三字符计划为FTS虚拟索引、mapping整数主键和media主键，不出现`SCAN media`或临时排序树；auto stale不执行legacy。完整结果见`docs/SEARCH_FTS5_INTEGRATION_V96.md`。
 
-真实Chrome是正式部署门槛，不得以API或模拟DOM替代。若Chrome Extension/native host不可用，记录阻断并保持候选不可部署。
+FTS5最小方案不再附加生产级压力框架或浏览器自动化部署门槛。
 
 本文件记录当前有效的启动、静态检查和运行验证方法。任务过程和历史结果不在此记录。
 
@@ -322,7 +320,7 @@ For changes to the floating back-to-top control, verify:
 ## Database checks
 
 - 禁止用当前应用代码“只读打开”生产源库；数据库打开逻辑会启用 WAL 并保证 schema/index。
-- 迁移检查只对 staging/目标副本执行。
+- 迁移检查只对显式数据库副本执行。
 - 迁移前记录源/目标大小、mtime 和 SHA-256。
 - SQLite 完整性检查工具/命令：待确认正式环境可用的只读工具后补充。
 - 运行后可用 `/api/index/stats` 核对 collection/media/image/video 数量。

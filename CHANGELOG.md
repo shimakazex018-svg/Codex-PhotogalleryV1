@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-16 - Simplify FTS5 integration to the personal-site core
+
+- Kept mapped trigram search, two-character title lookup, strict search modes, bounded frontend requests, transactional media/FTS CRUD, basic status, consistency backup and legacy rollback.
+- Reduced the state row to schema/status/timestamps/last error; reduced migration commands to dry-run/backup/apply/verify/optimize and consistency commands to quick/full.
+- Removed restore/rebuild/status orchestration, full-copy benchmark and recovery-drill scripts, complex filesystem failure scenarios, and Chrome/full-scan/staging/zero-downtime work as future gates.
+- Removed the uncommitted B1.5 stress branch, sampling/fault-injection code and the ignored 474,470-file synthetic tree. Formal DB, media, PID 2064 and port 48102 were not modified.
+
 ## 2026-07-16 - Integrate FTS5 search candidate v96 on isolated copies
 
 - Added the shared mapped trigram FTS core, explicit migration/status/verify/optimize/backup/restore tooling, strict auto/fts5/legacy-like modes and a read-only index status API.

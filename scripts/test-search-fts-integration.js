@@ -33,6 +33,13 @@ galleryDb.indexGallery(dbFile, gallery());
 const migration = spawnSync(process.execPath, [path.join(__dirname, "migrate-search-fts5.js"), "--db", dbFile, "--apply", "--batch-size", "100"], { encoding: "utf8" });
 assert.strictEqual(migration.status, 0, migration.stderr || migration.stdout);
 
+const stateSchemaDb = new DatabaseSync(dbFile);
+assert.deepStrictEqual(
+  stateSchemaDb.prepare(`PRAGMA table_info(${searchFts.SEARCH_STATE_TABLE})`).all().map((column) => column.name),
+  ["singleton", "schema_version", "status", "started_at", "completed_at", "last_sync_at", "last_verify_at", "last_error"],
+);
+stateSchemaDb.close();
+
 let status = galleryDb.getSearchIndexStatus(dbFile, "auto");
 assert.strictEqual(status.status, "ready");
 assert.strictEqual(status.mediaCount, 1);
@@ -102,28 +109,6 @@ galleryDb.markSearchIndexStale(dbFile, "file_moved_database_transaction_failed")
 galleryDb.indexGallery(dbFile, gallery("移动恢复三字", "/photos/isolated/moved.jpg"));
 assert.strictEqual(galleryDb.search(dbFile, "移动恢复", 60, { searchMode: "auto" }).media.length, 1);
 
-const movedId = galleryDb.getMedia(dbFile, "模特甲", { limit: 1 }).items[0].id;
-const dbUpdatedFirst = new DatabaseSync(dbFile);
-dbUpdatedFirst.exec("BEGIN");
-dbUpdatedFirst.prepare("UPDATE media SET src='/photos/isolated/never-moved.jpg' WHERE id=?").run(movedId);
-searchFts.upsertMediaDocument(dbUpdatedFirst, { id: movedId, title: "移动恢复三字", src: "/photos/isolated/never-moved.jpg" });
-searchFts.markIncrementalSync(dbUpdatedFirst);
-dbUpdatedFirst.exec("COMMIT");
-dbUpdatedFirst.close();
-let laterFileOperationFailed = false;
-try { fs.renameSync(path.join(mediaRoot, "missing.jpg"), path.join(mediaRoot, "never-moved.jpg")); } catch { laterFileOperationFailed = true; }
-assert.strictEqual(laterFileOperationFailed, true);
-galleryDb.markSearchIndexStale(dbFile, "database_updated_later_file_operation_failed");
-galleryDb.indexGallery(dbFile, gallery("移动恢复三字", "/photos/isolated/moved.jpg"));
-assert.strictEqual(galleryDb.getSearchIndexStatus(dbFile, "auto").status, "ready");
-
-let deleteFailed = false;
-try { fs.unlinkSync(path.join(mediaRoot, "does-not-exist.jpg")); } catch { deleteFailed = true; }
-assert.strictEqual(deleteFailed, true);
-galleryDb.markSearchIndexStale(dbFile, "filesystem_delete_failed");
-galleryDb.indexGallery(dbFile, gallery("移动恢复三字", "/photos/isolated/moved.jpg"));
-assert.strictEqual(galleryDb.getSearchIndexStatus(dbFile, "auto").status, "ready");
-
 galleryDb.markSearchIndexStale(dbFile, "simulated_filesystem_database_uncertainty");
 const forcedUnavailable = galleryDb.search(dbFile, "移动", 60, { searchMode: "fts5" });
 assert.strictEqual(forcedUnavailable.searchMode, "unavailable");
@@ -158,8 +143,6 @@ console.log(JSON.stringify({
   migrationEvents: migration.stdout.trim().split(/\r?\n/).length,
   filesystemScenarios: {
     fileMovedDatabaseFailed: movedDatabaseFailed,
-    databaseUpdatedFileFailed: laterFileOperationFailed,
-    deleteFailed,
     recoveredByRescan: true,
   },
   finalStatus: status,

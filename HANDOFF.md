@@ -4,13 +4,13 @@
 
 ## Last Completed Task
 
-已完成FTS5 Integration V96第二阶段B1候选：正式共享核心、显式迁移/状态/一致性/备份恢复、严格模式、安全降级、候选API/前端提示和媒体事务同步已实现；完整474470行副本、隔离48103 API、增量/事务/文件故障恢复均验证。正式数据库、PID 2064、48102和正式媒体未修改，v96未部署。真实Chrome与完整隔离媒体树扫描峰值未完成，因此不可正式部署。
+已完成FTS5 Integration V96精简清理：保留mapped trigram、两字符标题规则、严格`auto/fts5/legacy-like`模式、媒体事务同步、最小状态、显式迁移/一致性备份/quick-full校验和legacy回滚；删除生产级恢复编排、完整副本benchmark脚本及Chrome/全库压力部署门槛。正式数据库、PID 2064、48102和正式媒体未修改，v96未部署。
 
 ## Current State
 
 - 源码候选前端版本为`v96`；正式运行站仍为`v91`，本次未部署或重启。
 - 候选`/api/search`默认50/最大60总结果，图集流程不变；2字符只搜媒体title精确/前缀，3字符以上ready时使用mapped trigram FTS。auto不可用时安全降级，不自动`SCAN media`；legacy-like只能显式启用。
-- 正式库目前不存在FTS表。候选表为`media_search_documents`、`media_search_fts`和`search_fts_state`，完整说明及命令见`docs/SEARCH_FTS5_INTEGRATION_V96.md`。
+- 正式库目前不存在FTS表。候选表为`media_search_documents`、`media_search_fts`和最小`search_fts_state`，完整说明及命令见`docs/SEARCH_FTS5_INTEGRATION_V96.md`。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
@@ -26,11 +26,10 @@
 
 - B1完整干净副本apply 142.979秒（含逐条对照、FTS维护），迁移后1,461,190,656字节，增量291,262,464字节；峰值RSS143,560,704、WAL14,691,952。media/mapping/FTS均474470，所有缺失/孤立/重复/title/path mismatch为0，SQLite integrity ok。
 - 隔离API稀疏词冷/热中位37.020/32.007ms，无结果37.992/30.069ms；legacy对照约2.38至2.61秒。最终计划没有`SCAN media`或临时排序树。
-- 完整副本增量新增/更新/删除29.122/3.852/4.825ms，rowid稳定；同步失败media回滚。文件已移动DB失败、DB已更新文件失败、删除失败均stale并由扫描恢复。
-- auto stale三字符media SQL为0且不触发legacy，两字符title仍返回；状态API使用记录计数约13.58ms。
-- Chrome 150已安装，但当前用户Profile目录、Chrome Extension native-host注册表项及manifest缺失；按规则未自行修复，真实Chrome验收未完成。
+- 完整副本增量新增/更新/删除29.122/3.852/4.825ms，rowid稳定；同步失败media回滚。文件操作与数据库不同步时只记录错误、标记stale并由手工重新扫描恢复。
+- auto stale三字符media SQL为0且不触发legacy，两字符title仍返回；状态API保留基本状态与按需实时计数。
 
-- 实际Node v24.14.0/SQLite 3.51.2支持FTS5、trigram中文、MATCH、trigram LIKE及`integrity-check/optimize/rebuild`；trigram MATCH少于3个code point返回0。
+- 实际Node v24.14.0/SQLite 3.51.2支持FTS5、trigram中文、MATCH、trigram LIKE、`integrity-check`和`optimize`；trigram MATCH少于3个code point返回0。
 - 最终mapped完整副本：media/documents/FTS均474470，缺失、孤立、字段不一致、构建失败均0；SQLite完整性为ok。DB增量284315648字节，2000条批次构建89.052秒，FTS维护9.943秒，峰值RSS141426688字节、WAL14893832字节，结束后WAL/SHM/journal均0。
 - 计划从原`SCAN media`变为`VIRTUAL TABLE INDEX 0:M2`，回表使用documents INTEGER PRIMARY KEY和`sqlite_autoindex_media_1(id=?)`；图集精确/前缀使用`idx_collections_title_nocase`，两字标题前缀使用新增候选`idx_media_title_nocase`（逻辑7127040字节、构建2.486秒）。最新稀疏文件名冷/热中位34.320/24.346ms，无结果26.717/22.015ms；重复索引对齐跑稀疏冷最高80.311ms、`jpg`冷最高114.228ms，OS缓存未强制清空。
 - 两字媒体专属词`扫码`为图集0、media LIKE 4、title前缀4、trigram 0；候选`idx_media_title_nocase`范围计划生效。50k汉字bigram小样本为4/4、0误差、约3.23MB，但未纳入正式推荐结构。
@@ -57,8 +56,7 @@
 ## Known Issues
 
 - 正式运行站仍使用旧搜索并可能`SCAN media`；候选v96尚未部署或迁移正式库。
-- 真实Chrome验收被Extension/native host缺失阻断，不能宣称v96可部署。
-- `indexGallery()`继承既有全库单事务重建；FTS已同事务保证三表原子性，但完整隔离媒体树的RSS/WAL/CPU峰值未验证，也未改成有限独立批次。正式部署前必须补测或设计staging/swap。
+- FTS5额外生产级扩展和浏览器自动化验收已停止，不再是项目待办或部署门槛。
 - trigram不支持两字中间包含；当前推荐只允许两字`title`精确/前缀。URL解码相对路径会有意移除`photos`固定根和编码字节串的偶然LIKE语义，同时新增自然中文路径命中。
 - 新索引和v95尚未部署到正式Runtime；部署时首次打开会幂等创建约7k行的`idx_collections_title_nocase`，仍应先备份并在低流量窗口精确重启验证。
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
@@ -71,7 +69,7 @@
 
 ## Recommended Next Task
 
-先从Codex插件UI恢复Chrome插件/native host并完成规定的桌面、iPhone、iPad与连续输入验收；随后用完整隔离媒体目录补做一次全扫描峰值与中断恢复。两项均通过后才评审正式部署窗口，仍不得自动迁移或发布。
+没有FTS生产级扩展后续任务。若用户未来明确决定部署，只执行人工备份、显式migration、quick/full校验、配置切换和普通页面手工验收；不得自动迁移或发布。
 
 ## Notes for Next Codex Session
 

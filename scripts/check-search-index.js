@@ -4,28 +4,29 @@ const searchFts = require("../search-fts");
 const cli = require("./search-fts-cli-lib");
 
 const dbFile = cli.requireExplicitDatabase();
+const quick = process.argv.includes("--quick");
 const full = process.argv.includes("--full");
-const dryRun = process.argv.includes("--dry-run");
-const sample = Number(cli.argumentValue("--sample", "0")) || 0;
-if ([full, dryRun, sample > 0].filter(Boolean).length !== 1) throw new Error("Choose exactly one: --dry-run, --full, or --sample <count>");
+if ([quick, full].filter(Boolean).length !== 1) throw new Error("Choose exactly one: --quick or --full");
 
 const db = cli.openDatabase(dbFile, false);
 try {
   const started = performance.now();
-  const result = dryRun ? searchFts.getIndexStatus(db) : searchFts.consistencyCheck(db, { full, sample });
-  const integrity = dryRun ? "not_run" : db.prepare("PRAGMA integrity_check").get().integrity_check;
-  if (full && result.ok && integrity === "ok") {
-    searchFts.updateState(db, "ready", { lastFullCheckAt: new Date().toISOString(), errorSummary: "", needsRebuild: 0 });
+  const result = searchFts.consistencyCheck(db, { full });
+  const integrityPragma = full ? "integrity_check" : "quick_check";
+  const integrity = db.prepare(`PRAGMA ${integrityPragma}`).get()[integrityPragma];
+  if (result.ok && integrity === "ok") {
+    searchFts.updateState(db, "ready", { lastVerifyAt: new Date().toISOString(), lastError: "" });
+  } else {
+    searchFts.updateState(db, "stale", { lastVerifyAt: new Date().toISOString(), lastError: "consistency_check_failed" });
   }
   cli.emit("search-fts-consistency", {
     database: cli.databaseIdentity(dbFile, false),
-    mode: dryRun ? "dry-run" : full ? "full" : "sample",
-    sample: full ? null : sample,
+    mode: full ? "full" : "quick",
     elapsedMs: Math.round(performance.now() - started),
     integrity,
     result,
   });
-  if (!dryRun && (!result.ok || integrity !== "ok")) process.exitCode = 1;
+  if (!result.ok || integrity !== "ok") process.exitCode = 1;
 } finally {
   db.close();
 }

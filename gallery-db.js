@@ -1200,9 +1200,9 @@ function removeMediaRecords(dbFile, ids = []) {
 
 function getSearchIndexStatus(dbFile, configuredMode = "auto") {
   return withDatabase(dbFile, (db) => {
-    const index = searchFts.getIndexStatus(db, { includeCounts: false });
+    const index = searchFts.getIndexStatus(db);
     const behavior = searchFts.resolveSearchBehavior(configuredMode, index);
-    return { configuredSearchMode: behavior.configured, actualSearchMode: behavior.actual, countsSource: "recorded-state", ...index };
+    return { configuredSearchMode: behavior.configured, actualSearchMode: behavior.actual, countsSource: "live", ...index };
   });
 }
 

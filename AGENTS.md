@@ -183,8 +183,8 @@ node --check duplicates-worker.js
 
 ## 11. Search FTS5 maintenance
 
-- FTS5迁移、校验、optimize、rebuild和恢复必须显式指定数据库路径；疑似正式数据库默认拒绝写入。
+- FTS5迁移、备份、校验和optimize必须显式指定数据库路径；疑似正式数据库默认拒绝写入。
 - 服务启动只读索引状态，禁止自动全量构建或自动回退到完整媒体LIKE扫描。
 - `media`、`media_search_documents`和`media_search_fts`的搜索字段变更必须保持同一SQLite事务；文件系统失败只能标记`stale`并由扫描修复，不能宣称跨文件系统ACID。
-- 正式迁移必须先停止写入、完成SQLite一致性备份及integrity校验；生产回滚不自动DROP FTS表。
+- 迁移前必须完成SQLite一致性备份及integrity校验；回滚通过显式`legacy-like`模式完成，不提供自动DROP或数据库替换编排。
 - B1命令和当前限制以`docs/SEARCH_FTS5_INTEGRATION_V96.md`为准。

@@ -4,7 +4,6 @@ const fs = require("fs");
 const path = require("path");
 
 const SEARCH_FTS_SCHEMA_VERSION = 1;
-const SEARCH_FTS_MIGRATION_VERSION = "search-fts5-v96-1";
 const SEARCH_FTS_TABLE = "media_search_fts";
 const SEARCH_DOCUMENTS_TABLE = "media_search_documents";
 const SEARCH_STATE_TABLE = "search_fts_state";
@@ -74,17 +73,12 @@ function createStateTable(db) {
     CREATE TABLE IF NOT EXISTS ${SEARCH_STATE_TABLE} (
       singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
       schema_version INTEGER NOT NULL,
-      migration_version TEXT NOT NULL,
       status TEXT NOT NULL,
       started_at TEXT,
       completed_at TEXT,
-      last_incremental_sync_at TEXT,
-      last_full_check_at TEXT,
-      media_count INTEGER NOT NULL DEFAULT 0,
-      mapping_count INTEGER NOT NULL DEFAULT 0,
-      fts_document_count INTEGER NOT NULL DEFAULT 0,
-      error_summary TEXT NOT NULL DEFAULT '',
-      needs_rebuild INTEGER NOT NULL DEFAULT 0
+      last_sync_at TEXT,
+      last_verify_at TEXT,
+      last_error TEXT NOT NULL DEFAULT ''
     )
   `);
 }
@@ -106,10 +100,10 @@ function createSearchSchema(db) {
   `);
   db.prepare(`
     INSERT INTO ${SEARCH_STATE_TABLE} (
-      singleton, schema_version, migration_version, status, error_summary, needs_rebuild
-    ) VALUES (1, ?, ?, 'not_created', '', 0)
+      singleton, schema_version, status, last_error
+    ) VALUES (1, ?, 'not_created', '')
     ON CONFLICT(singleton) DO NOTHING
-  `).run(SEARCH_FTS_SCHEMA_VERSION, SEARCH_FTS_MIGRATION_VERSION);
+  `).run(SEARCH_FTS_SCHEMA_VERSION);
 }
 
 function stateRow(db) {
@@ -126,11 +120,11 @@ function getIndexStatus(db, options = {}) {
   const capability = detectFts5Capability(db);
   const row = stateRow(db);
   const includeCounts = options.includeCounts !== false;
-  const mediaCount = includeCounts ? (tableExists(db, "media") ? safeCount(db, "media") : null) : (row ? Number(row.media_count) : null);
+  const mediaCount = includeCounts ? (tableExists(db, "media") ? safeCount(db, "media") : null) : null;
   const mappingExists = tableExists(db, SEARCH_DOCUMENTS_TABLE);
   const ftsExists = tableExists(db, SEARCH_FTS_TABLE);
-  const mappingCount = includeCounts ? safeCount(db, SEARCH_DOCUMENTS_TABLE) : (row ? Number(row.mapping_count) : null);
-  const ftsDocumentCount = includeCounts ? safeCount(db, SEARCH_FTS_TABLE) : (row ? Number(row.fts_document_count) : null);
+  const mappingCount = includeCounts ? safeCount(db, SEARCH_DOCUMENTS_TABLE) : null;
+  const ftsDocumentCount = includeCounts ? safeCount(db, SEARCH_FTS_TABLE) : null;
   let status = row && SEARCH_STATES.has(row.status) ? row.status : "not_created";
   let reason = "";
   if (!capability.fts5) {
@@ -156,16 +150,14 @@ function getIndexStatus(db, options = {}) {
     status,
     reason,
     schemaVersion: row ? Number(row.schema_version) : null,
-    migrationVersion: row ? row.migration_version : "",
     mediaCount,
     mappingCount,
     ftsDocumentCount,
     startedAt: row ? row.started_at || "" : "",
     completedAt: row ? row.completed_at || "" : "",
-    lastIncrementalSyncAt: row ? row.last_incremental_sync_at || "" : "",
-    lastFullCheckAt: row ? row.last_full_check_at || "" : "",
-    errorSummary: row ? row.error_summary || "" : "",
-    needsRebuild: row ? Boolean(row.needs_rebuild) : status !== "ready",
+    lastSyncAt: row ? row.last_sync_at || "" : "",
+    lastVerifyAt: row ? row.last_verify_at || "" : "",
+    lastError: row ? row.last_error || "" : "",
   };
 }
 
@@ -174,41 +166,30 @@ function updateState(db, status, details = {}) {
   createStateTable(db);
   const previous = stateRow(db);
   const now = new Date().toISOString();
-  const mediaCount = details.mediaCount ?? previous?.media_count ?? 0;
-  const mappingCount = details.mappingCount ?? previous?.mapping_count ?? 0;
-  const ftsDocumentCount = details.ftsDocumentCount ?? previous?.fts_document_count ?? 0;
+  const detail = (name, previousValue, fallback = null) => Object.prototype.hasOwnProperty.call(details, name)
+    ? details[name]
+    : (previousValue ?? fallback);
   db.prepare(`
     INSERT INTO ${SEARCH_STATE_TABLE} (
-      singleton, schema_version, migration_version, status, started_at, completed_at,
-      last_incremental_sync_at, last_full_check_at, media_count, mapping_count,
-      fts_document_count, error_summary, needs_rebuild
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      singleton, schema_version, status, started_at, completed_at,
+      last_sync_at, last_verify_at, last_error
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
       schema_version=excluded.schema_version,
-      migration_version=excluded.migration_version,
       status=excluded.status,
       started_at=excluded.started_at,
       completed_at=excluded.completed_at,
-      last_incremental_sync_at=excluded.last_incremental_sync_at,
-      last_full_check_at=excluded.last_full_check_at,
-      media_count=excluded.media_count,
-      mapping_count=excluded.mapping_count,
-      fts_document_count=excluded.fts_document_count,
-      error_summary=excluded.error_summary,
-      needs_rebuild=excluded.needs_rebuild
+      last_sync_at=excluded.last_sync_at,
+      last_verify_at=excluded.last_verify_at,
+      last_error=excluded.last_error
   `).run(
     SEARCH_FTS_SCHEMA_VERSION,
-    SEARCH_FTS_MIGRATION_VERSION,
     status,
-    details.startedAt ?? previous?.started_at ?? (status === "building" ? now : null),
-    details.completedAt ?? previous?.completed_at ?? (status === "ready" ? now : null),
-    details.lastIncrementalSyncAt ?? previous?.last_incremental_sync_at ?? null,
-    details.lastFullCheckAt ?? previous?.last_full_check_at ?? null,
-    mediaCount,
-    mappingCount,
-    ftsDocumentCount,
-    String(details.errorSummary ?? previous?.error_summary ?? "").slice(0, 500),
-    details.needsRebuild ?? (status === "ready" ? 0 : 1)
+    detail("startedAt", previous?.started_at, status === "building" ? now : null),
+    detail("completedAt", previous?.completed_at, status === "ready" ? now : null),
+    detail("lastSyncAt", previous?.last_sync_at),
+    detail("lastVerifyAt", previous?.last_verify_at),
+    String(detail("lastError", previous?.last_error, "") || "").slice(0, 500)
   );
 }
 
@@ -254,24 +235,14 @@ function clearDocuments(db) {
   db.prepare(`DELETE FROM ${SEARCH_DOCUMENTS_TABLE}`).run();
 }
 
-function markIncrementalSync(db, options = {}) {
+function markIncrementalSync(db) {
   if (!tableExists(db, SEARCH_STATE_TABLE)) return;
-  const previous = stateRow(db);
-  const counts = options.exactCounts ? {
-    mediaCount: safeCount(db, "media"),
-    mappingCount: safeCount(db, SEARCH_DOCUMENTS_TABLE),
-    ftsDocumentCount: safeCount(db, SEARCH_FTS_TABLE),
-  } : {
-    mediaCount: Math.max(0, Number(previous?.media_count || 0) + Number(options.mediaDelta || 0)),
-    mappingCount: Math.max(0, Number(previous?.mapping_count || 0) + Number(options.mappingDelta || 0)),
-    ftsDocumentCount: Math.max(0, Number(previous?.fts_document_count || 0) + Number(options.ftsDelta || 0)),
-  };
-  updateState(db, "ready", { ...counts, lastIncrementalSyncAt: new Date().toISOString(), errorSummary: "", needsRebuild: 0 });
+  updateState(db, "ready", { lastSyncAt: new Date().toISOString(), lastError: "" });
 }
 
-function markStale(db, errorSummary) {
+function markStale(db, lastError) {
   if (!tableExists(db, SEARCH_STATE_TABLE)) return;
-  updateState(db, "stale", { errorSummary, needsRebuild: 1 });
+  updateState(db, "stale", { lastError });
 }
 
 function resolveSearchBehavior(configuredMode, indexStatus) {
@@ -403,7 +374,6 @@ function databaseIdentity(dbFile) {
 module.exports = {
   FORMAL_DATABASE_PATH,
   SEARCH_DOCUMENTS_TABLE,
-  SEARCH_FTS_MIGRATION_VERSION,
   SEARCH_FTS_SCHEMA_VERSION,
   SEARCH_FTS_TABLE,
   SEARCH_STATE_TABLE,
