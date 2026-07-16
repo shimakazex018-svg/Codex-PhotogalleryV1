@@ -1,5 +1,26 @@
 # TESTING.md
 
+## Search FTS5 Integration V96
+
+只允许显式副本路径；以下命令不得指向正式`D:\GalleryRuntime\data\gallery.db`：
+
+```powershell
+node scripts/migrate-search-fts5.js --db <copy.db> --dry-run
+node scripts/migrate-search-fts5.js --db <copy.db> --backup --output <versioned-backup.db>
+node scripts/migrate-search-fts5.js --db <copy.db> --apply --batch-size 2000
+node scripts/migrate-search-fts5.js --db <copy.db> --verify
+node scripts/migrate-search-fts5.js --db <copy.db> --optimize
+node scripts/check-search-index.js --db <copy.db> --full
+node scripts/test-search-fts-integration.js
+node scripts/test-search-fts-full-copy-incremental.js --db <migrated-copy.db>
+node scripts/benchmark-search-fts5-integration.js --db <migrated-copy.db> --output <tmp-result.json>
+node scripts/benchmark-search-api-fts5.js --base-url http://127.0.0.1:<isolated-port> --output <tmp-result.json>
+```
+
+通过标准：三表计数一致；缺失/孤立/重复/title/path mismatch为0；FTS和SQLite integrity通过；两字符计划只用`idx_media_title_nocase`；三字符计划为FTS虚拟索引、mapping整数主键和media主键，不出现`SCAN media`或临时排序树；auto stale不执行legacy。完整结果见`docs/SEARCH_FTS5_INTEGRATION_V96.md`。
+
+真实Chrome是正式部署门槛，不得以API或模拟DOM替代。若Chrome Extension/native host不可用，记录阻断并保持候选不可部署。
+
 本文件记录当前有效的启动、静态检查和运行验证方法。任务过程和历史结果不在此记录。
 
 ## Environment requirements

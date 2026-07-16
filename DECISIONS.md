@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-023：FTS5使用显式迁移、严格模式与安全降级
+
+### Decision
+候选v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索引ready才用FTS，其他状态仅允许图集与两字符媒体标题精确/前缀；fts5不可用时明确返回unavailable；legacy必须人工显式启用。正式结构、规范化和查询复用DEC-022；迁移默认2000条事务批次并维护`not_created/building/ready/stale/error`状态，启动不自动build。
+
+### Reason
+完整媒体LIKE在稀疏和无结果词仍约2.3至2.6秒，不能作为索引故障的静默回退。mapping和独立FTS可以稳定增删改、分批恢复和逐条审计；状态记录使服务在部分迁移或文件系统不确定时安全降级。
+
+### Impact
+所有搜索字段变更需要同步media/mapping/FTS事务；文件移动与SQLite不能成为同一ACID事务，失败标记stale并依赖扫描恢复。生产迁移必须显式路径、SQLite backup、integrity、完整一致性和人工部署窗口，不自动DROP。
+
+### Status
+B1候选实现与完整副本验证有效；正式库/进程未修改。真实Chrome与完整隔离媒体树扫描峰值未完成，暂不可正式部署。
+
 ## DEC-022：FTS5正式候选使用稳定映射与独立trigram索引
 
 ### Decision

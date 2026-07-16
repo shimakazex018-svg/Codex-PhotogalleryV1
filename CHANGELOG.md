@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-16 - Integrate FTS5 search candidate v96 on isolated copies
+
+- Added the shared mapped trigram FTS core, explicit migration/status/verify/optimize/backup/restore tooling, strict auto/fts5/legacy-like modes and a read-only index status API.
+- Connected candidate search, full gallery index transactions and duplicate-record deletion to mapping/FTS synchronization; filesystem uncertainty marks the index stale and rescans repair it.
+- Kept v95 request cancellation/cache/limits and added bounded degraded/two-character guidance; raised only candidate static markers to v96 without deploying formal runtime.
+- Migrated and fully compared a 474470-row SQLite copy, verified interruption resume, safe backup/restore, incremental CRUD/rollback/failure cases and isolated 48103 API performance. Formal DB/PID/48102/media were unchanged.
+- Real Chrome acceptance was blocked by the missing ChatGPT Chrome Extension native host, and the inherited single-transaction full scanner still needs an isolated full-media peak test; v96 remains not deployable.
+
 ## 2026-07-16 - Validate and define FTS5 Prototype V96
 
 - Verified the actual Node 24.14.0 / SQLite 3.51.2 runtime supports FTS5, trigram Unicode, MATCH, trigram LIKE and FTS maintenance commands; confirmed the less-than-three-code-point limitation and safe MATCH quoting behavior.

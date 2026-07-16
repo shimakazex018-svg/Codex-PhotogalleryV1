@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v95";
+const APP_VERSION = "v96";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -1018,6 +1018,10 @@ async function fetchSqliteMediaPage(collectionId, offset = 0, limit = MEDIA_PAGE
   };
 }
 
+function searchCharacterLength(value) {
+  return Array.from(String(value || "").normalize("NFC")).length;
+}
+
 async function loadSqliteCollection(parts) {
   const id = sqliteCollectionIdFromParts(parts);
   let collection = state.sqliteCollections.get(id);
@@ -1057,6 +1061,10 @@ function applySqliteSearchPayload(query, payload, requestStartedAt = 0) {
     collections,
     media,
     hasMore: Boolean(payload.hasMore),
+    searchMode: payload.searchMode || "",
+    indexStatus: payload.indexStatus || "",
+    degraded: Boolean(payload.degraded),
+    degradedReason: payload.degradedReason || "",
   };
   render();
   if (SEARCH_PERF_DEBUG && requestStartedAt) {
@@ -1076,7 +1084,7 @@ function applySqliteSearchPayload(query, payload, requestStartedAt = 0) {
 
 function requestSqliteSearch() {
   const query = state.searchQuery;
-  if (query.length < SEARCH_MIN_QUERY_LENGTH || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
+  if (searchCharacterLength(query) < SEARCH_MIN_QUERY_LENGTH || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
   const cached = state.searchCache.get(query);
   if (cached && Date.now() - cached.storedAt < SEARCH_CACHE_TTL_MS) {
     applySqliteSearchPayload(query, cached.payload);
@@ -2081,28 +2089,37 @@ function renderSqliteSearchMediaGrid(items) {
 
 function renderSqliteSearchResults() {
   const query = state.searchQuery;
+  const queryLength = searchCharacterLength(query);
   if (!query) return false;
 
   if (state.sqliteSearch.query !== query) {
     state.sqliteSearch = { query, loading: false, collections: [], media: [] };
   }
 
-  if (query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && !state.sqliteSearch.completed) {
+  if (queryLength >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && !state.sqliteSearch.completed) {
     requestSqliteSearch();
   }
 
   const collections = state.sqliteSearch.collections || [];
   const media = state.sqliteSearch.media || [];
   const hasResults = collections.length || media.length;
+  const degradedMessage = state.sqliteSearch.degraded
+    ? `搜索索引当前为 ${escapeHtml(state.sqliteSearch.indexStatus || "不可用")}，现仅显示图集和媒体标题精确或前缀结果。`
+    : "";
+  const twoCharacterMessage = queryLength === 2 && state.sqliteSearch.completed && media.length === 0
+    ? "两个字符仅搜索媒体标题的精确或前缀匹配。"
+    : "";
   view.innerHTML = `
     <div class="search-summary">${escapeHtml(query)} / ${collections.length} ${text.works} / ${media.length} ${text.media}</div>
-    ${query.length < SEARCH_MIN_QUERY_LENGTH ? `<div class="empty-state">${text.searchMoreCharacters}</div>` : ""}
+    ${degradedMessage ? `<div class="empty-state">${degradedMessage}</div>` : ""}
+    ${twoCharacterMessage ? `<div class="empty-state">${twoCharacterMessage}</div>` : ""}
+    ${queryLength < SEARCH_MIN_QUERY_LENGTH ? `<div class="empty-state">${text.searchMoreCharacters}</div>` : ""}
     ${state.sqliteSearch.loading ? `<div class="empty-state">${text.refreshing}</div>` : ""}
-    ${query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && hasResults ? `
+    ${queryLength >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && hasResults ? `
       ${collections.length ? `<section class="search-section"><h2>目录</h2>${renderCollectionGrid(collections)}</section>` : ""}
       ${media.length ? `<section class="search-section"><h2>媒体</h2>${renderSqliteSearchMediaGrid(media)}</section>` : ""}
     ` : ""}
-    ${query.length >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && state.sqliteSearch.completed && !hasResults ? `<div class="empty-state">${text.noSearchResults}</div>` : ""}
+    ${queryLength >= SEARCH_MIN_QUERY_LENGTH && !state.sqliteSearch.loading && state.sqliteSearch.completed && !hasResults ? `<div class="empty-state">${text.noSearchResults}</div>` : ""}
   `;
   return true;
 }

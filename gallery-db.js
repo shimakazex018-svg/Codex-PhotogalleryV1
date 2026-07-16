@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
+const searchFts = require("./search-fts");
 
 function json(value) {
   return JSON.stringify(value || null);
@@ -151,7 +152,7 @@ function collectionSignature(collection) {
     .digest("hex");
 }
 
-function insertCollection(db, collection, parentId, sortOrder, insertedAt) {
+function insertCollection(db, collection, parentId, sortOrder, insertedAt, syncSearchIndex = false) {
   db.prepare(`
     INSERT INTO collections (
       id, parent_id, title, folder, path_parts, level, cover, cover_thumb,
@@ -205,13 +206,16 @@ function insertCollection(db, collection, parentId, sortOrder, insertedAt) {
   `);
 
   (collection.images || []).forEach((item, index) => {
+    const id = mediaId(collection.id, item);
+    const title = item.title || item.file || "";
+    const src = item.src || "";
     insertMedia.run(
-      mediaId(collection.id, item),
+      id,
       collection.id,
       "image",
-      item.title || item.file || "",
+      title,
       item.file || "",
-      item.src || "",
+      src,
       item.thumb || "",
       item.detailThumb || item.previewThumb || "",
       item.carouselThumb || "",
@@ -225,16 +229,20 @@ function insertCollection(db, collection, parentId, sortOrder, insertedAt) {
       index,
       json(item)
     );
+    if (syncSearchIndex) searchFts.upsertMediaDocument(db, { id, title, src });
   });
 
   (collection.videos || []).forEach((item, index) => {
+    const id = mediaId(collection.id, item);
+    const title = item.title || item.file || "";
+    const src = item.src || "";
     insertMedia.run(
-      mediaId(collection.id, item),
+      id,
       collection.id,
       "video",
-      item.title || item.file || "",
+      title,
       item.file || "",
-      item.src || "",
+      src,
       item.thumb || "",
       "",
       "",
@@ -248,15 +256,20 @@ function insertCollection(db, collection, parentId, sortOrder, insertedAt) {
       index,
       json(item)
     );
+    if (syncSearchIndex) searchFts.upsertMediaDocument(db, { id, title, src });
   });
 
-  (collection.children || []).forEach((child, index) => insertCollection(db, child, collection.id, index, insertedAt));
+  (collection.children || []).forEach((child, index) => insertCollection(db, child, collection.id, index, insertedAt, syncSearchIndex));
 }
 
 function indexGallery(dbFile, gallery) {
   const db = openDatabase(dbFile);
   const insertedAt = new Date().toISOString();
   const collections = gallery.collections || [];
+  const searchIndexStatus = searchFts.getIndexStatus(db);
+  const syncSearchIndex = searchIndexStatus.fts5Available
+    && searchIndexStatus.mappingCount !== null
+    && searchIndexStatus.ftsDocumentCount !== null;
   try {
     db.exec("BEGIN");
     db.exec(`
@@ -268,7 +281,8 @@ function indexGallery(dbFile, gallery) {
       WHERE m.src != '';
     `);
     db.exec("DELETE FROM media; DELETE FROM covers; DELETE FROM scan_state; DELETE FROM collections;");
-    collections.forEach((collection, index) => insertCollection(db, collection, null, index, insertedAt));
+    if (syncSearchIndex) searchFts.clearDocuments(db);
+    collections.forEach((collection, index) => insertCollection(db, collection, null, index, insertedAt, syncSearchIndex));
     db.exec(`
       INSERT OR REPLACE INTO media_hashes (
         media_id, collection_id, file_size, mtime, sha256, width, height,
@@ -282,6 +296,7 @@ function indexGallery(dbFile, gallery) {
     `);
     db.exec("DELETE FROM media_hashes WHERE media_id NOT IN (SELECT id FROM media);");
     db.exec("DROP TABLE IF EXISTS temp_preserved_media_hashes;");
+    if (syncSearchIndex) searchFts.markIncrementalSync(db, { exactCounts: true });
     db.exec("COMMIT");
     const stats = getStatsFromDb(db);
     return { ...stats, indexedAt: insertedAt };
@@ -557,9 +572,10 @@ function roundedMilliseconds(value) {
 
 function search(dbFile, query, limitValue = 50, options = {}) {
   const totalStartedAt = performance.now();
-  const q = String(query || "").trim();
+  const q = searchFts.normalizeSearchQuery(query);
+  const queryCodePointLength = Array.from(q).length;
   const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 60);
-  if (q.length < 2) return { query: q, collections: [], media: [], hasMore: false, minimumQueryLength: 2 };
+  if (queryCodePointLength < 2) return { query: q, collections: [], media: [], hasMore: false, minimumQueryLength: 2 };
 
   const escaped = escapeLike(q);
   const prefixUpperBound = `${q}\uffff`;
@@ -572,8 +588,11 @@ function search(dbFile, query, limitValue = 50, options = {}) {
   let mediaSqlMs = 0;
   let sortMs = 0;
   let transformMs = 0;
+  let ftsInitialHitCount = 0;
 
   try {
+    const indexStatus = searchFts.getIndexStatus(db, { includeCounts: false });
+    const behavior = searchFts.resolveSearchBehavior(options.searchMode, indexStatus);
     const collectionRows = [];
     const collectionIds = new Set();
     let prefixMatchCount = 0;
@@ -605,22 +624,33 @@ function search(dbFile, query, limitValue = 50, options = {}) {
     const mediaLimit = preferredCollectionMatch ? 0 : Math.max(limit - limitedCollectionRows.length, 0);
     let mediaRows = [];
 
-    if (mediaLimit > 0) {
+    const twoCharacterMediaAllowed = queryCodePointLength === 2 && behavior.actual !== "unavailable";
+    if (mediaLimit > 0 && (twoCharacterMediaAllowed || behavior.actual === "fts5" || behavior.actual === "legacy-like")) {
       sqlStartedAt = performance.now();
-      mediaRows = db.prepare(searchSql.mediaContains).all(contains, contains, contains, mediaLimit + 1);
+      if (queryCodePointLength === 2) {
+        mediaRows = searchFts.queryTwoCharacterMedia(db, q, mediaLimit + 1);
+      } else if (behavior.actual === "fts5") {
+        const ftsResult = searchFts.queryFtsMedia(db, q, mediaLimit + 1);
+        mediaRows = ftsResult.rows;
+        ftsInitialHitCount = ftsResult.hitCount;
+      } else if (behavior.actual === "legacy-like") {
+        mediaRows = db.prepare(searchSql.mediaContains).all(contains, contains, contains, mediaLimit + 1);
+      }
       mediaSqlMs += performance.now() - sqlStartedAt;
 
-      const normalizedQuery = q.toLocaleLowerCase("en-US");
-      const sortStartedAt = performance.now();
-      mediaRows = mediaRows
-        .map((row, index) => ({
-          row,
-          index,
-          rank: `${row.title || ""} ${row.file_name || ""}`.toLocaleLowerCase("en-US").includes(normalizedQuery) ? 0 : 1,
-        }))
-        .sort((a, b) => a.rank - b.rank || a.index - b.index)
-        .map(({ row }) => row);
-      sortMs += performance.now() - sortStartedAt;
+      if (behavior.actual === "legacy-like") {
+        const normalizedQuery = q.toLocaleLowerCase("en-US");
+        const sortStartedAt = performance.now();
+        mediaRows = mediaRows
+          .map((row, index) => ({
+            row,
+            index,
+            rank: `${row.title || ""} ${row.file_name || ""}`.toLocaleLowerCase("en-US").includes(normalizedQuery) ? 0 : 1,
+          }))
+          .sort((a, b) => a.rank - b.rank || a.index - b.index)
+          .map(({ row }) => row);
+        sortMs += performance.now() - sortStartedAt;
+      }
     }
 
     const mediaHasMore = mediaRows.length > mediaLimit;
@@ -636,6 +666,12 @@ function search(dbFile, query, limitValue = 50, options = {}) {
       limit,
       exactCollectionMatch,
       preferredCollectionMatch,
+      searchMode: behavior.actual,
+      configuredSearchMode: behavior.configured,
+      indexStatus: indexStatus.status,
+      queryLength: queryCodePointLength,
+      degraded: behavior.degraded,
+      degradedReason: behavior.degradedReason,
     };
 
     if (options.includePerformance) {
@@ -647,6 +683,10 @@ function search(dbFile, query, limitValue = 50, options = {}) {
         sortMs: roundedMilliseconds(sortMs),
         transformMs: roundedMilliseconds(transformMs),
         databaseTotalMs: roundedMilliseconds(performance.now() - totalStartedAt),
+        twoCharacterTitleMode: queryCodePointLength === 2,
+        legacyMode: behavior.actual === "legacy-like",
+        safeDegraded: behavior.actual === "safe-degraded" || behavior.actual === "unavailable",
+        ftsInitialHitCount,
       };
     }
     return payload;
@@ -668,6 +708,7 @@ function getSearchDiagnostics(dbFile, query = "test") {
       collectionPrefix: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.collectionPrefix}`).all(q, `${q}\uffff`, 61),
       collectionContains: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.collectionContains}`).all(`%${escaped}%`, `%${escaped}%`, 61),
       mediaContains: db.prepare(`EXPLAIN QUERY PLAN ${searchSql.mediaContains}`).all(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, 61),
+      ...searchFts.getSearchQueryPlans(db, q),
     },
   }));
 }
@@ -1125,6 +1166,7 @@ function removeMediaRecords(dbFile, ids = []) {
   const mediaIds = [...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean))];
   if (!mediaIds.length) return { removed: 0 };
   return withDatabase(dbFile, (db) => {
+    const syncSearchIndex = searchFts.getIndexStatus(db).status === "ready";
     db.exec("BEGIN");
     try {
       const deleteHash = db.prepare("DELETE FROM media_hashes WHERE media_id = ?");
@@ -1132,11 +1174,17 @@ function removeMediaRecords(dbFile, ids = []) {
       const deleteMedia = db.prepare("DELETE FROM media WHERE id = ?");
       let removed = 0;
       for (const id of mediaIds) {
+        if (syncSearchIndex) searchFts.deleteMediaDocument(db, id);
         deleteHash.run(id);
         deleteMarks.run(id, `duplicate-delete:${id}`);
         const result = deleteMedia.run(id);
         removed += result.changes || 0;
       }
+      if (syncSearchIndex) searchFts.markIncrementalSync(db, {
+        mediaDelta: -removed,
+        mappingDelta: -removed,
+        ftsDelta: -removed,
+      });
       db.exec("COMMIT");
       return { removed };
     } catch (error) {
@@ -1148,6 +1196,25 @@ function removeMediaRecords(dbFile, ids = []) {
       throw error;
     }
   });
+}
+
+function getSearchIndexStatus(dbFile, configuredMode = "auto") {
+  return withDatabase(dbFile, (db) => {
+    const index = searchFts.getIndexStatus(db, { includeCounts: false });
+    const behavior = searchFts.resolveSearchBehavior(configuredMode, index);
+    return { configuredSearchMode: behavior.configured, actualSearchMode: behavior.actual, countsSource: "recorded-state", ...index };
+  });
+}
+
+function markSearchIndexStale(dbFile, reason) {
+  return withDatabase(dbFile, (db) => {
+    searchFts.markStale(db, String(reason || "external_media_operation_uncertain"));
+    return getSearchIndexStatusFromConnection(db);
+  });
+}
+
+function getSearchIndexStatusFromConnection(db) {
+  return searchFts.getIndexStatus(db);
 }
 
 module.exports = {
@@ -1179,4 +1246,6 @@ module.exports = {
   getMediaItemsByIds,
   getDuplicateDeletionCandidates,
   removeMediaRecords,
+  getSearchIndexStatus,
+  markSearchIndexStale,
 };

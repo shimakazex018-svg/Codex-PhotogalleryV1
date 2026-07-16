@@ -6,9 +6,9 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 前端版本标记：`v95`（`app.js` 中的 `APP_VERSION`）；搜索使用有界分段 SQL、250ms 防抖和旧请求取消。
+- 前端候选版本标记：`v96`（`app.js` 中的 `APP_VERSION`）；正式运行站仍为v91，未部署本候选。
 - 当前稳定发布标签：`v1.3-release`。
-- 当前分支：`main`；SQLite访问日志迁移、分页、媒体清理历史恢复与v91回收/恢复流程已部署。
+- 当前开发分支：`codex/fts5-integration-v96`；正式部署仍来自main/v91，本候选未合并或发布。
 
 ## Current implementation state
 
@@ -36,8 +36,8 @@
 - 图片灯箱立即显示点击处WebP预览；当前原图走独立P0高优先级通道，下一张以P1提前加载并解码，其余预测原图在并发2、有界5项窗口内按网络条件加载；
 - 图片缩略图、懒加载和分批渲染；
 - 视频 poster、按需加载和 HTTP Range；
-- SQLite 索引、搜索和分页媒体查询；搜索总结果默认50/最大60，图集精确/前缀优先，任意媒体子串仍可能扫描完整`media`表；
-- FTS5 Prototype V96已在正式库一致性副本上完成能力、完整构建、短词、正确性、体积、计划和一致性验证；推荐结构为稳定`media_id`映射表加独立trigram FTS，索引`title`与解码相对路径。本结构尚未接入正式schema/API/扫描器或部署。
+- SQLite 索引、搜索和分页媒体查询；候选v96支持`auto/fts5/legacy-like`，2字符只搜媒体标题精确/前缀，3字符以上在ready状态使用mapped trigram FTS；auto不自动执行完整媒体LIKE。
+- FTS5 Integration V96已接入候选API、全库扫描重建事务、重复项数据库删除、只读状态接口及CLI迁移/校验/备份恢复；完整474470行副本通过。正式数据库尚无FTS表，正式站未重启或部署；真实Chrome和完整隔离媒体树扫描峰值仍未验收，候选不可正式部署。
 - 设置页收藏图册、观看历史和用户标记；
 - hash路由的会话级滚动位置恢复，包含搜索词、稳定锚点和有界媒体深度恢复；
 - 首页轮播；
@@ -74,7 +74,7 @@
 - 数据库：SQLite。
 - 访问方式：Node 内置 `node:sqlite` 的 `DatabaseSync`。
 - schema 由 `gallery-db.js` 运行时使用 `CREATE TABLE/INDEX IF NOT EXISTS` 保证。
-- 当前表：`collections`、`media`、`covers`、`scan_state`、`user_marks`、`media_hashes`、`access_logs`。
+- 基础表：`collections`、`media`、`covers`、`scan_state`、`user_marks`、`media_hashes`、`access_logs`。显式迁移后另有`media_search_documents`、`media_search_fts`和`search_fts_state`；服务启动不会自动创建或构建它们。
 - 旧`access-YYYY-MM-DD.log`会按内容哈希幂等导入`access_logs`且原文件保留；新访问记录只写SQLite。
 - 当前打开逻辑会启用 WAL 和 `synchronous=NORMAL`。
 - 没有独立数据库 migration 文件。

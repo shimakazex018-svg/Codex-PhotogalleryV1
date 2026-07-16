@@ -34,6 +34,7 @@ const allowRemoteDelete = process.env.ALLOW_REMOTE_DELETE === "1" || process.env
 const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
 const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
 const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
+const searchBackendMode = process.env.SEARCH_BACKEND_MODE || "auto";
 const imagePreviewMaxEdge = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_MAX_EDGE) || 768, 320), 1600);
 const imagePreviewQuality = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_QUALITY) || 78, 40), 95);
 const duplicateRecycleLimit = 50000;
@@ -1263,7 +1264,10 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
     const includePerformance = searchPerfLoggingEnabled && requestUrl.searchParams.get("perf") === "1";
     const parameterParseMs = performance.now() - parameterParseStartedAt;
     try {
-      const payload = galleryDb.search(galleryDbFile, query, limit, { includePerformance: searchPerfLoggingEnabled });
+      const payload = galleryDb.search(galleryDbFile, query, limit, {
+        includePerformance: searchPerfLoggingEnabled,
+        searchMode: searchBackendMode,
+      });
       const databasePerformance = payload.performance || {};
       if (!includePerformance) delete payload.performance;
       const serializationStartedAt = performance.now();
@@ -1293,8 +1297,14 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
       }
     } catch (error) {
       console.error("SQLite search failed:", error);
-      sendJsonError(response, 500, error.message);
+      try { galleryDb.markSearchIndexStale(galleryDbFile, "fts_query_failed"); } catch {}
+      sendJsonError(response, 503, "Search backend unavailable");
     }
+    return true;
+  }
+
+  if (requestUrl.pathname === "/api/search-index/status") {
+    sendDbResponse(response, () => galleryDb.getSearchIndexStatus(galleryDbFile, searchBackendMode));
     return true;
   }
 
@@ -1622,7 +1632,15 @@ function recycleDuplicateItems(request, response, mode) {
         }
       }
 
-      const cleanup = galleryDb.removeMediaRecords(galleryDbFile, deletedIds);
+      let cleanup;
+      try {
+        cleanup = galleryDb.removeMediaRecords(galleryDbFile, deletedIds);
+      } catch (error) {
+        try {
+          galleryDb.markSearchIndexStale(galleryDbFile, "duplicate_recycle_files_moved_database_update_failed");
+        } catch {}
+        throw error;
+      }
       logEvent("duplicate-recycle", {
         mode,
         ip: clientAddress(request),

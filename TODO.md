@@ -4,6 +4,9 @@
 
 ## High Priority
 
+- [ ] 完成FTS5 Integration V96真实Chrome与完整隔离媒体树扫描峰值验收
+  - 状态：迁移、完整数据库副本、API、增量事务和故障恢复已通过；Chrome Extension/native host缺失，扫描器仍继承单大事务，未满足正式部署门槛。
+
 - [x] 将媒体清理永久删除改为可恢复的项目回收站
   - 状态：v91已实现并部署同盘rename、跨盘copy-verify-delete、manifest幂等、冲突改名、ChangedSinceScan跳过与localhost恢复；隔离执行/API测试通过，正式媒体零移动，待用户手工确认。
 
@@ -81,6 +84,8 @@
   - 状态：若部署范围扩大再处理。
 
 ## Done
+
+- [x] 完成FTS5 Integration V96 B1候选：共享核心、显式迁移/状态/一致性/备份恢复、严格搜索模式、API/前端提示、完整474470行副本、隔离API、性能、增量与故障恢复；正式部署保持未执行。
 
 - [x] 完成FTS5 Prototype V96第二阶段A：Node/SQLite实际能力、474470行完整副本多结构构建、URL解码相对路径、稳定mapping、两字媒体词、50k bigram小原型、正确性/计划/体积/资源/一致性与一冷五热基准；未接正式schema/API/扫描器或部署。
 - [x] 完成搜索性能基线与低风险优化：真实执行计划、图集精确/前缀索引、总结果60上限、无COUNT/无媒体排序、开发态分段计时、250ms防抖、旧请求取消、乱序保护和30秒同词缓存；剩余`SCAN media`留待独立FTS5阶段评审（前端`v95`）。

@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const searchFts = require("../search-fts");
 
 const REPOSITORY_ROOT = path.resolve(__dirname, "..");
 const EXPERIMENT_ROOT = path.join(REPOSITORY_ROOT, "tmp", "fts5-prototype");
@@ -48,11 +49,11 @@ function assertSafeExperimentPaths(sourceValue, targetValue) {
 }
 
 function quoteMatchText(value) {
-  return `"${String(value || "").replace(/"/g, '""')}"`;
+  return searchFts.quoteMatchText(value);
 }
 
 function escapeLike(value) {
-  return String(value || "").replace(/[\\%_]/g, "\\$&");
+  return searchFts.escapeLike(value);
 }
 
 function normalizeRelativeSource(value) {
@@ -61,12 +62,7 @@ function normalizeRelativeSource(value) {
 }
 
 function normalizeDecodedRelativeSource(value) {
-  const relative = normalizeRelativeSource(value);
-  try {
-    return decodeURIComponent(relative);
-  } catch {
-    return relative;
-  }
+  return searchFts.normalizeRelativeSource(value);
 }
 
 function round(value, digits = 3) {
