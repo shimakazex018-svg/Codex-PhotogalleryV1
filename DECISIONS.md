@@ -407,3 +407,21 @@ stop/status必须同时核对任务、host、Node PID、Node父PID和48102监听
 ### Status
 
 有效，启动CMD自动退出、手工关闭启动CMD、重复启动和精确停止验收均已通过
+
+## DEC-015：统一自然排序并复用原始字节SHA-256查找
+
+### Decision
+
+图册只使用`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`八种公共枚举；名称使用中文数字自然排序，空值末尾，名称与相对路径作为稳定次级条件。搜索结果保留`relevance`专用默认值。上传查找复用`media_hashes.sha256`的原始文件字节算法和既有索引，不引入感知哈希。
+
+### Reason
+
+旧实现按页面分成两套枚举且在首页分页后排序，搜索和收藏部分路径并未真正执行所选模式。现有查重数据库已提供兼容的SHA-256和索引，无需第二套算法、全库逐条比较或数据库迁移。
+
+### Impact
+
+`gallery-sort.js`成为前后端唯一排序规则源。上传API单并发、200 MiB、流式哈希、不落盘；精确字节变化（含元数据变化、重新压缩、改格式）不会命中。哈希覆盖不足时UI必须限定为“已建立哈希的图片”。
+
+### Status
+
+有效，自v99起实施

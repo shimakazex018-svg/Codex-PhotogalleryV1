@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前前端版本标记：`v98`（`app.js` 中的`APP_VERSION`）；正式运行站已完成v98扫描与播放验收。
+- 当前前端版本标记：`v99`（`app.js` 中的`APP_VERSION`）；v99统一图册排序并增加原始字节SHA-256上传查找。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
@@ -18,6 +18,8 @@
 - V1.4.2 已在仓库外创建独立 runtime，并迁移经过 SHA256 校验的数据库副本。
 - runtime 已配置现有媒体路径。V1.5.0站点已启动作为日常运行候选，PID和48102由正式脚本管理。
 - 视频兼容性扫描只读查询SQLite中的`media.type='video'`，结果写入Runtime的`DATA_DIR/video-compatibility-report.json`；该文件及其临时/previous副本均属于运行数据，不进入Git。
+- 图册排序统一为名称、图片数、视频数、内容更新时间的正/倒序；根目录由后端在完整集合排序后分页，子目录在返回前排序，搜索默认保留FTS相关性。
+- `POST /api/image-hash-lookup`只接收单张图片并流式计算原始字节SHA-256；不落盘、不写图库、不生成缩略图，通过`media_hashes.sha256`索引返回全部相对路径命中。
 
 ## Current runtime behavior
 

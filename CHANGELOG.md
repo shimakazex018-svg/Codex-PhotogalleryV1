@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-18 - Unify gallery sorting and add exact image lookup v99
+
+- Replaced page-specific legacy sort modes with eight shared modes covering natural name, image count, video count and content-update time in both directions; added null-last and deterministic name/path tie breakers.
+- Moved root collection sorting before pagination, applied the same rules to subdirectories and favorites, kept viewing history chronological, and preserved FTS relevance as the search-specific default.
+- Added a single-image, 200 MiB, streaming multipart endpoint that validates extension, MIME and signature, computes the existing original-byte SHA-256 without writing a temporary file, and uses `idx_media_hashes_sha256` to return every relative-path match.
+- Added the accessible desktop/mobile upload panel, coverage-aware no-match wording, isolated sort/hash tests and v99 responsive-browser validation. SQLite schema, formal media and generated caches were unchanged.
+
 ## 2026-07-16 - Add bounded video compatibility scanning and result-driven playback v98
 
 - Added a read-only, resumable scanner over SQLite `media.type='video'`; metadata probing is limited to two concurrent FFprobe processes, and only suspect files receive three one-second decode samples with one concurrent FFmpeg process.

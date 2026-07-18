@@ -4,6 +4,9 @@
 
 ## High Priority
 
+- [x] 统一图册排序并增加上传图片精确哈希查找
+  - 状态：v99已完成8种公共排序、后端分页前排序、旧配置兼容、搜索相关性保留，以及复用`media_hashes.sha256`的流式单图查询；数据库schema和正式媒体均未修改。
+
 - [x] 将媒体清理永久删除改为可恢复的项目回收站
   - 状态：v91已实现并部署同盘rename、跨盘copy-verify-delete、manifest幂等、冲突改名、ChangedSinceScan跳过与localhost恢复；隔离执行/API测试通过，正式媒体零移动，待用户手工确认。
 

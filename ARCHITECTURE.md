@@ -6,7 +6,7 @@
 
 ```text
 Browser SPA
-  ├─ static: index.html / app.js / styles.css
+  ├─ static: index.html / app.js / gallery-sort.js / styles.css
   └─ HTTP API
        └─ server.js
             ├─ gallery-db.js -> SQLite gallery.db
@@ -28,6 +28,7 @@ Browser SPA
 |---|---|
 | `index.html` | 静态 HTML shell、顶部工具栏、状态区和灯箱结构 |
 | `app.js` | hash 路由、页面渲染、客户端状态、API 请求、灯箱、视频按需加载和设置页 |
+| `gallery-sort.js` | 浏览器和Node共同复用的8种排序枚举、旧值归一化、中文自然排序、空值与稳定次序规则 |
 | `styles.css` | 全部当前页面、响应式和状态样式 |
 | `server.js` | HTTP 服务、静态资源、API 路由、扫描任务、媒体/缩略图/HLS、日志和文件操作 |
 | `gallery-db.js` | SQLite基础schema、查询、用户标记、查重及媒体写事务；委托FTS核心同步 |
@@ -37,6 +38,8 @@ Browser SPA
 | `video-compatibility-manager.js` | 扫描生命周期、报告恢复/分页、媒体API兼容字段和worker IPC |
 | `video-compatibility-worker.js` | 只读视频枚举、两阶段探测、并发/超时/暂停/停止和原子报告写入 |
 | `scripts/test-video-compatibility.js` | 仅使用唯一TEMP媒体/数据库的分类、增量、暂停、停止与超时回归 |
+| `scripts/test-gallery-sort.js` | 8种排序、旧配置、自然排序、空值、稳定次序和数据库分页前排序回归 |
+| `scripts/test-image-hash-lookup.js` | TEMP SQLite/媒体上的流式上传、哈希命中、安全校验、中断清理与查询计划回归 |
 | `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、可恢复回收/恢复和空目录清理 |
 | `make-hls.ps1` | 手工 HLS 生成工具 |
 | `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |
@@ -70,6 +73,10 @@ Browser SPA
 前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频为`preload="none"`并在交互时才设置资源地址。`direct_safe`和`device_dependent`保留原始Range地址，只有报告中的`fallback_required`媒体ID映射到单路兼容流；`invalid`显示不可用。暂停、切换或离页时发送停止请求并释放video src。扫描完成后清空图集内存缓存，以重新读取最新分类。
 
 搜索输入使用250ms防抖；关键词变化立即中止旧`fetch`，请求序号阻止乱序覆盖，同词结果在内存缓存30秒。空词和少于2字符不请求API。结果总数最多60，卡片继续使用按需WebP预览、`loading="lazy"`且不创建video播放器。v96显示FTS降级和两字符限制提示。开发时可用`SEARCH_PERF_LOG=1`和页面`?searchPerf=1`记录后端分段与前端首次渲染时间，正式默认关闭。
+
+排序由`gallery-sort.js`统一：`Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})`负责中文/英文/数字自然次序，主字段之后固定以名称正序和相对路径正序打破平局，缺失或非法值始终放末尾。根目录API先读取完整根集合、排序后再按`offset/limit`截取；子目录先排序再返回。搜索专用默认仍为`relevance`，用户显式选择8种排序时只对白名单枚举执行排序。
+
+上传图片查找不创建临时文件。`server.js`限制单并发和200 MiB，流式解析单文件multipart并同时计算SHA-256，扩展名/MIME/文件签名三重校验后调用`gallery-db.js`的索引查询；返回值只包含图库相对路径、现有hash路由和媒体ID，不暴露`PHOTOS_DIR`或数据库路径。数据库schema未变化。
 
 灯箱使用两阶段图片显示：点击后立即复用卡片的按需WebP预览，当前原图完成网络加载和`decode()`后再替换。规范化原图URL是任务唯一键，任务状态覆盖`idle/queued/loading/loaded/decoding/ready/failed/aborted`；已加载或进行中的网络/解码Promise可复用。当前原图使用不计入普通并发的P0立即通道并设置`fetchPriority=high`，下一张为P1并提前解码，第二/第三张预测图为P3且只在当前图显示后调度；普通预加载最大并发2，缓存窗口最多5项，并按Save-Data/2G/3G降级。关闭灯箱或换路由会取消队列和旧会话任务并提升generation，render token阻止旧回调覆盖。列表只请求按需WebP预览，视口外图片保持懒加载并使用低请求优先级；视频数组不参与灯箱调度。
 
