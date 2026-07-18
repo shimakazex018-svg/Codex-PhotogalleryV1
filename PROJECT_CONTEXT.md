@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前前端版本标记：`v100`（`app.js` 中的`APP_VERSION`）；v100修复上传图片的PNG/MIME/文件签名识别，SHA-256精确查找语义不变。
+- 当前源码前端版本标记：`v101`（`app.js` 中的`APP_VERSION`）；v101在SHA-256精确查找旁新增标准64位pHash相似查找，正式48102在发布前仍为v100。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
@@ -19,7 +19,8 @@
 - runtime 已配置现有媒体路径。V1.5.0站点已启动作为日常运行候选，PID和48102由正式脚本管理。
 - 视频兼容性扫描只读查询SQLite中的`media.type='video'`，结果写入Runtime的`DATA_DIR/video-compatibility-report.json`；该文件及其临时/previous副本均属于运行数据，不进入Git。
 - 图册排序统一为名称、图片数、视频数、内容更新时间的正/倒序；根目录由后端在完整集合排序后分页，子目录在返回前排序，搜索默认保留FTS相关性。
-- `POST /api/image-hash-lookup`只接收单张图片并流式计算原始字节SHA-256；文件签名是格式主判据，浏览器MIME仅作辅助，支持空MIME、`application/octet-stream`、无扩展名和`filename*`；扩展名冲突返回真实格式的准确提示。不落盘、不写图库、不生成缩略图，通过`media_hashes.sha256`索引返回全部相对路径命中。
+- `POST /api/image-hash-lookup`流式计算原始字节SHA-256，并把完整上传字节写入随机命名的短期临时文件供FFmpeg解码pHash；成功、失败和中断均清理。响应分为SHA-256完全相同与pHash高度/可能相似，不返回服务器绝对路径。
+- pHash索引使用`media_perceptual_hashes`的8字节BLOB，通过media_id关联；后台任务手动启动、单worker、可暂停/继续/停止、按size/mtime增量重算。480 MiB自动暂停，512 MiB硬停止，不在服务启动时自动全量生成。
 - v100从`codex/fts5-integration-v96`发布到正式48102；正式Node由既有任务Host托管，数据库schema、媒体路径和运行配置未变化。
 
 ## Current runtime behavior

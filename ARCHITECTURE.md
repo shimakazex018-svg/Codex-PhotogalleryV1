@@ -34,6 +34,10 @@ Browser SPA
 | `gallery-db.js` | SQLite基础schema、查询、用户标记、查重及媒体写事务；委托FTS核心同步 |
 | `search-fts.js` | FTS5能力、schema/state、规范化、两字符/三字符查询、mapping/FTS CRUD、一致性与维护核心 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
+| `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
+| `perceptual-index-worker.js` | 单并发、可暂停恢复、受磁盘硬限制的pHash增量任务 |
+| `perceptual-query-worker.js` | 独立进程顺序扫描紧凑8字节哈希，筛选距离≤10的最多50条结果 |
+| `perceptual-manager.js` | pHash任务生命周期与查询子进程管理 |
 | `video-compatibility.js` | 路径边界、fingerprint、探测结果规范化、兼容分类和原因码的唯一规则源 |
 | `video-compatibility-manager.js` | 扫描生命周期、报告恢复/分页、媒体API兼容字段和worker IPC |
 | `video-compatibility-worker.js` | 只读视频枚举、两阶段探测、并发/超时/暂停/停止和原子报告写入 |
@@ -76,7 +80,9 @@ Browser SPA
 
 排序由`gallery-sort.js`统一：`Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})`负责中文/英文/数字自然次序，主字段之后固定以名称正序和相对路径正序打破平局，缺失或非法值始终放末尾。根目录API先读取完整根集合、排序后再按`offset/limit`截取；子目录先排序再返回。搜索专用默认仍为`relevance`，用户显式选择8种排序时只对白名单枚举执行排序。
 
-上传图片查找不创建临时文件。`server.js`限制单并发和200 MiB，流式解析单文件multipart并同时计算SHA-256；JPEG/PNG/WebP/GIF/AVIF文件签名是可信主判据，浏览器MIME仅用于辅助判断，扩展名冲突会返回实际格式的准确提示，RFC 5987 `filename*`安全解码后只保留基名。签名明确且声明无扩展名冲突的支持格式进入`gallery-db.js`索引查询，无法识别与已识别但不支持的格式使用不同错误码；返回值只包含图库相对路径、现有hash路由和媒体ID，不暴露`PHOTOS_DIR`或数据库路径。数据库schema未变化。
+上传图片查找限制单并发和200 MiB，流式解析multipart时同时计算完整原始字节SHA-256，并写入随机命名的专用临时文件供FFmpeg解码；finally和解析失败分支均删除临时文件。pHash将首帧Lanczos缩放为32x32灰度，计算低频8x8二维DCT并以除DC外中位数生成8字节BLOB。查询在独立子进程遍历紧凑哈希，不把路径对象常驻内存，距离≤10且最多50条；回表后只返回相对路径和现有hash路由。
+
+`media_perceptual_hashes`为WITHOUT ROWID表，按media_id保存hash64、源size/mtime和状态；`perceptual_hash_state`保存任务状态和磁盘基线。普通B-tree不能完整覆盖汉明距离；4x16分段在距离10下没有召回保证，而11段保证结构会放大到约528万桶行，因此v101采用独立进程顺序扫描作为空间优先实现。索引只由用户手动启动，默认1 worker；480 MiB自动暂停、512 MiB停止新增有效记录。
 
 灯箱使用两阶段图片显示：点击后立即复用卡片的按需WebP预览，当前原图完成网络加载和`decode()`后再替换。规范化原图URL是任务唯一键，任务状态覆盖`idle/queued/loading/loaded/decoding/ready/failed/aborted`；已加载或进行中的网络/解码Promise可复用。当前原图使用不计入普通并发的P0立即通道并设置`fetchPriority=high`，下一张为P1并提前解码，第二/第三张预测图为P3且只在当前图显示后调度；普通预加载最大并发2，缓存窗口最多5项，并按Save-Data/2G/3G降级。关闭灯箱或换路由会取消队列和旧会话任务并提升generation，render token阻止旧回调覆盖。列表只请求按需WebP预览，视口外图片保持懒加载并使用低请求优先级；视频数组不参与灯箱调度。
 

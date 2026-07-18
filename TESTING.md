@@ -1,5 +1,22 @@
 # TESTING.md
 
+## Perceptual image lookup v101
+
+```powershell
+node --check perceptual-hash.js
+node --check perceptual-limits.js
+node --check perceptual-index-worker.js
+node --check perceptual-query-worker.js
+node --check perceptual-manager.js
+node scripts/test-perceptual-hash.js
+```
+
+自动测试验证64位稳定序列化、BLOB往返、符号位汉明距离、相似度换算、缩略/重压缩距离、不同图片距离，以及480 MiB暂停和512 MiB硬停止边界。`scripts/benchmark-perceptual-hash.js`必须显式指定数据库副本、媒体根、FFmpeg和输出文件；它只读真实媒体，变体逐个写入TEMP并立即删除。
+
+本轮副本10,000条空间实测：净增868,352字节、WAL峰值906,432字节、SHM32,768字节、integrity ok；线性预测486,028条约40.2 MiB。真实样本为100张原图、20组连拍、750个变体；阈值4/6/8/10/12正确命中571/590/598/600/607，错误候选均0，连拍距离≤6/10各1组。25%/10%缩略、JPEG质量90/70/40、PNG转JPEG、JPEG转WebP、亮度/对比度/锐化、边框和5%裁剪在距离≤10下50/50命中；20%裁剪、镜像、90°旋转不作为支持范围。
+
+48112隔离验收使用数据库副本：原图精确命中，25%缩略图仅pHash命中；PNG与`application/octet-stream`均200，伪装JPG为415；五次连续查询459/398/421/480/524ms，平均456.4ms，Node工作集下降397,312字节，临时文件0，stderr 0。浏览器设置页和上传入口可访问，控制台日志0。
+
 ## Gallery sorting and image hash lookup v100
 
 静态与自动测试：

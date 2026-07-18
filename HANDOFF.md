@@ -4,16 +4,17 @@
 
 ## Last Completed Task
 
-已发布v100：修复“上传图片查找”的PNG/MIME/文件签名识别；v99的8种图册排序与原始字节SHA-256精确查找保持不变。
+v101相似图片查找已完成隔离实现和验证，待正式48102发布：保留SHA-256完全匹配，新增标准64位pHash相似匹配、手动后台索引和磁盘硬限制。
 
 ## Current State
 
-- 源码与正式运行站均为`v100`，Node PID 26268、任务Host PID 13252，监听`0.0.0.0:48102`；loopback与物理LAN首页均为HTTP 200，唯一监听PID与Node PID一致。
+- 源码为`v101`，正式运行站发布前仍为`v100`、Node PID 26268，监听`0.0.0.0:48102`；48112隔离实例使用数据库副本验证完成。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
 - “更新时间”使用`collections.mtime`（epoch毫秒），来自目录/媒体/子图册内容mtime的最大值并随增量扫描更新；0或非法时间视为空值。名称使用`zh-CN`数字自然排序，平局固定名称正序、相对路径正序。
 - 搜索仍以`relevance`为专用默认值；显式选择8种模式时只接受白名单，图册候选在截取前排序，媒体候选保留有界FTS集合后使用同一稳定比较器。
-- `POST /api/image-hash-lookup`单次只接收一张JPEG/PNG/WebP/GIF/AVIF，默认上限200 MiB；文件签名为主判据，空MIME、`application/octet-stream`、无扩展名及`filename*`均兼容，MIME冲突按真实格式查询，扩展名冲突准确返回声明格式与真实格式。上传流直接计算SHA-256，不写临时文件、不写图库或历史。
-- 正式哈希覆盖为470347/486028（96.7736%）；因此0命中只表示“未在已建立哈希的图片中找到”。查询使用`idx_media_hashes_sha256`，不支持感知哈希、裁剪、重压缩、改尺寸或格式转换后的相似匹配。
+- `POST /api/image-hash-lookup`单次只接收一张JPEG/PNG/WebP/GIF/AVIF，默认上限200 MiB；文件签名为主判据。上传流计算完整SHA-256，同时写入随机短期文件供FFmpeg解码pHash，所有完成/失败路径清理，不写图库、历史或缩略图。
+- SHA-256精确覆盖仍为470347/486028；pHash使用`media_perceptual_hashes`的8字节BLOB。相似查询在独立进程顺序读取紧凑哈希，距离0-6为高度相似、7-10为可能相似、最多50条，并排除已精确命中的媒体。
+- pHash后台索引只手工启动，默认1 worker，可暂停/继续/停止，按size/mtime增量重算；480 MiB自动暂停、512 MiB硬停止，不在网站启动时自动全量处理。
 - 正式只读扫描共2096条视频：`direct_safe=1432`、`device_dependent=267`、`fallback_required=395`、`invalid=2`。视频编码分布为H.264 1488、MPEG-4 Part 2 388、HEVC 217、ProRes 1、无有效轨2。
 - 扫描报告为Runtime文件`DATA_DIR/video-compatibility-report.json`，不进入Git。元数据最多2路FFprobe；只对疑似项在10%/50%/90%各解码1秒，最多1路FFmpeg；不生成永久转码或兼容缓存。
 - 设置路由`#/__settings/video-compatibility`提供状态、控制、统计、分类筛选、搜索和50条服务端分页。扫描完成会清除图集内存缓存，使重新访问时取得最新分类。
@@ -32,6 +33,11 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- pHash自动测试通过：`phash64-v1`固定8字节，缩略图距离2、重压缩距离0、不同图片距离30，BLOB往返和480/512 MiB阈值通过。
+- 数据库副本10,000条净增868,352字节、WAL峰值906,432字节、integrity ok；全量486,028张预测约40.2 MiB，低于150 MiB目标。
+- 真实只读样本100张、20组连拍、750个变体：目标能力到5%裁剪在距离≤10下600/750命中（未命中的150项为20%裁剪、镜像、旋转三类）；阈值≤10错误候选0，连拍≤10为1组。
+- 48112原图精确命中、25%缩略图pHash命中距离0；PNG和通用MIME为200，伪装JPG为415；5次端到端平均456.4ms、最慢524ms，Node工作集未增长，临时残留0、stderr 0、浏览器控制台0。
 
 - 静态检查、`git diff --check`、8种排序/TEMP SQLite分页测试和TEMP哈希API测试通过；哈希测试覆盖双路径、改名、无命中、完整SHA-256、空/通用/冲突MIME、无扩展名、`filename*`、PNG/JPEG/WebP扩展名冲突、损坏PNG头、JPEG/PNG/WebP/GIF/AVIF、HEIC准确拒绝、伪装文件、空文件、413、上传中断、并发429与槽位释放和零临时目录。
 - 正式7189图册完整内存排序耗时7.422–41.506ms；正式根目录API 8种模式为7.951–68.455ms，675个子目录的8种顺序均验证正确。`maleah`搜索相关性返回60条、模式FTS5/index ready，显式名称倒序60条顺序正确。

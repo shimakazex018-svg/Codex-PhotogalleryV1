@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-18 - Add bounded perceptual image lookup v101
+
+- Added standard 64-bit pHash v1 beside original-byte SHA-256. FFmpeg decodes one frame to 32x32 grayscale, Node performs a two-dimensional DCT, and SQLite stores the result as an 8-byte BLOB.
+- Added compact hash/task tables, a manual single-worker resumable indexer, an isolated query process, exact/similar deduplication, distance limit 10 and at most 50 similar results.
+- Enforced 480 MiB automatic pause and 512 MiB hard stop. A 10,000-row database-copy test added 868,352 bytes with a 906,432-byte WAL peak, projecting about 40.2 MiB for 486,028 images.
+- Real-sample validation covered 100 originals, 20 burst pairs and 750 transformed variants. Scale, recompression, format conversion, small tone changes, border and 5% crop matched at distance <=10; 20% crop, mirror and rotation remain documented limitations.
+- Added v101 settings controls and grouped exact/highly-similar/possibly-similar upload results. Randomly named upload files exist only while FFmpeg decodes them and are removed after success or failure.
+
 ## 2026-07-18 - Fix upload image signature validation v100
 
 - Fixed normal PNG uploads being rejected when browser MIME metadata was empty, generic or conflicting. Image signatures are now authoritative; MIME conflicts use the detected format, extension conflicts report both formats precisely, unrecognized and unsupported actual formats have distinct errors, and RFC 5987 `filename*` is supported.
