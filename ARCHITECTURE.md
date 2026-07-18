@@ -14,6 +14,8 @@ Browser SPA
             ├─ filesystem -> PHOTOS_DIR
             ├─ generated files -> DATA_DIR
             ├─ duplicates-worker.js -> SQLite + PHOTOS_DIR
+            ├─ video-compatibility-manager.js -> scan lifecycle + report/API augmentation
+            ├─ video-compatibility-worker.js -> read-only SQLite + bounded FFprobe/FFmpeg
             ├─ scripts/media-library-cleanup-worker.ps1 -> PHOTOS_DIR metadata + DATA_DIR/logs reports + TRASH_DIR manifest
             └─ FFmpeg / FFprobe
 ```
@@ -31,6 +33,10 @@ Browser SPA
 | `gallery-db.js` | SQLite基础schema、查询、用户标记、查重及媒体写事务；委托FTS核心同步 |
 | `search-fts.js` | FTS5能力、schema/state、规范化、两字符/三字符查询、mapping/FTS CRUD、一致性与维护核心 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
+| `video-compatibility.js` | 路径边界、fingerprint、探测结果规范化、兼容分类和原因码的唯一规则源 |
+| `video-compatibility-manager.js` | 扫描生命周期、报告恢复/分页、媒体API兼容字段和worker IPC |
+| `video-compatibility-worker.js` | 只读视频枚举、两阶段探测、并发/超时/暂停/停止和原子报告写入 |
+| `scripts/test-video-compatibility.js` | 仅使用唯一TEMP媒体/数据库的分类、增量、暂停、停止与超时回归 |
 | `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、可恢复回收/恢复和空目录清理 |
 | `make-hls.ps1` | 手工 HLS 生成工具 |
 | `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |
@@ -56,11 +62,12 @@ Browser SPA
 - `#/__settings/duplicates`：图片查重。
 - `#/__settings/access-log`：访问日志。
 - `#/__settings/media-cleanup`：媒体库清理扫描、报告、项目回收站与恢复确认。
+- `#/__settings/video-compatibility`：视频兼容性状态、控制、统计、筛选和50条分页结果。
 - Node启动时恢复`DATA_DIR/logs`中最新有效媒体清理摘要用于历史查看；写操作只接受服务端批准的完整、零错误job，客户端不能提交路径。
 - `#/__duplicates`：旧查重兼容入口。
 - 灯箱不是独立路由，由 overlay 和内存状态控制。
 
-前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频在交互/播放时才设置资源地址。
+前端直接使用原生 DOM、事件监听、`fetch`、`localStorage` 和 `sessionStorage`，没有组件框架或状态库。媒体列表使用缩略图、懒加载和分批图片渲染；视频为`preload="none"`并在交互时才设置资源地址。`direct_safe`和`device_dependent`保留原始Range地址，只有报告中的`fallback_required`媒体ID映射到单路兼容流；`invalid`显示不可用。暂停、切换或离页时发送停止请求并释放video src。扫描完成后清空图集内存缓存，以重新读取最新分类。
 
 搜索输入使用250ms防抖；关键词变化立即中止旧`fetch`，请求序号阻止乱序覆盖，同词结果在内存缓存30秒。空词和少于2字符不请求API。结果总数最多60，卡片继续使用按需WebP预览、`loading="lazy"`且不创建video播放器。v96显示FTS降级和两字符限制提示。开发时可用`SEARCH_PERF_LOG=1`和页面`?searchPerf=1`记录后端分段与前端首次渲染时间，正式默认关闭。
 
@@ -94,6 +101,10 @@ Browser SPA
 | GET | `/api/media` | collection 媒体分页 |
 | GET | `/api/search` | SQLite 搜索 |
 | GET | `/api/highlights` | 首页轮播 |
+| GET/POST | `/api/video-compatible?id=<mediaId>`、`/api/video-compatible/stop` | 仅允许报告标记为fallback的媒体进入单路无落盘H.264/AAC流及显式停止 |
+| GET | `/api/video-compatibility/status`、`/api/video-compatibility/results` | 扫描状态、分类统计与服务端50条分页/筛选 |
+| POST | `/api/video-compatibility/scan/start|pause|resume|stop` | 只读兼容性扫描生命周期；同一时间最多一个worker |
+| POST | `/api/video-playback-events` | 去重记录播放error/stalled/abort，不记录本地绝对路径 |
 | GET/POST/DELETE | `/api/recent` | 最近观看标记 |
 | GET/POST/DELETE | `/api/favorites` | 收藏标记 |
 | GET/POST/DELETE | `/api/duplicate-delete-marks` | 查重待删除标记 |
@@ -116,6 +127,8 @@ Browser SPA
 所有 API 当前没有账号/Session/Token 鉴权。删除重复媒体接口有本机/`ALLOW_REMOTE_DELETE` 控制，但这不等价于完整认证系统。
 
 媒体清理任务独立于 SQLite 索引扫描。Node 同时只持有一个 worker 句柄，PowerShell 顺序枚举并约每 5000 个对象原子更新进度；扫描报告直接流式写入 `DATA_DIR/logs`。Node 查询 NDJSON 时仅保留当前排序页所需的有界候选（offset 最大 50000、pageSize 最大 200），响应不暴露绝对路径。回收只解析批准报告中的`kind=non-media`并逐项复核；同盘rename，跨盘copy到`.partial`、校验、原子改名后才删除源。manifest、summary和recycle.log写入`TRASH_DIR/media-cleanup/<jobId>`；恢复同样不接受客户端路径且不覆盖原位置。
+
+视频兼容性任务与索引/清理任务分离。worker以只读SQLite连接仅枚举`type='video'`，元数据阶段最多2个FFprobe，采样阶段最多1个FFmpeg；每个外部进程有超时和stderr上限，暂停/停止/异常退出都会终止已登记子进程。报告以temp、previous和rename方案原子替换`DATA_DIR/video-compatibility-report.json`，启动可恢复最后一份有效报告。报告只存媒体ID、相对URL、fingerprint和探测/分类数据，不存可执行的客户端绝对路径；服务端使用媒体ID重新查库和校验根目录。
 
 ## Database architecture
 
@@ -148,6 +161,7 @@ FTS5 Integration V96候选使用`media_search_documents(fts_rowid, media_id UNIQ
 - 视频 poster 文件：`THUMBNAILS_DIR`，默认 `DATA_DIR/video-thumbnails`。
 - poster进程内映射未命中时，服务端按poster URL从SQLite只读回查`src`并验证媒体根路径。
 - HLS URL：`/hls/...`；文件来自 `HLS_DIR`。
+- 兼容视频流只允许指定`看球`目录，FFmpeg输出最大边960、30fps的fragmented MP4；不落盘、不缓存，新的流会终止旧流。
 - 轮播 URL：`/highlight-carousel/...`；文件来自 `DATA_DIR/highlight-carousel`。
 - FFprobe 元数据缓存：`DATA_DIR/video-metadata.json`。
 

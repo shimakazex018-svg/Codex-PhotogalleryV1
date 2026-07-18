@@ -1180,6 +1180,21 @@ a {
   box-shadow: var(--shadow);
 }
 
+.video-unavailable {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: 1rem;
+  background: var(--surface-muted, #17202b);
+  color: var(--muted, #9ca3af);
+  text-align: center;
+}
+
+.media-cleanup-row small {
+  display: block;
+  margin-top: 0.25rem;
+}
+
 .video-item figcaption {
   margin-top: 10px;
   color: var(--muted);

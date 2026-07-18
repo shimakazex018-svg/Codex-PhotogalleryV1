@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前前端版本标记：`v96`（`app.js` 中的`APP_VERSION`）；正式运行站已部署v96。
+- 当前前端版本标记：`v98`（`app.js` 中的`APP_VERSION`）；正式运行站已完成v98扫描与播放验收。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
@@ -17,6 +17,7 @@
 - 正式`main`已包含媒体清理worker、API、设置页和v85灯箱调度，并已部署、验证和普通推送；功能Worktree与远程功能分支暂时保留。
 - V1.4.2 已在仓库外创建独立 runtime，并迁移经过 SHA256 校验的数据库副本。
 - runtime 已配置现有媒体路径。V1.5.0站点已启动作为日常运行候选，PID和48102由正式脚本管理。
+- 视频兼容性扫描只读查询SQLite中的`media.type='video'`，结果写入Runtime的`DATA_DIR/video-compatibility-report.json`；该文件及其临时/previous副本均属于运行数据，不进入Git。
 
 ## Current runtime behavior
 
@@ -33,9 +34,11 @@
 
 - 多级目录与图集浏览；
 - 图片灯箱、缩放、拖动和键盘导航；
+- 视频兼容性只读扫描、分类报告、设置页分页筛选和基于媒体ID的按需兼容播放；
 - 图片灯箱立即显示点击处WebP预览；当前原图走独立P0高优先级通道，下一张以P1提前加载并解码，其余预测原图在并发2、有界5项窗口内按网络条件加载；
 - 图片缩略图、懒加载和分批渲染；
 - 视频 poster、按需加载和 HTTP Range；
+- `利世/.../看球`旧`mpeg4/mp4v`视频使用点击触发、单路、无落盘的H.264/AAC兼容流；其他视频继续使用原始Range。
 - SQLite 索引、搜索和分页媒体查询；正式v96支持`auto/fts5/legacy-like`，2字符只搜媒体标题精确/前缀，3字符以上在ready状态使用mapped trigram FTS；auto不自动执行完整媒体LIKE。
 - FTS5 Integration V96已部署正式Runtime：正式库media/mapping/FTS均474470、状态ready，`SEARCH_BACKEND_MODE=auto`实际使用FTS5；不自动执行媒体LIKE或全库扫描。
 - 设置页收藏图册、观看历史和用户标记；

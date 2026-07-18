@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v96";
+const APP_VERSION = "v98";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -44,6 +44,7 @@ const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_PERF_DEBUG = new URLSearchParams(window.location.search).get("searchPerf") === "1"
   || localStorage.getItem("gallerySearchPerf") === "1";
 const HEIC_COMPATIBILITY_COLLECTION_ID = "杏子yada/亮点";
+const VIDEO_COMPATIBILITY_COLLECTION_ID = "利世/【女神 推荐】火爆高颜值网红美女【利世】承接原味业务私人定制甄选 透纱情趣套 露奶露逼露唇 高清720P版/看球";
 const IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 10'%3E%3Crect width='16' height='10' fill='%23e4e7eb'/%3E%3C/svg%3E";
 
 const state = {
@@ -77,6 +78,13 @@ const state = {
   mediaCleanupDirection: "asc",
   mediaCleanupPollTimer: null,
   mediaCleanupLoading: false,
+  videoCompatibilityStatus: null,
+  videoCompatibilityResults: { items: [], total: 0, page: 1, pageSize: 50, pages: 1 },
+  videoCompatibilityFilter: "",
+  videoCompatibilitySearch: "",
+  videoCompatibilityLoading: false,
+  videoCompatibilityPollTimer: null,
+  videoPlaybackEvents: new Set(),
   lastAccessLogKey: "",
   columns: Number(localStorage.getItem("galleryColumns") || 4),
   coverFit: localStorage.getItem("galleryCoverFit") || "crop",
@@ -709,7 +717,14 @@ function collectionToModel(collection) {
 
 function sqliteMediaToGalleryMedia(item) {
   if (!item) return null;
-  if (item.metadata && typeof item.metadata === "object") return item.metadata;
+  if (item.metadata && typeof item.metadata === "object") return {
+    ...item.metadata,
+    mediaId: item.id,
+    collectionId: item.collectionId,
+    compatibilityStatus: item.compatibilityStatus || "",
+    compatibilityReasonCode: item.compatibilityReasonCode || "",
+    compatibilityReason: item.compatibilityReason || "",
+  };
   if (item.type === "image") {
     return {
       file: item.file || item.title || "",
@@ -725,6 +740,8 @@ function sqliteMediaToGalleryMedia(item) {
     };
   }
   return {
+    mediaId: item.id,
+    collectionId: item.collectionId,
     file: item.file || item.title || "",
     title: item.title || item.file || "",
     src: item.src || "",
@@ -736,6 +753,9 @@ function sqliteMediaToGalleryMedia(item) {
     size: item.size || 0,
     codec: item.codec || "",
     mtime: item.mtime || 0,
+    compatibilityStatus: item.compatibilityStatus || "",
+    compatibilityReasonCode: item.compatibilityReasonCode || "",
+    compatibilityReason: item.compatibilityReason || "",
   };
 }
 
@@ -805,6 +825,7 @@ function settingsSection() {
   if (route.includes("history")) return "history";
   if (route.includes("access-log")) return "access-log";
   if (route.includes("media-cleanup")) return "media-cleanup";
+  if (route.includes("video-compatibility")) return "video-compatibility";
   return route.includes("duplicates") ? "duplicates" : "display";
 }
 
@@ -2526,10 +2547,135 @@ function bindMediaCleanupPage() {
   restoreButton?.addEventListener("click", async () => { restoreButton.disabled=true; await postJson("/api/media-cleanup/restore", { jobId: state.mediaCleanupStatus.eligibleRecycleJob?.id, confirmation: restoreInput.value.trim() }); restoreModal.hidden=true; await loadMediaCleanupStatus(); renderSettingsPage(); });
 }
 
+function stopVideoCompatibilityPolling() {
+  if (state.videoCompatibilityPollTimer) clearTimeout(state.videoCompatibilityPollTimer);
+  state.videoCompatibilityPollTimer = null;
+}
+
+function videoCompatibilityActive(status = state.videoCompatibilityStatus?.status) {
+  return ["starting", "running", "pausing", "stopping"].includes(status);
+}
+
+async function loadVideoCompatibilityStatus() {
+  state.videoCompatibilityStatus = await fetchJson("/api/video-compatibility/status");
+  return state.videoCompatibilityStatus;
+}
+
+async function loadVideoCompatibilityResults(page = 1) {
+  state.videoCompatibilityLoading = true;
+  const query = new URLSearchParams({
+    page: String(Math.max(Number(page) || 1, 1)),
+    pageSize: String(state.videoCompatibilityResults.pageSize || 50),
+    status: state.videoCompatibilityFilter,
+    search: state.videoCompatibilitySearch,
+  });
+  try {
+    state.videoCompatibilityResults = await fetchJson(`/api/video-compatibility/results?${query}`);
+  } finally {
+    state.videoCompatibilityLoading = false;
+  }
+}
+
+function videoCompatibilityPageHtml() {
+  const status = state.videoCompatibilityStatus || {};
+  const summary = status.summary || {};
+  const counts = summary.counts || {};
+  const results = state.videoCompatibilityResults || { items: [], total: 0, page: 1, pageSize: 50, pages: 1 };
+  const active = videoCompatibilityActive(status.status);
+  const paused = status.status === "paused";
+  const progress = status.total ? Math.min(Math.round((Number(status.processed || 0) / Number(status.total)) * 100), 100) : 0;
+  return `
+    <section class="media-cleanup-page">
+      <div class="media-cleanup-heading">
+        <div><h1>视频兼容性检查</h1><p>只读取数据库中的视频记录；FFprobe并发2，疑似视频短片段解码并发1，不修改原视频、不生成永久转码缓存。</p></div>
+        <div class="media-cleanup-actions">
+          <button id="videoCompatibilityIncremental" type="button" ${active || paused ? "disabled" : ""}>扫描新增或变化</button>
+          <button id="videoCompatibilityFull" type="button" ${active || paused ? "disabled" : ""}>全量重新分类</button>
+          <button id="videoCompatibilityPause" type="button" ${status.status !== "running" ? "disabled" : ""}>暂停</button>
+          <button id="videoCompatibilityResume" type="button" ${!paused ? "disabled" : ""}>继续</button>
+          <button id="videoCompatibilityStop" type="button" ${!active && !paused ? "disabled" : ""}>停止</button>
+        </div>
+      </div>
+      <div class="media-cleanup-summary">
+        ${mediaCleanupStat("数据库视频", status.total || summary.total || 0)}
+        ${mediaCleanupStat("已处理", status.processed || 0)}
+        ${mediaCleanupStat("待处理", Math.max(Number(status.total || 0) - Number(status.processed || 0), 0))}
+        ${mediaCleanupStat("本轮跳过", status.skipped || 0)}
+        ${mediaCleanupStat("可直接播放", counts.direct_safe || 0)}
+        ${mediaCleanupStat("设备依赖", counts.device_dependent || 0)}
+        ${mediaCleanupStat("需要兼容流", counts.fallback_required || 0)}
+        ${mediaCleanupStat("异常", counts.invalid || 0)}
+        ${mediaCleanupStat("抽样进度", `${status.sample_processed || 0}/${status.sample_total || 0}`)}
+      </div>
+      <div class="media-cleanup-root"><strong>状态</strong><code>${escapeHtml(status.status || "not_started")} · ${escapeHtml(status.phase || "metadata")} · ${progress}% · 规则 ${escapeHtml(status.rules_version || "")}</code></div>
+      <div class="media-cleanup-root"><strong>当前文件</strong><code>${escapeHtml(status.current || "无")}</code></div>
+      <div class="media-cleanup-filters">
+        <select id="videoCompatibilityFilter">
+          <option value="" ${!state.videoCompatibilityFilter ? "selected" : ""}>全部</option>
+          <option value="direct_safe" ${state.videoCompatibilityFilter === "direct_safe" ? "selected" : ""}>可直接播放</option>
+          <option value="device_dependent" ${state.videoCompatibilityFilter === "device_dependent" ? "selected" : ""}>设备依赖</option>
+          <option value="fallback_required" ${state.videoCompatibilityFilter === "fallback_required" ? "selected" : ""}>需要兼容流</option>
+          <option value="invalid" ${state.videoCompatibilityFilter === "invalid" ? "selected" : ""}>异常</option>
+        </select>
+        <input id="videoCompatibilitySearch" value="${escapeHtml(state.videoCompatibilitySearch)}" placeholder="搜索文件名或相对路径" maxlength="200" />
+        <button id="videoCompatibilityApply" type="button">查询</button>
+      </div>
+      ${state.videoCompatibilityLoading ? `<div class="empty-state">${text.refreshing}</div>` : `
+        <div class="media-cleanup-table">
+          <div class="media-cleanup-row head"><span>分类</span><span>视频</span><span>编码</span><span>扫描时间</span></div>
+          ${(results.items || []).map((item) => `<div class="media-cleanup-row"><span>${escapeHtml(item.compatibilityStatus || "")}</span><span title="${escapeHtml(item.relativePath || "")}"><strong>${escapeHtml(item.title || "")}</strong><small>${escapeHtml(item.relativePath || "")}</small><small>${escapeHtml(item.reasonCode || "")} · ${escapeHtml(item.reason || "")}</small></span><span>${escapeHtml(item.container || "无")}<small>${escapeHtml(item.videoCodec || "无")} / ${escapeHtml(item.audioCodec || "无音频")}</small><small>${escapeHtml(item.pixelFormat || "无")} · ${item.width || 0}×${item.height || 0}</small></span><span>${escapeHtml(formatAccessTime(item.scannedAt || ""))}</span></div>`).join("")}
+        </div>
+      `}
+      ${!state.videoCompatibilityLoading && !(results.items || []).length ? `<div class="empty-state">当前筛选没有结果。</div>` : ""}
+      <div class="media-cleanup-pagination"><button id="videoCompatibilityPrev" type="button" ${Number(results.page || 1) <= 1 ? "disabled" : ""}>上一页</button><span>${results.page || 1} / ${results.pages || 1}（${results.total || 0} 条）</span><button id="videoCompatibilityNext" type="button" ${Number(results.page || 1) >= Number(results.pages || 1) ? "disabled" : ""}>下一页</button></div>
+    </section>
+  `;
+}
+
+function scheduleVideoCompatibilityPolling() {
+  stopVideoCompatibilityPolling();
+  if (!videoCompatibilityActive()) return;
+  state.videoCompatibilityPollTimer = setTimeout(async () => {
+    if (settingsSection() !== "video-compatibility") return;
+    try {
+      const previous = state.videoCompatibilityStatus?.status;
+      await loadVideoCompatibilityStatus();
+      if (previous !== state.videoCompatibilityStatus?.status && ["completed", "stopped", "failed", "interrupted"].includes(state.videoCompatibilityStatus?.status)) {
+        if (state.videoCompatibilityStatus?.status === "completed") state.sqliteCollections.clear();
+        await loadVideoCompatibilityResults(1);
+      }
+    } catch (error) {}
+    renderSettingsPage();
+  }, 1000);
+}
+
+function bindVideoCompatibilityPage() {
+  scheduleVideoCompatibilityPolling();
+  const run = async (url, body = {}) => {
+    await postJson(url, body);
+    await loadVideoCompatibilityStatus();
+    renderSettingsPage();
+  };
+  document.querySelector("#videoCompatibilityIncremental")?.addEventListener("click", () => run("/api/video-compatibility/scan/start", { mode: "incremental", sample: true }));
+  document.querySelector("#videoCompatibilityFull")?.addEventListener("click", () => run("/api/video-compatibility/scan/start", { mode: "full", sample: true }));
+  document.querySelector("#videoCompatibilityPause")?.addEventListener("click", () => run("/api/video-compatibility/scan/pause"));
+  document.querySelector("#videoCompatibilityResume")?.addEventListener("click", () => run("/api/video-compatibility/scan/resume"));
+  document.querySelector("#videoCompatibilityStop")?.addEventListener("click", () => run("/api/video-compatibility/scan/stop"));
+  document.querySelector("#videoCompatibilityApply")?.addEventListener("click", async () => {
+    state.videoCompatibilityFilter = document.querySelector("#videoCompatibilityFilter").value;
+    state.videoCompatibilitySearch = document.querySelector("#videoCompatibilitySearch").value.trim();
+    await loadVideoCompatibilityResults(1);
+    renderSettingsPage();
+  });
+  document.querySelector("#videoCompatibilityPrev")?.addEventListener("click", async () => { await loadVideoCompatibilityResults(Number(state.videoCompatibilityResults.page || 1) - 1); renderSettingsPage(); });
+  document.querySelector("#videoCompatibilityNext")?.addEventListener("click", async () => { await loadVideoCompatibilityResults(Number(state.videoCompatibilityResults.page || 1) + 1); renderSettingsPage(); });
+}
+
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", "media-cleanup": "媒体库清理", "access-log": "访问日志" };
+  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志" };
+  if (section !== "video-compatibility") stopVideoCompatibilityPolling();
   recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <strong>\u8bbe\u7f6e</strong>`;
   view.innerHTML = `
@@ -2540,10 +2686,11 @@ function renderSettingsPage() {
         <a class="${section === "display" ? "active" : ""}" href="#/__settings">\u663e\u793a\u8bbe\u7f6e</a>
         <a class="${section === "duplicates" ? "active" : ""}" href="#/__settings/duplicates">\u56fe\u7247\u67e5\u91cd</a>
         <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
+        <a class="${section === "video-compatibility" ? "active" : ""}" href="#/__settings/video-compatibility">视频兼容性检查</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
       </aside>
       <div class="settings-content">
-        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : `
+        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -2558,6 +2705,7 @@ function renderSettingsPage() {
   if (section === "duplicates") bindDuplicatePage();
   if (section === "favorites") bindFavoriteButtons();
   if (section === "media-cleanup") bindMediaCleanupPage();
+  if (section === "video-compatibility") bindVideoCompatibilityPage();
   if (section === "access-log") {
     document.querySelector("#accessLogRefreshButton")?.addEventListener("click", async () => {
       const loading = loadAccessLogs(state.accessLogPage || 1);
@@ -2607,6 +2755,10 @@ async function ensureSettingsPage() {
   if (settingsSection() === "media-cleanup") {
     await loadMediaCleanupStatus();
     if (state.mediaCleanupStatus?.id && ["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(state.mediaCleanupStatus.status) && !state.mediaCleanupResults.items.length) await loadMediaCleanupResults(1);
+  }
+  if (settingsSection() === "video-compatibility") {
+    await loadVideoCompatibilityStatus();
+    if (!state.videoCompatibilityResults.items.length) await loadVideoCompatibilityResults(1);
   }
   renderSettingsPage();
 }
@@ -2803,6 +2955,9 @@ function clearImageBatchLoading() {
   state.lazyImageObserver?.disconnect();
   state.lazyImageObserver = null;
   view.querySelectorAll("video").forEach((video) => {
+    if (video.dataset.compatibilityStream === "1" && video.src) {
+      fetch("/api/video-compatible/stop", { method: "POST", cache: "no-store", keepalive: true }).catch(() => {});
+    }
     video.pause();
     video.removeAttribute("src");
     video.load();
@@ -2991,7 +3146,7 @@ function renderCollection(collection) {
     </section>
     ${hasChildren ? renderCollectionGrid(children) : ""}
     ${hasChildren && hasMedia ? `<section class="collection-media-section">` : ""}
-    ${hasMedia ? `${renderVideos(visibleVideos, collection.cover)}${renderImages(visibleImages, Boolean(state.mediaPaging))}` : ""}
+    ${hasMedia ? `${renderVideos(visibleVideos, collection.cover, collection.id)}${renderImages(visibleImages, Boolean(state.mediaPaging))}` : ""}
     ${hasChildren && hasMedia ? `</section>` : ""}
   `;
   bindDetailMediaControls(mediaFilter);
@@ -3058,22 +3213,38 @@ function renderMediaFilter(work) {
   `;
 }
 
-function renderVideos(videos, poster) {
+function videoNeedsCompatibility(video, collectionId = "") {
+  return video.compatibilityStatus === "fallback_required"
+    || (!video.compatibilityStatus && collectionId === VIDEO_COMPATIBILITY_COLLECTION_ID);
+}
+
+function videoPlaybackUrl(video, collectionId = "") {
+  return videoNeedsCompatibility(video, collectionId) && video.mediaId
+    ? `/api/video-compatible?id=${encodeURIComponent(video.mediaId)}`
+    : video.src;
+}
+
+function renderVideos(videos, poster, collectionId = "") {
   if (!videos.length) return "";
   return `
     <div class="video-stack">
       ${videos
-        .map(
-          (video) => `
+        .map((video) => {
+          const compatibilityStream = videoNeedsCompatibility(video, collectionId);
+          const invalid = video.compatibilityStatus === "invalid";
+          return `
             <figure class="video-item" ${scrollAnchorAttribute("video", video.src || video.file)}>
-              <video data-src="${video.src}" preload="none" ${video.poster || poster ? `poster="${video.poster || poster}"` : ""} controls></video>
+              ${invalid
+                ? `<div class="video-unavailable">文件异常，已停止自动播放</div>`
+                : `<video data-src="${escapeHtml(videoPlaybackUrl(video, collectionId))}" data-media-id="${escapeHtml(video.mediaId || "")}" data-playback-mode="${compatibilityStream ? "compatibility" : "direct"}"${compatibilityStream ? " data-compatibility-stream=\"1\"" : ""} preload="none" ${video.poster || poster ? `poster="${video.poster || poster}"` : ""} controls></video>`}
               <figcaption>
                 <span>${escapeHtml(video.title)}</span>
                 ${videoMeta(video) ? `<small>${escapeHtml(videoMeta(video))}</small>` : ""}
+                ${video.compatibilityStatus ? `<small>${escapeHtml(video.compatibilityStatus)} · ${escapeHtml(video.compatibilityReason || video.compatibilityReasonCode || "")}</small>` : ""}
               </figcaption>
             </figure>
-          `,
-        )
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -3118,15 +3289,57 @@ function bindDetailMediaControls(filter) {
   setupImageBatchLoading();
 
   view.querySelectorAll("video[data-src]").forEach((video) => {
+    const stopCompatibilityStream = () => {
+      if (video.dataset.compatibilityStream !== "1" || !video.src) return;
+      fetch("/api/video-compatible/stop", { method: "POST", cache: "no-store", keepalive: true }).catch(() => {});
+    };
+    const stopOtherCompatibilityStreams = () => {
+      view.querySelectorAll('video[data-compatibility-stream="1"]').forEach((other) => {
+        if (other === video || !other.src) return;
+        other.pause();
+        other.removeAttribute("src");
+        other.load();
+      });
+    };
     const loadVideo = () => {
+      stopOtherCompatibilityStreams();
       if (!video.src) {
         video.src = video.dataset.src;
         video.load();
       }
     };
 
-    video.addEventListener("pointerdown", loadVideo, { once: true });
-    video.addEventListener("play", loadVideo, { once: true });
+    video.addEventListener("pointerdown", loadVideo);
+    video.addEventListener("play", loadVideo);
+    video.addEventListener("pause", () => {
+      if (video.ended || video.dataset.compatibilityStream !== "1" || !video.src) return;
+      stopCompatibilityStream();
+      video.removeAttribute("src");
+      video.load();
+    });
+    ["error", "stalled", "abort"].forEach((eventName) => video.addEventListener(eventName, () => {
+      const mediaId = video.dataset.mediaId || "";
+      const mode = video.dataset.playbackMode || "direct";
+      const eventKey = `${mediaId}|${eventName}|${mode}`;
+      if (!mediaId || state.videoPlaybackEvents.has(eventKey)) return;
+      state.videoPlaybackEvents.add(eventKey);
+      fetch("/api/video-playback-events", {
+        method: "POST",
+        cache: "no-store",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mediaId,
+          event: eventName,
+          mode,
+          attemptedCompatibility: mode === "compatibility",
+          mediaErrorCode: video.error?.code || 0,
+          readyState: video.readyState,
+          networkState: video.networkState,
+          currentTime: video.currentTime || 0,
+        }),
+      }).catch(() => {});
+    }));
   });
 }
 
@@ -3255,7 +3468,7 @@ function renderMediaDetail({ collectionId = "", title, meta, actions = "", image
       <div class="detail-meta">${escapeHtml(meta)}</div>
       ${renderMediaFilter({ videos })}
     </section>
-    ${visibleVideos.length || visibleImages.length ? `${renderVideos(visibleVideos, poster)}${renderImages(visibleImages, Boolean(state.mediaPaging))}` : `<div class="empty-state">${message}</div>`}
+    ${visibleVideos.length || visibleImages.length ? `${renderVideos(visibleVideos, poster, collectionId)}${renderImages(visibleImages, Boolean(state.mediaPaging))}` : `<div class="empty-state">${message}</div>`}
   `;
 
   bindDetailMediaControls(filter);

@@ -4,18 +4,22 @@
 
 ## Last Completed Task
 
-已完成FTS5 Integration V96最小正式部署：时间戳一致性备份、474470行迁移、verify/optimize/full、`auto`配置、48102重启和六类API验收均通过；正式媒体未扫描或修改。
+已把v97的`看球`路径特例升级为v98视频兼容性系统：只读扫描SQLite视频、分层探测、四级分类、增量报告、设置页，以及仅由`fallback_required`媒体ID触发的单路无落盘H.264/AAC兼容流。
 
 ## Current State
 
-- 源码及正式运行站均为`v96`；正式Node PID为22196，监听`0.0.0.0:48102`。
+- 源码与正式运行站均为`v98`，Node PID 8088，监听`0.0.0.0:48102`；loopback、物理LAN与ZeroTier首页均为HTTP 200，监听PID与Node PID一致，Node父PID与任务Host一致。
+- 正式只读扫描共2096条视频：`direct_safe=1432`、`device_dependent=267`、`fallback_required=395`、`invalid=2`。视频编码分布为H.264 1488、MPEG-4 Part 2 388、HEVC 217、ProRes 1、无有效轨2。
+- 扫描报告为Runtime文件`DATA_DIR/video-compatibility-report.json`，不进入Git。元数据最多2路FFprobe；只对疑似项在10%/50%/90%各解码1秒，最多1路FFmpeg；不生成永久转码或兼容缓存。
+- 设置路由`#/__settings/video-compatibility`提供状态、控制、统计、分类筛选、搜索和50条服务端分页。扫描完成会清除图集内存缓存，使重新访问时取得最新分类。
+- `direct_safe`与`device_dependent`使用原始懒加载Range URL；只有报告标记`fallback_required`的媒体ID进入兼容流，`invalid`显示不可用。兼容接口不接受客户端文件路径，同时只保留一条FFmpeg。
 - 候选`/api/search`默认50/最大60总结果，图集流程不变；2字符只搜媒体title精确/前缀，3字符以上ready时使用mapped trigram FTS。auto不可用时安全降级，不自动`SCAN media`；legacy-like只能显式启用。
 - 正式库已包含`media_search_documents`、`media_search_fts`和最小`search_fts_state`，三表状态ready；正式配置为`SEARCH_BACKEND_MODE=auto`，实际模式fts5。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
 - 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
-- 设置导航顺序为收藏图册、观看历史、显示设置、图片查重、媒体库清理、访问日志；新增路由为`#/__settings/favorites`和`#/__settings/history`。
+- 设置导航包含收藏图册、观看历史、显示设置、图片查重、媒体库清理、视频兼容性和访问日志；视频兼容性路由为`#/__settings/video-compatibility`。
 - 首页只保留轮播和正常图册列表，不再渲染收藏/最近观看，也不在启动时请求`/api/favorites`或`/api/recent`。收藏和最近写入API、SQLite`user_marks`及localStorage兜底保持不变。
 - `gallery.db`新增幂等`access_logs`表和`idx_access_logs_time_id`索引；GET分页默认50、最大100，按`time DESC, id DESC`稳定排序。
 - 启动时流式、每250条一批导入旧`access-YYYY-MM-DD.log`，内容哈希防重复，原文件保留。新访问只写SQLite。
@@ -23,6 +27,14 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- 正式全量扫描耗时约2093.8秒：2096条均有源文件；元数据阶段实测最多2个FFprobe、0个FFmpeg，662条疑似项进入采样，602通过、60失败，采样阶段最多1个FFmpeg。probe超时1、probe失败1；结束后所有探测/转码子进程为0。
+- 正式增量扫描随后处理2096条、实际重扫0、跳过2096、采样0；运行时无FFprobe/FFmpeg。报告可解析，大小约3.35MB，临时文件为0。
+- 正式扫描前后5个源视频的大小、mtime和SHA-256逐项一致；扫描没有写媒体、数据库或永久转码。
+- 直接播放样本Range返回206并包含`Accept-Ranges`和正确`Content-Range`；直接/异常媒体请求兼容接口均返回409。fallback样本输出H.264/yuv420p 720×960与AAC，显式停止使FFmpeg从1降至0。
+- v98目标图集在最终重启前的浏览器DOM确认40个可见视频保持按需加载，fallback卡片使用`/api/video-compatible?id=...`且显示结构化分类原因。最终重启后设置页状态/默认50条/筛选总数已由正式API验证；浏览器控制通道连接本机地址超时，未虚报重启后的设置页视觉验收。实体iPhone/iPad及不同设备对`device_dependent`项目仍未验证。
+- `看球`页面41段视频共468942824字节；抽样前两段均为MP4+AAC、视频轨`mpeg4/mp4v`。首段Range为206，但Chrome为`readyState=4`且视频尺寸0×0。
+- 隔离旧编码样本经兼容API输出H.264/AAC、320×240；目录外URL为400、无兼容缓存文件。正式兼容API输出H.264/yuv420p、720×960；显式停止后FFmpeg进程数由1降至0。
 
 - 正式迁移前备份为`D:\GalleryRuntime\backups\gallery-pre-fts5-v96-20260716-162140.db`，1169928192字节、integrity ok、media 474470、collections 7287；正式库迁移后1461190656字节。
 - 正式apply 98.847秒；media/mapping/FTS均474470，缺失、孤立、重复和title/path mismatch为0。独立verify 76.227秒、full 75.688秒，SQLite与FTS integrity通过。

@@ -509,6 +509,16 @@ function getVideoSourceByPoster(dbFile, posterUrl) {
   });
 }
 
+function getVideoById(dbFile, mediaId) {
+  const id = String(mediaId || "").trim();
+  if (!id) return null;
+  return withDatabase(dbFile, (db) => rowToMedia(db.prepare("SELECT * FROM media WHERE id = ? AND type = 'video' LIMIT 1").get(id)));
+}
+
+function getVideoCount(dbFile) {
+  return withDatabase(dbFile, (db) => Number(db.prepare("SELECT COUNT(*) AS count FROM media WHERE type = 'video'").get().count || 0));
+}
+
 const searchCollectionColumns = `
   c.id, c.parent_id, c.title, c.folder, c.path_parts, c.level,
   c.cover, c.cover_thumb, c.image_count, c.video_count,
@@ -1228,6 +1238,8 @@ module.exports = {
   getMedia,
   getImageSourceByThumbnail,
   getVideoSourceByPoster,
+  getVideoById,
+  getVideoCount,
   search,
   getSearchDiagnostics,
   optimizeDatabase,

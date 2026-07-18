@@ -352,6 +352,32 @@ V1.4.5正式Runtime策略：
 
 ## Video checks
 
+视频兼容性扫描的首选回归使用唯一TEMP目录：
+
+```powershell
+node scripts/test-video-compatibility.js
+```
+
+脚本生成短H.264/AAC、MPEG-4 Part 2/AAC、静音H.264、损坏和缺失样本，覆盖首次分类、第二次全跳过、mtime变化重扫、暂停/继续、停止及外部进程超时。测试数据库和媒体必须位于TEMP；结束时FFprobe/FFmpeg为0且TEMP根删除。不得把该脚本指向正式数据库或媒体。
+
+正式扫描只允许用户明确授权后执行。验收要求：
+
+1. 扫描只读查询`media.type='video'`，正式媒体、SQLite行数、5个抽样文件的大小/mtime/SHA-256前后相同。
+2. 元数据阶段FFprobe并发不超过2且FFmpeg为0；采样阶段只处理疑似项，FFmpeg并发不超过1。
+3. 报告能被JSON解析，无残留temp文件；结果API默认50条分页，筛选总数与summary一致。
+4. 完成后的增量扫描应跳过所有未变化fingerprint，且不启动FFprobe/FFmpeg。
+5. 暂停、停止、超时和连接关闭后精确子进程归零；网站全程继续HTTP 200。
+
+报告驱动兼容流检查：
+
+1. `GET /api/video-compatible?id=<mediaId>`只允许报告中的`fallback_required`；direct/invalid返回409，缺失ID返回404，客户端URL/路径不作为源选择依据。
+2. 输出必须为H.264/yuv420p与AAC、最大边不超过960、保持比例、不放大且无兼容缓存文件。
+3. 同时只保留最新一条FFmpeg流；暂停、换视频、换路由和关闭连接后子进程必须退出。
+4. 正式浏览器只允许抽样点击，不批量播放；确认兼容URL来自媒体ID，直接播放项仍为原始`/photos/...` Range。
+5. video保持`preload="none"`，无首屏视频批量请求；播放事件日志按媒体ID/事件去重且不写本地绝对路径。
+
+2026-07-16正式结果：全量2096条为1432 direct、267 device、395 fallback、2 invalid；662条采样候选中602通过、60失败，probe timeout/failure各1。随后增量扫描在6.867秒内跳过全部2096条且未启动探测/解码进程。最终重启后状态、默认50条、fallback筛选395、invalid筛选2及播放接口409/404边界通过；浏览器控制通道未能在重启后重新连接本机地址，因此设置页视觉复验仍标记未完成。
+
 Range 检查：
 
 ```powershell

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-16 - Add bounded video compatibility scanning and result-driven playback v98
+
+- Added a read-only, resumable scanner over SQLite `media.type='video'`; metadata probing is limited to two concurrent FFprobe processes, and only suspect files receive three one-second decode samples with one concurrent FFmpeg process.
+- Added centralized `direct_safe`, `device_dependent`, `fallback_required`, and `invalid` classification with structured reason codes, atomic runtime reports, incremental fingerprint reuse, pause/resume/stop, timeout cleanup, filtered pagination, and a new settings page.
+- Replaced the collection-name compatibility exception with report-driven media-ID routing. Direct-safe videos retain original lazy Range URLs; only `fallback_required` items may use the single, user-triggered, no-cache H.264/AAC stream; invalid items show an unavailable state.
+- Completed the formal 2,096-video scan without changing media or SQLite: 1,432 direct-safe, 267 device-dependent, 395 fallback-required, and 2 invalid. The immediate incremental rerun skipped all 2,096 unchanged rows and started no probe/decode processes.
+- Raised static assets to `v98`; verified loopback, LAN and ZeroTier HTTP 200, original Range 206, compatible H.264/yuv420p/AAC output, explicit child-process stop, and exact before/after hashes for five source videos.
+
+## 2026-07-16 - Stream the selected legacy video collection as browser-compatible MP4
+
+- Confirmed that sampled `看球` MP4 files use MPEG-4 Part 2 (`mpeg4/mp4v`) video with AAC audio; HTTP Range and lazy loading were healthy, but Chrome decoded no video dimensions.
+- Added a path-scoped, user-triggered compatibility stream that converts only this collection to H.264/AAC fragmented MP4 without modifying source media or writing a transcode cache.
+- Limited compatibility work to the latest single stream, capped output at a 960-pixel edge and 30 fps, and added explicit stop handling for pause, video switching, route changes, and client disconnects.
+- Kept all other collections on their original Range URLs and raised frontend assets to `v97`.
+- Restarted the formal service as Node PID 28048; loopback, LAN and ZeroTier returned HTTP 200, formal output probed as H.264/yuv420p 720×960, and explicit stop reduced the live FFmpeg process count from one to zero.
+
 ## 2026-07-16 - Deploy FTS5 search v96 to the formal runtime
 
 - Added an explicit `--allow-formal-db` maintenance-window override while preserving default formal-path refusal, and allowed the runtime launcher to validate and inject `SEARCH_BACKEND_MODE=auto`.

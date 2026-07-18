@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const readline = require("readline");
 const galleryDb = require("./gallery-db");
+const videoCompatibilityManager = require("./video-compatibility-manager");
 
 const rootDir = __dirname;
 
@@ -20,12 +21,14 @@ const imageThumbnailsDir = path.join(dataDir, "thumbnails");
 const imagePreviewDir = resolveConfiguredPath(process.env.IMAGE_PREVIEW_DIR, path.join(dataDir, "image-previews"));
 const hlsDir = resolveConfiguredPath(process.env.HLS_DIR, path.join(dataDir, "hls"));
 const highlightDir = path.join(dataDir, "highlight-carousel");
+const legacyCompatibleVideoCollectionId = "利世/【女神 推荐】火爆高颜值网红美女【利世】承接原味业务私人定制甄选 透纱情趣套 露奶露逼露唇 高清720P版/看球";
 const trashDir = resolveConfiguredPath(process.env.TRASH_DIR, path.join(path.dirname(photosDir), "回收站"));
 const logsDir = path.join(dataDir, "logs");
 const galleryFile = path.join(dataDir, "gallery.json");
 const galleryDbFile = path.join(dataDir, "gallery.db");
 const highlightFile = path.join(dataDir, "highlight-carousel.json");
 const videoMetadataFile = path.join(dataDir, "video-metadata.json");
+const videoCompatibilityReportFile = path.join(dataDir, "video-compatibility-report.json");
 const port = Number(process.env.PORT || 48101);
 const host = process.env.HOST || "0.0.0.0";
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
@@ -42,11 +45,23 @@ const videoPosterSources = new Map();
 const imageThumbnailSources = new Map();
 const imagePreviewJobs = new Map();
 let imagePreviewQueue = Promise.resolve();
+let activeCompatibleVideoStream = null;
+const videoPlaybackEventKeys = new Map();
 let videoMetadataCache = null;
 let videoMetadataDirty = false;
 let videoMetadataProbeStartedAt = 0;
 const videoMetadataProbeBudgetMs = 10000;
 const videoMetadataProbeTimeoutMs = 5000;
+const videoCompatibility = videoCompatibilityManager.createManager({
+  databaseFile: galleryDbFile,
+  photosDir,
+  reportFile: videoCompatibilityReportFile,
+  workerFile: path.join(rootDir, "video-compatibility-worker.js"),
+  ffprobePath,
+  ffmpegPath,
+  videoCount: () => galleryDb.getVideoCount(galleryDbFile),
+  log: logEvent,
+});
 
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
 const videoExtensions = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
@@ -1080,6 +1095,128 @@ function sendImagePreview(requestUrl, response) {
     });
 }
 
+function terminateCompatibleVideoChild(child) {
+  if (!child || child.exitCode !== null) return;
+  child.compatibilityStopRequested = true;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+  } else {
+    child.kill("SIGKILL");
+  }
+  if (activeCompatibleVideoStream?.child === child) activeCompatibleVideoStream = null;
+}
+
+function sendCompatibleVideo(request, requestUrl, response) {
+  if (request.method !== "GET") {
+    sendJsonError(response, 405, "Method not allowed");
+    return;
+  }
+
+  const mediaId = String(requestUrl.searchParams.get("id") || "").trim();
+  const media = galleryDb.getVideoById(galleryDbFile, mediaId);
+  if (!media) {
+    sendJsonError(response, 404, "Video not found");
+    return;
+  }
+  const compatibilityItem = videoCompatibility.getItem(mediaId);
+  const legacyFallback = !compatibilityItem && media.collectionId === legacyCompatibleVideoCollectionId;
+  if (compatibilityItem?.compatibility_status !== "fallback_required" && !legacyFallback) {
+    sendJsonError(response, 409, "Video is not approved for compatibility streaming");
+    return;
+  }
+  const sourcePath = mediaSrcToFilePath(media.src);
+  if (!sourcePath || !fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+    sendJsonError(response, 409, "Approved video source is unavailable");
+    return;
+  }
+
+  if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
+
+  const child = spawn(ffmpegPath, [
+    "-hide_banner", "-loglevel", "error", "-i", sourcePath,
+    "-map", "0:v:0", "-map", "0:a:0?",
+    "-vf", "scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+    "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+    "-crf", "28", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k",
+    "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+    "-f", "mp4", "pipe:1",
+  ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+
+  activeCompatibleVideoStream = { child, sourcePath };
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    if (stderr.length < 4096) stderr += chunk.toString("utf8").slice(0, 4096 - stderr.length);
+  });
+  child.once("error", (error) => {
+    if (activeCompatibleVideoStream?.child === child) activeCompatibleVideoStream = null;
+    logEvent("compatible_video_stream_failed", { source: sourcePath, error: error.message });
+    if (!response.headersSent) sendJsonError(response, 503, "Compatibility video stream unavailable");
+    else response.destroy(error);
+  });
+  child.once("exit", (code, signal) => {
+    if (activeCompatibleVideoStream?.child === child) activeCompatibleVideoStream = null;
+    if (code !== 0 && !child.compatibilityStopRequested) {
+      logEvent("compatible_video_stream_failed", { source: sourcePath, code, signal, error: stderr.trim() });
+    }
+  });
+
+  const stopStream = () => {
+    if (activeCompatibleVideoStream?.child !== child || child.killed) return;
+    terminateCompatibleVideoChild(child);
+  };
+  request.once("aborted", stopStream);
+  response.once("close", stopStream);
+  response.writeHead(200, {
+    "Content-Type": "video/mp4",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  child.stdout.pipe(response);
+}
+
+function stopCompatibleVideo(request, response) {
+  if (request.method !== "POST") {
+    sendJsonError(response, 405, "Method not allowed");
+    return;
+  }
+  const stopped = Boolean(activeCompatibleVideoStream);
+  if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
+  sendJson(response, { ok: true, stopped });
+}
+
+function recordVideoPlaybackEvent(request, payload) {
+  const mediaId = String(payload.mediaId || "").trim();
+  const event = ["error", "stalled", "abort"].includes(payload.event) ? payload.event : "";
+  const media = galleryDb.getVideoById(galleryDbFile, mediaId);
+  if (!media || !event) {
+    const error = new Error("Valid video event and mediaId are required");
+    error.statusCode = 400;
+    throw error;
+  }
+  const key = `${mediaId}|${event}|${String(payload.mode || "direct")}`;
+  const now = Date.now();
+  const last = videoPlaybackEventKeys.get(key) || 0;
+  if (now - last < 60000) return { ok: true, deduplicated: true };
+  videoPlaybackEventKeys.set(key, now);
+  if (videoPlaybackEventKeys.size > 2000) {
+    const cutoff = now - 24 * 60 * 60 * 1000;
+    for (const [entryKey, time] of videoPlaybackEventKeys) if (time < cutoff || videoPlaybackEventKeys.size > 1500) videoPlaybackEventKeys.delete(entryKey);
+  }
+  logEvent("video_playback_event", {
+    mediaId,
+    event,
+    mode: payload.mode === "compatibility" ? "compatibility" : "direct",
+    attemptedCompatibility: Boolean(payload.attemptedCompatibility),
+    mediaErrorCode: Number(payload.mediaErrorCode || 0),
+    readyState: Number(payload.readyState || 0),
+    networkState: Number(payload.networkState || 0),
+    currentTime: Math.max(Number(payload.currentTime || 0), 0),
+    userAgent: String(request.headers["user-agent"] || "").slice(0, 300),
+  });
+  return { ok: true, deduplicated: false };
+}
+
 function isSqliteCorruption(error) {
   const message = String((error && error.message) || error || "").toLowerCase();
   return message.includes("database disk image is malformed") || message.includes("file is not a database") || message.includes("sqlite_corrupt") || message.includes("sqlite_notadb");
@@ -1248,11 +1385,11 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
       return true;
     }
     sendDbResponse(response, () =>
-      galleryDb.getMedia(galleryDbFile, collectionId, {
+      videoCompatibility.augmentMedia(galleryDb.getMedia(galleryDbFile, collectionId, {
         type: requestUrl.searchParams.get("type") || "",
         limit: requestUrl.searchParams.get("limit") || "",
         offset: requestUrl.searchParams.get("offset") || "",
-      })
+      }))
     );
     return true;
   }
@@ -2218,6 +2355,82 @@ function handleRequest(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === "/api/video-compatible") {
+    sendCompatibleVideo(request, requestUrl, response);
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/video-compatible/stop") {
+    stopCompatibleVideo(request, response);
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/video-compatibility/status") {
+    if (request.method !== "GET") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    sendJson(response, videoCompatibility.status());
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/video-compatibility/results") {
+    if (request.method !== "GET") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    sendJson(response, videoCompatibility.query({
+      page: requestUrl.searchParams.get("page"),
+      pageSize: requestUrl.searchParams.get("pageSize"),
+      status: requestUrl.searchParams.get("status"),
+      search: requestUrl.searchParams.get("search"),
+    }));
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith("/api/video-compatibility/scan/")) {
+    if (request.method !== "POST") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    const action = requestUrl.pathname.slice("/api/video-compatibility/scan/".length);
+    if (action === "start") {
+      readRequestBody(request, (body) => {
+        try {
+          const payload = JSON.parse(body || "{}");
+          sendJson(response, videoCompatibility.start({ mode: payload.mode, sample: payload.sample !== false }));
+        } catch (error) {
+          sendJsonError(response, error.statusCode || 400, error.message);
+        }
+      });
+      return;
+    }
+    try {
+      if (action === "pause") sendJson(response, videoCompatibility.pause());
+      else if (action === "resume") sendJson(response, videoCompatibility.resume());
+      else if (action === "stop") sendJson(response, videoCompatibility.stop());
+      else sendJsonError(response, 404, "Unknown scan action");
+    } catch (error) {
+      sendJsonError(response, error.statusCode || 500, error.message);
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/video-playback-events") {
+    if (request.method !== "POST") {
+      sendJsonError(response, 405, "Method not allowed");
+      return;
+    }
+    readRequestBody(request, (body) => {
+      try {
+        sendJson(response, recordVideoPlaybackEvent(request, JSON.parse(body || "{}")));
+      } catch (error) {
+        sendJsonError(response, error.statusCode || 400, error.message);
+      }
+    });
+    return;
+  }
+
   if (requestUrl.pathname === "/api/highlights") {
     try {
       const hourKey = startOfHour();
@@ -2568,11 +2781,26 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
 
-  http.createServer(handleRequest).listen(port, host, () => {
+  const httpServer = http.createServer(handleRequest).listen(port, host, () => {
     console.log(`Photo gallery site started: http://localhost:${port}`);
     console.log(`Listening host: ${host}`);
     console.log(`Media folder: ${photosDir}`);
     console.log(`FFprobe path: ${ffprobePath}`);
     console.log(`SQLite index: ${galleryDbFile}`);
+  });
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    videoCompatibility.shutdown();
+    if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.once("exit", () => {
+    videoCompatibility.shutdown();
+    if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
   });
 }
