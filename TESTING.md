@@ -17,6 +17,8 @@ node scripts/test-perceptual-hash.js
 
 48112隔离验收使用数据库副本：原图精确命中，25%缩略图仅pHash命中；PNG与`application/octet-stream`均200，伪装JPG为415；五次连续查询459/398/421/480/524ms，平均456.4ms，Node工作集下降397,312字节，临时文件0，stderr 0。浏览器设置页和上传入口可访问，控制台日志0。
 
+正式v101：发布备份2,060,144,640字节且quick_check ok；幂等迁移净增8,192字节，启动后索引为`not_started`且没有自动worker。首批1,000张为1,000成功/0失败，净增94,208字节、完成后WAL/SHM为0；运行中首页约30-33ms且Node工作集未持续增长。正式25%缩略图在10,000张受限批次运行时返回距离2的高度相似原图，响应无盘符，临时文件0。
+
 ## Gallery sorting and image hash lookup v100
 
 静态与自动测试：

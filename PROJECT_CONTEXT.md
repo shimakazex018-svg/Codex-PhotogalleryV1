@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前源码前端版本标记：`v101`（`app.js` 中的`APP_VERSION`）；v101在SHA-256精确查找旁新增标准64位pHash相似查找，正式48102在发布前仍为v100。
+- 当前源码与正式前端版本标记均为`v101`（`app.js` 中的`APP_VERSION`）；v101在SHA-256精确查找旁新增标准64位pHash相似查找。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
@@ -21,7 +21,7 @@
 - 图册排序统一为名称、图片数、视频数、内容更新时间的正/倒序；根目录由后端在完整集合排序后分页，子目录在返回前排序，搜索默认保留FTS相关性。
 - `POST /api/image-hash-lookup`流式计算原始字节SHA-256，并把完整上传字节写入随机命名的短期临时文件供FFmpeg解码pHash；成功、失败和中断均清理。响应分为SHA-256完全相同与pHash高度/可能相似，不返回服务器绝对路径。
 - pHash索引使用`media_perceptual_hashes`的8字节BLOB，通过media_id关联；后台任务手动启动、单worker、可暂停/继续/停止、按size/mtime增量重算。480 MiB自动暂停，512 MiB硬停止，不在服务启动时自动全量生成。
-- v100从`codex/fts5-integration-v96`发布到正式48102；正式Node由既有任务Host托管，数据库schema、媒体路径和运行配置未变化。
+- v101从`codex/fts5-integration-v96`发布到正式48102；正式Node由既有任务Host托管，媒体路径和运行配置未变化。数据库只新增紧凑pHash表与状态表，未重建现有表。
 
 ## Current runtime behavior
 

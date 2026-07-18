@@ -7,6 +7,7 @@
 - Enforced 480 MiB automatic pause and 512 MiB hard stop. A 10,000-row database-copy test added 868,352 bytes with a 906,432-byte WAL peak, projecting about 40.2 MiB for 486,028 images.
 - Real-sample validation covered 100 originals, 20 burst pairs and 750 transformed variants. Scale, recompression, format conversion, small tone changes, border and 5% crop matched at distance <=10; 20% crop, mirror and rotation remain documented limitations.
 - Added v101 settings controls and grouped exact/highly-similar/possibly-similar upload results. Randomly named upload files exist only while FFmpeg decodes them and are removed after success or failure.
+- Published v101 from PID 26268 to PID 19540 after a SHA-256-verified SQLite backup. The schema migration added 8,192 bytes, did not auto-start indexing, and loopback/LAN, unique listener, stderr, PNG safety and formal 25% thumbnail matching passed. The first 1,000-image batch completed with 1,000 successes and zero failures; a manually bounded 10,000-image batch is continuing at one worker.
 
 ## 2026-07-18 - Fix upload image signature validation v100
 
