@@ -1148,7 +1148,14 @@ function readSingleMultipartImage(request) {
     const opening = Buffer.from(`--${boundary}\r\n`);
     const marker = Buffer.from(`\r\n--${boundary}`);
     const headerEnd = Buffer.from("\r\n\r\n");
-    const hash = crypto.createHash("sha256");
+    let hash;
+    try {
+      hash = crypto.createHash("sha256");
+    } catch (error) {
+      reject(imageLookupError("HASH_CALCULATION_FAILED", error.message, 500));
+      request.resume();
+      return;
+    }
     let pending = Buffer.alloc(0);
     let headersParsed = false;
     let finished = false;
@@ -1171,7 +1178,11 @@ function readSingleMultipartImage(request) {
         return;
       }
       if (prefix.length < 32) prefix = Buffer.concat([prefix, bytes.subarray(0, 32 - prefix.length)]);
-      hash.update(bytes);
+      try {
+        hash.update(bytes);
+      } catch (error) {
+        fail(imageLookupError("HASH_CALCULATION_FAILED", error.message, 500));
+      }
     }
 
     function drain(final = false) {
@@ -1218,7 +1229,13 @@ function readSingleMultipartImage(request) {
           return;
         }
         try {
-          const file = { fileName, mimeType, size, prefix, sha256: hash.digest("hex") };
+          let sha256;
+          try {
+            sha256 = hash.digest("hex");
+          } catch (error) {
+            throw imageLookupError("HASH_CALCULATION_FAILED", error.message, 500);
+          }
+          const file = { fileName, mimeType, size, prefix, sha256 };
           validateUploadedImage(file);
           finished = true;
           resolve(file);
