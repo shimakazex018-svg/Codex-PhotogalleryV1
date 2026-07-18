@@ -68,13 +68,14 @@ async function main() {
     ORDER BY m.id`).iterate();
   const pendingAtStart = Number(db.prepare(`SELECT COUNT(*) AS count FROM media m LEFT JOIN media_perceptual_hashes p ON p.media_id=m.id
     WHERE m.type='image' AND (p.media_id IS NULL OR p.source_size!=COALESCE(m.size,0) OR p.source_mtime!=COALESCE(m.mtime,0) OR p.status!=1)`).get().count || 0);
+  const targetCount = maxItems ? Math.min(maxItems, pendingAtStart) : pendingAtStart;
   let recentError = "";
   const publish = (status, current = "") => {
     state.run(PHASH_ALGORITHM, PHASH_ALGORITHM_VERSION, status, counters.processed, counters.succeeded, counters.failed, counters.skipped, baselineBytes, Date.now(), recentError);
     const bytesAdded = Math.max(0, diskBytes() - baselineBytes);
     const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
     const imagesPerSecond = counters.processed / elapsedSeconds;
-    const remaining = Math.max(0, pendingAtStart - counters.processed);
+    const remaining = Math.max(0, targetCount - counters.processed);
     process.send?.({ type: "status", status: { status, ...counters, current, bytesAdded, limitBytes: hardLimitBytes,
       imagesPerSecond, estimatedRemainingSeconds: imagesPerSecond ? remaining / imagesPerSecond : null, pendingAtStart, recentError } });
     return bytesAdded;
