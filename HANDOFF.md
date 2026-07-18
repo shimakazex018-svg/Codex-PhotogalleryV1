@@ -8,7 +8,7 @@
 
 ## Current State
 
-- 源码与正式运行站均为`v99`，Node PID 25840，监听`0.0.0.0:48102`；loopback与物理LAN首页均为HTTP 200，唯一监听PID与Node PID一致，Node父PID 16832与任务Host一致。
+- 源码与正式运行站均为`v99`，Node PID 12052，监听`0.0.0.0:48102`；loopback与物理LAN首页均为HTTP 200，唯一监听PID与Node PID一致，Node父PID 2440与任务Host一致。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
 - “更新时间”使用`collections.mtime`（epoch毫秒），来自目录/媒体/子图册内容mtime的最大值并随增量扫描更新；0或非法时间视为空值。名称使用`zh-CN`数字自然排序，平局固定名称正序、相对路径正序。
 - 搜索仍以`relevance`为专用默认值；显式选择8种模式时只接受白名单，图册候选在截取前排序，媒体候选保留有界FTS集合后使用同一稳定比较器。
@@ -38,7 +38,7 @@
 - 正式SHA索引单次SQL命中0.181ms；4,586字节真实图片改名上传后313ms返回1条正确路由且绝对路径泄露0。20次连续合成查询0失败，平均276.2ms，Node工作集由43,094,016降至41,152,512字节，未创建upload临时目录。
 - 隔离浏览器在功能完成、版本标记递增前验证（当时页脚仍为v98）：1440×900、820×1180、390×844均无横向溢出；8项下拉可切换并刷新保留，搜索态显示`relevance`，上传入口和`accept=image/*`正确，控制台0 warning/error。随后前端只递增v99静态标记；iPad/iPhone为视口模拟，不代表实体设备。
 - 正式原视频Range仍为206、`Accept-Ranges: bytes`且返回0–1023/221716；关键状态API均200，FTS5 ready。正式stderr为0字节，媒体根mtime未变化，数据库schema/媒体路径均未修改。
-- 正式服务经历两次受控重启（第二次加载multipart兼容修复），最终Node PID 25840、任务Running、唯一48102监听、loopback/LAN 200，静态资源均为v99；每次维护窗口上界分别18.389秒和17.807秒，未回滚。
+- 正式服务经历三次受控重启（第二次加载multipart兼容修复，第三次补齐哈希计算错误分类），最终Node PID 12052、任务Running、唯一48102监听、loopback/LAN 200，静态资源均为v99；三次维护窗口上界分别18.389秒、17.807秒和17.347秒，未回滚。
 
 - 正式全量扫描耗时约2093.8秒：2096条均有源文件；元数据阶段实测最多2个FFprobe、0个FFmpeg，662条疑似项进入采样，602通过、60失败，采样阶段最多1个FFmpeg。probe超时1、probe失败1；结束后所有探测/转码子进程为0。
 - 正式增量扫描随后处理2096条、实际重扫0、跳过2096、采样0；运行时无FFprobe/FFmpeg。报告可解析，大小约3.35MB，临时文件为0。
@@ -104,4 +104,4 @@
 2. 正式部署前不要用应用代码“只读打开”正式数据库；隔离测试继续使用唯一TEMP目录。
 3. 正式旧NDJSON文件不得在本次升级时删除；迁移依靠`source_key`保持重复启动幂等。
 4. 视频poster、`preload="none"`、按需加载和现有媒体清理边界均未改变。
-5. FTS阶段A原始副本和JSON位于Git忽略的`tmp/fts5-prototype`；它们可重建且不应提交。正式Node PID为25840，端口仍为48102。
+5. FTS阶段A原始副本和JSON位于Git忽略的`tmp/fts5-prototype`；它们可重建且不应提交。正式Node PID为12052，端口仍为48102。
