@@ -1072,10 +1072,11 @@ function sendJsonError(response, status, message) {
   response.end(JSON.stringify({ error: message }));
 }
 
-function imageLookupError(code, message, statusCode = 400) {
+function imageLookupError(code, message, statusCode = 400, details = {}) {
   const error = new Error(message);
   error.code = code;
   error.statusCode = statusCode;
+  error.details = details;
   return error;
 }
 
@@ -1083,7 +1084,8 @@ function sendImageLookupError(response, error) {
   if (response.writableEnded || response.destroyed) return;
   const knownCodes = new Set([
     "NO_FILE", "TOO_MANY_FILES", "FILE_TOO_LARGE", "EMPTY_FILE", "UNSUPPORTED_IMAGE_TYPE",
-    "INVALID_IMAGE_SIGNATURE", "UPLOAD_FAILED", "HASH_CALCULATION_FAILED", "HASH_DATABASE_UNAVAILABLE",
+    "INVALID_IMAGE_SIGNATURE", "UNRECOGNIZED_IMAGE_SIGNATURE", "EXTENSION_SIGNATURE_MISMATCH",
+    "UNSUPPORTED_ACTUAL_IMAGE_TYPE", "UPLOAD_FAILED", "HASH_CALCULATION_FAILED", "HASH_DATABASE_UNAVAILABLE",
     "HASH_DATABASE_INCOMPLETE", "DATABASE_QUERY_FAILED", "REQUEST_ABORTED", "UPLOAD_BUSY", "INTERNAL_ERROR",
   ]);
   const code = knownCodes.has(error?.code) ? error.code : "INTERNAL_ERROR";
@@ -1094,6 +1096,9 @@ function sendImageLookupError(response, error) {
     EMPTY_FILE: "不能上传空文件。",
     UNSUPPORTED_IMAGE_TYPE: "不支持的图片格式。当前支持 JPEG、PNG、WebP、GIF 和 AVIF。",
     INVALID_IMAGE_SIGNATURE: "文件内容与图片格式不一致。",
+    UNRECOGNIZED_IMAGE_SIGNATURE: "无法识别图片格式，文件可能损坏或不属于当前支持的图片类型。",
+    EXTENSION_SIGNATURE_MISMATCH: "文件扩展名与实际图片格式不一致。",
+    UNSUPPORTED_ACTUAL_IMAGE_TYPE: "文件的实际图片格式当前不受支持。",
     UPLOAD_FAILED: "图片上传失败。",
     HASH_CALCULATION_FAILED: "图片哈希计算失败。",
     HASH_DATABASE_UNAVAILABLE: "图片哈希数据库当前不可用。",
@@ -1103,8 +1108,51 @@ function sendImageLookupError(response, error) {
     UPLOAD_BUSY: "已有图片正在查询，请稍后再试。",
     INTERNAL_ERROR: "图片查询发生内部错误。",
   };
+  const details = error?.details && typeof error.details === "object" ? error.details : {};
+  const publicDetails = {};
+  for (const key of ["declaredExtension", "declaredMime", "detectedFormat"]) {
+    if (typeof details[key] === "string" && details[key]) publicDetails[key] = details[key];
+  }
   response.writeHead(Number(error?.statusCode) || 500, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-  response.end(JSON.stringify({ ok: false, code, message: messages[code] }));
+  response.end(JSON.stringify({ ok: false, code, message: error?.publicMessage || messages[code], ...publicDetails }));
+}
+
+const imageFormatLabels = Object.freeze({
+  jpeg: "JPEG", png: "PNG", webp: "WebP", gif: "GIF", avif: "AVIF",
+  heic: "HEIC", bmp: "BMP", tiff: "TIFF", "iso-bmff": "ISO BMFF",
+});
+const supportedUploadImageFormats = new Set(["jpeg", "png", "webp", "gif", "avif"]);
+const uploadExtensionFormats = new Map([
+  ["jpg", "jpeg"], ["jpeg", "jpeg"], ["png", "png"], ["webp", "webp"], ["gif", "gif"], ["avif", "avif"],
+]);
+const uploadMimeFormats = new Map([
+  ["image/jpeg", "jpeg"], ["image/png", "png"], ["image/webp", "webp"], ["image/gif", "gif"], ["image/avif", "avif"],
+]);
+
+function detectIsoBmffFormat(prefix) {
+  if (prefix.length < 16 || prefix.toString("ascii", 4, 8) !== "ftyp") return "";
+  let boxSize = prefix.readUInt32BE(0);
+  let majorBrandOffset = 8;
+  let compatibleBrandsOffset = 16;
+  if (boxSize === 1) {
+    if (prefix.length < 24) return "";
+    const extendedSize = prefix.readBigUInt64BE(8);
+    if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return "iso-bmff";
+    boxSize = Number(extendedSize);
+    majorBrandOffset = 16;
+    compatibleBrandsOffset = 24;
+  }
+  if (boxSize !== 0 && boxSize < compatibleBrandsOffset) return "";
+  if (prefix.length < majorBrandOffset + 4) return "";
+  const availableEnd = Math.min(prefix.length, boxSize || prefix.length);
+  const brands = [prefix.toString("ascii", majorBrandOffset, majorBrandOffset + 4)];
+  for (let offset = compatibleBrandsOffset; offset + 4 <= availableEnd; offset += 4) {
+    brands.push(prefix.toString("ascii", offset, offset + 4));
+  }
+  if (brands.some((brand) => brand === "avif" || brand === "avis")) return "avif";
+  const heicBrands = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs"]);
+  if (brands.some((brand) => heicBrands.has(brand))) return "heic";
+  return "iso-bmff";
 }
 
 function detectImageFormat(prefix) {
@@ -1112,28 +1160,74 @@ function detectImageFormat(prefix) {
   if (prefix.length >= 8 && prefix.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
   if (prefix.length >= 12 && prefix.toString("ascii", 0, 4) === "RIFF" && prefix.toString("ascii", 8, 12) === "WEBP") return "webp";
   if (prefix.length >= 6 && ["GIF87a", "GIF89a"].includes(prefix.toString("ascii", 0, 6))) return "gif";
-  if (prefix.length >= 16 && prefix.toString("ascii", 4, 8) === "ftyp" && /avif|avis/.test(prefix.toString("ascii", 8, 32))) return "avif";
+  if (prefix.length >= 2 && prefix.toString("ascii", 0, 2) === "BM") return "bmp";
+  if (prefix.length >= 4 && (prefix.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || prefix.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a])))) return "tiff";
+  const isoBmffFormat = detectIsoBmffFormat(prefix);
+  if (isoBmffFormat) return isoBmffFormat;
   return "";
 }
 
+function imageLookupDiagnostic(file, branch, detectedFormat = "") {
+  const extension = path.extname(file.fileName || "").slice(1).toLowerCase();
+  const mimeType = String(file.mimeType || "").split(";", 1)[0].trim().toLowerCase();
+  console.warn("[image-hash-lookup-validation]", JSON.stringify({
+    fileName: path.basename(String(file.fileName || "").replace(/\\/g, "/")),
+    declaredExtension: extension,
+    declaredMime: mimeType,
+    prefixHex: file.prefix.subarray(0, 16).toString("hex").match(/.{1,2}/g)?.join(" ").toUpperCase() || "",
+    detectedFormat,
+    branch,
+  }));
+}
+
 function validateUploadedImage(file) {
-  const extension = path.extname(file.fileName).toLowerCase();
-  const extensionFormats = new Map([[".jpg", "jpeg"], [".jpeg", "jpeg"], [".png", "png"], [".webp", "webp"], [".gif", "gif"], [".avif", "avif"]]);
-  const mimeFormats = new Map([["image/jpeg", "jpeg"], ["image/png", "png"], ["image/webp", "webp"], ["image/gif", "gif"], ["image/avif", "avif"]]);
-  const extensionFormat = extensionFormats.get(extension);
-  const mimeFormat = mimeFormats.get(String(file.mimeType || "").toLowerCase());
-  if (!extensionFormat || !mimeFormat) throw imageLookupError("UNSUPPORTED_IMAGE_TYPE", "Unsupported image type", 415);
-  const signatureFormat = detectImageFormat(file.prefix);
-  if (!signatureFormat || extensionFormat !== signatureFormat || mimeFormat !== signatureFormat) {
-    throw imageLookupError("INVALID_IMAGE_SIGNATURE", "Image signature mismatch", 415);
+  const declaredExtension = path.extname(file.fileName || "").slice(1).toLowerCase();
+  const declaredMime = String(file.mimeType || "").split(";", 1)[0].trim().toLowerCase();
+  const extensionFormat = uploadExtensionFormats.get(declaredExtension) || "";
+  const mimeFormat = uploadMimeFormats.get(declaredMime) || "";
+  const detectedFormat = detectImageFormat(file.prefix);
+  const details = { declaredExtension, declaredMime, detectedFormat };
+  if (!detectedFormat) {
+    imageLookupDiagnostic(file, "UNRECOGNIZED_IMAGE_SIGNATURE");
+    throw imageLookupError("UNRECOGNIZED_IMAGE_SIGNATURE", "Unrecognized image signature", 415, details);
+  }
+  if (!supportedUploadImageFormats.has(detectedFormat)) {
+    imageLookupDiagnostic(file, "UNSUPPORTED_ACTUAL_IMAGE_TYPE", detectedFormat);
+    const error = imageLookupError("UNSUPPORTED_ACTUAL_IMAGE_TYPE", "Unsupported actual image type", 415, details);
+    error.publicMessage = `文件实际内容识别为 ${imageFormatLabels[detectedFormat] || detectedFormat.toUpperCase()}，当前不支持该图片格式。`;
+    throw error;
+  }
+
+  if (declaredExtension && extensionFormat !== detectedFormat) {
+    const declaredLabel = imageFormatLabels[extensionFormat] || declaredExtension.toUpperCase();
+    imageLookupDiagnostic(file, "EXTENSION_SIGNATURE_MISMATCH", detectedFormat);
+    const error = imageLookupError("EXTENSION_SIGNATURE_MISMATCH", "Extension and signature mismatch", 415, details);
+    error.publicMessage = `文件扩展名为 ${declaredLabel}，但实际内容识别为 ${imageFormatLabels[detectedFormat]}。`;
+    throw error;
+  }
+  if (declaredMime && declaredMime !== "application/octet-stream" && mimeFormat !== detectedFormat) {
+    imageLookupDiagnostic(file, "MIME_SIGNATURE_MISMATCH_ACCEPTED", detectedFormat);
+  }
+  file.detectedFormat = detectedFormat;
+  file.declaredExtension = declaredExtension;
+  file.declaredMime = declaredMime;
+}
+
+function decodeMultipartFilenameStar(value) {
+  const match = String(value || "").match(/^([^']*)'[^']*'(.*)$/);
+  if (!match || (match[1] && match[1].toLowerCase() !== "utf-8")) return "";
+  try {
+    return decodeURIComponent(match[2]);
+  } catch (error) {
+    return "";
   }
 }
 
 function readSingleMultipartImage(request) {
   return new Promise((resolve, reject) => {
     const contentType = String(request.headers["content-type"] || "");
-    const boundaryMatch = contentType.match(/^multipart\/form-data;\s*boundary=(?:"([^"]+)"|([^;\s]+))/i);
-    if (!boundaryMatch) {
+    const boundaryMatch = contentType.match(/(?:^|;)\s*boundary=(?:"([^"]+)"|([^;\s]+))/i);
+    if (!/^multipart\/form-data(?:\s*;|\s*$)/i.test(contentType) || !boundaryMatch) {
       reject(imageLookupError("NO_FILE", "multipart/form-data with one image is required"));
       request.resume();
       return;
@@ -1177,7 +1271,7 @@ function readSingleMultipartImage(request) {
         fail(imageLookupError("FILE_TOO_LARGE", "Image is too large", 413));
         return;
       }
-      if (prefix.length < 32) prefix = Buffer.concat([prefix, bytes.subarray(0, 32 - prefix.length)]);
+      if (prefix.length < 512) prefix = Buffer.concat([prefix, bytes.subarray(0, 512 - prefix.length)]);
       try {
         hash.update(bytes);
       } catch (error) {
@@ -1201,9 +1295,11 @@ function readSingleMultipartImage(request) {
         const dispositionLine = headerText.match(/content-disposition:\s*form-data([^\r\n]*)/i)?.[1] || "";
         const fieldName = dispositionLine.match(/(?:^|;)\s*name=(?:"([^"]*)"|([^;\s]*))/i);
         const uploadedName = dispositionLine.match(/(?:^|;)\s*filename=(?:"([^"]*)"|([^;\s]*))/i);
+        const uploadedNameStar = dispositionLine.match(/(?:^|;)\s*filename\*=(?:"([^"]*)"|([^;\s]*))/i);
         const type = headerText.match(/content-type:\s*([^\r\n;]+)/i);
         const parsedFieldName = fieldName?.[1] ?? fieldName?.[2] ?? "";
-        const parsedFileName = uploadedName?.[1] ?? uploadedName?.[2] ?? "";
+        const encodedFileName = uploadedNameStar?.[1] ?? uploadedNameStar?.[2] ?? "";
+        const parsedFileName = decodeMultipartFilenameStar(encodedFileName) || uploadedName?.[1] || uploadedName?.[2] || "";
         if (parsedFieldName !== "image" || !parsedFileName) {
           fail(imageLookupError("NO_FILE", "The image field is required"));
           return;
@@ -1287,7 +1383,7 @@ async function handleImageHashLookup(request, response) {
       ok: true,
       algorithm: "sha256",
       exactByteMatch: true,
-      uploadedFile: { fileName: file.fileName, size: file.size },
+      uploadedFile: { fileName: file.fileName, size: file.size, detectedFormat: file.detectedFormat },
       coverage: result.coverage,
       matches: result.matches,
     });
