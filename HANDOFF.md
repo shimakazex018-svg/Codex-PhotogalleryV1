@@ -4,11 +4,16 @@
 
 ## Last Completed Task
 
-已把v97的`看球`路径特例升级为v98视频兼容性系统：只读扫描SQLite视频、分层探测、四级分类、增量报告、设置页，以及仅由`fallback_required`媒体ID触发的单路无落盘H.264/AAC兼容流。
+已发布v99：统一8种图册排序、修复分页后排序与收藏/搜索排序不一致，并增加复用现有原始字节SHA-256索引的“上传图片查找”。
 
 ## Current State
 
-- 源码与正式运行站均为`v98`，Node PID 8088，监听`0.0.0.0:48102`；loopback、物理LAN与ZeroTier首页均为HTTP 200，监听PID与Node PID一致，Node父PID与任务Host一致。
+- 源码与正式运行站均为`v99`，Node PID 25840，监听`0.0.0.0:48102`；loopback与物理LAN首页均为HTTP 200，唯一监听PID与Node PID一致，Node父PID 16832与任务Host一致。
+- 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
+- “更新时间”使用`collections.mtime`（epoch毫秒），来自目录/媒体/子图册内容mtime的最大值并随增量扫描更新；0或非法时间视为空值。名称使用`zh-CN`数字自然排序，平局固定名称正序、相对路径正序。
+- 搜索仍以`relevance`为专用默认值；显式选择8种模式时只接受白名单，图册候选在截取前排序，媒体候选保留有界FTS集合后使用同一稳定比较器。
+- `POST /api/image-hash-lookup`单次只接收一张JPEG/PNG/WebP/GIF/AVIF，默认上限200 MiB，扩展名/MIME/签名三重一致；上传流直接计算SHA-256，不写临时文件、不写图库或历史。
+- 正式哈希覆盖为470347/486028（96.7736%）；因此0命中只表示“未在已建立哈希的图片中找到”。查询使用`idx_media_hashes_sha256`，不支持感知哈希、裁剪、重压缩、改尺寸或格式转换后的相似匹配。
 - 正式只读扫描共2096条视频：`direct_safe=1432`、`device_dependent=267`、`fallback_required=395`、`invalid=2`。视频编码分布为H.264 1488、MPEG-4 Part 2 388、HEVC 217、ProRes 1、无有效轨2。
 - 扫描报告为Runtime文件`DATA_DIR/video-compatibility-report.json`，不进入Git。元数据最多2路FFprobe；只对疑似项在10%/50%/90%各解码1秒，最多1路FFmpeg；不生成永久转码或兼容缓存。
 - 设置路由`#/__settings/video-compatibility`提供状态、控制、统计、分类筛选、搜索和50条服务端分页。扫描完成会清除图集内存缓存，使重新访问时取得最新分类。
@@ -27,6 +32,13 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- 静态检查、`git diff --check`、8种排序/TEMP SQLite分页测试和TEMP哈希API测试通过；哈希测试覆盖双路径、改名、无命中、伪装文件、空文件、413、中断释放、带/不带引号multipart参数和零临时目录。
+- 正式7189图册完整内存排序耗时7.422–41.506ms；正式根目录API 8种模式为7.951–68.455ms，675个子目录的8种顺序均验证正确。`maleah`搜索相关性返回60条、模式FTS5/index ready，显式名称倒序60条顺序正确。
+- 正式SHA索引单次SQL命中0.181ms；4,586字节真实图片改名上传后313ms返回1条正确路由且绝对路径泄露0。20次连续合成查询0失败，平均276.2ms，Node工作集由43,094,016降至41,152,512字节，未创建upload临时目录。
+- 隔离浏览器验证1440×900、820×1180、390×844均无横向溢出；8项下拉可切换并刷新保留，搜索态显示`relevance`，上传入口和`accept=image/*`正确，控制台0 warning/error。iPad/iPhone为视口模拟，不代表实体设备。
+- 正式原视频Range仍为206、`Accept-Ranges: bytes`且返回0–1023/221716；关键状态API均200，FTS5 ready。正式stderr为0字节，媒体根mtime未变化，数据库schema/媒体路径均未修改。
+- 正式服务经历两次受控重启（第二次加载multipart兼容修复），最终Node PID 25840、任务Running、唯一48102监听、loopback/LAN 200，静态资源均为v99；每次维护窗口上界分别18.389秒和17.807秒，未回滚。
 
 - 正式全量扫描耗时约2093.8秒：2096条均有源文件；元数据阶段实测最多2个FFprobe、0个FFmpeg，662条疑似项进入采样，602通过、60失败，采样阶段最多1个FFmpeg。probe超时1、probe失败1；结束后所有探测/转码子进程为0。
 - 正式增量扫描随后处理2096条、实际重扫0、跳过2096、采样0；运行时无FFprobe/FFmpeg。报告可解析，大小约3.35MB，临时文件为0。
@@ -77,7 +89,7 @@
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
 
-- 实体iPad/iPhone、Disable cache/HAR、长期内存等仍需人工补测；本次iPad/iPhone结果为对应浏览器视口模拟。
+- 实体iPad/iPhone、Disable cache/HAR和更长期内存趋势仍需人工补测；本次iPad/iPhone结果为对应浏览器视口模拟，20次小图查询只证明没有短期持续增长。
 - 旧NDJSON原文件为升级安全而保留；它们已冻结、不再增长，但未来如需删除必须先确认备份/审计策略。
 - 页码分页使用OFFSET；当前一年约3.4万条规模可接受，达到百万级或出现深页性能问题后再评估游标分页。
 - 项目没有登录、角色权限或完整API鉴权；访问日志可能含IP和User-Agent，部署范围必须继续受控。
@@ -92,4 +104,4 @@
 2. 正式部署前不要用应用代码“只读打开”正式数据库；隔离测试继续使用唯一TEMP目录。
 3. 正式旧NDJSON文件不得在本次升级时删除；迁移依靠`source_key`保持重复启动幂等。
 4. 视频poster、`preload="none"`、按需加载和现有媒体清理边界均未改变。
-5. FTS阶段A原始副本和JSON位于Git忽略的`tmp/fts5-prototype`；它们可重建且不应提交。正式Node PID/端口未被本任务操作。
+5. FTS阶段A原始副本和JSON位于Git忽略的`tmp/fts5-prototype`；它们可重建且不应提交。正式Node PID为25840，端口仍为48102。

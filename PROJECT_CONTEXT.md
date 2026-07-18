@@ -20,6 +20,7 @@
 - 视频兼容性扫描只读查询SQLite中的`media.type='video'`，结果写入Runtime的`DATA_DIR/video-compatibility-report.json`；该文件及其临时/previous副本均属于运行数据，不进入Git。
 - 图册排序统一为名称、图片数、视频数、内容更新时间的正/倒序；根目录由后端在完整集合排序后分页，子目录在返回前排序，搜索默认保留FTS相关性。
 - `POST /api/image-hash-lookup`只接收单张图片并流式计算原始字节SHA-256；不落盘、不写图库、不生成缩略图，通过`media_hashes.sha256`索引返回全部相对路径命中。
+- v99已从`codex/fts5-integration-v96`普通推送并部署到正式48102；正式Node由既有任务Host托管，数据库schema、媒体路径和运行配置未变化。
 
 ## Current runtime behavior
 

@@ -6,6 +6,7 @@
 - Moved root collection sorting before pagination, applied the same rules to subdirectories and favorites, kept viewing history chronological, and preserved FTS relevance as the search-specific default.
 - Added a single-image, 200 MiB, streaming multipart endpoint that validates extension, MIME and signature, computes the existing original-byte SHA-256 without writing a temporary file, and uses `idx_media_hashes_sha256` to return every relative-path match.
 - Added the accessible desktop/mobile upload panel, coverage-aware no-match wording, isolated sort/hash tests and v99 responsive-browser validation. SQLite schema, formal media and generated caches were unchanged.
+- Deployed v99 through the existing task-hosted runtime; final Node PID 25840 is the only 48102 listener, loopback/LAN are HTTP 200, formal exact lookup and no-match boundaries passed, and no rollback was required.
 
 ## 2026-07-16 - Add bounded video compatibility scanning and result-driven playback v98
 
