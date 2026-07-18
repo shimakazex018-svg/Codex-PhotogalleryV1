@@ -33,7 +33,7 @@ function createManager(options) {
     child.once("error", (error) => { current = { ...current, status: "failed", recentError: error.message }; });
     child.once("exit", (code) => {
       child = null;
-      if (code && current?.status !== "stopped") current = { ...current, status: "failed", recentError: stderr || `worker exited ${code}` };
+      if (code && current?.status !== "stopped") current = { ...current, status: "failed", recentError: current?.recentError || stderr || `worker exited ${code}` };
       else current = null;
     });
     return status();

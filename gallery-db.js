@@ -427,6 +427,16 @@ function withDatabase(dbFile, callback) {
   }
 }
 
+function withReadOnlyDatabase(dbFile, callback) {
+  const db = new DatabaseSync(dbFile, { readOnly: true });
+  try {
+    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=5000");
+    return callback(db);
+  } finally {
+    db.close();
+  }
+}
+
 function getStats(dbFile) {
   return withDatabase(dbFile, (db) => getStatsFromDb(db));
 }
@@ -1043,7 +1053,7 @@ function getDuplicateHashStats(dbFile) {
 function findImagesBySha256(dbFile, sha256) {
   const normalizedHash = String(sha256 || "").trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error("Invalid SHA-256 value");
-  return withDatabase(dbFile, (db) => {
+  return withReadOnlyDatabase(dbFile, (db) => {
     const coverage = db.prepare(
       `SELECT
          (SELECT COUNT(*) FROM media WHERE type = 'image') AS total_images,
@@ -1083,7 +1093,7 @@ function findImagesBySha256(dbFile, sha256) {
 }
 
 function getPerceptualHashStats(dbFile) {
-  return withDatabase(dbFile, (db) => {
+  return withReadOnlyDatabase(dbFile, (db) => {
     const row = db.prepare(`SELECT
       (SELECT COUNT(*) FROM media WHERE type = 'image') AS total_images,
       (SELECT COUNT(*) FROM media_perceptual_hashes WHERE status = 1 AND length(hash64) = 8) AS indexed_images,
@@ -1120,7 +1130,7 @@ function getPerceptualHashStats(dbFile) {
 function getMediaItemsByPerceptualIds(dbFile, ids = []) {
   const mediaIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 50);
   if (!mediaIds.length) return [];
-  return withDatabase(dbFile, (db) => {
+  return withReadOnlyDatabase(dbFile, (db) => {
     const select = db.prepare(`SELECT m.id, m.title, m.file_name, m.src, c.title AS collection_title, c.path_parts
       FROM media m JOIN collections c ON c.id = m.collection_id WHERE m.id = ? AND m.type = 'image'`);
     return mediaIds.map((id) => select.get(id)).filter(Boolean).map((row) => {

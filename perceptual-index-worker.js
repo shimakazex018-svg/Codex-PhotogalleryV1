@@ -62,6 +62,22 @@ async function main() {
   const upsertError = db.prepare(`INSERT INTO media_perceptual_hashes(media_id,hash64,source_size,source_mtime,computed_at,status,error_code)
     VALUES(?,NULL,?,?,?,2,?) ON CONFLICT(media_id) DO UPDATE SET hash64=NULL,source_size=excluded.source_size,
     source_mtime=excluded.source_mtime,computed_at=excluded.computed_at,status=2,error_code=excluded.error_code`);
+  const pendingWrites = [];
+  const flushWrites = () => {
+    if (!pendingWrites.length) return;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const item of pendingWrites) {
+        if (item.hash64) upsertReady.run(item.mediaId, item.hash64, item.size, item.mtime, item.computedAt);
+        else upsertError.run(item.mediaId, item.size, item.mtime, item.computedAt, item.errorCode);
+      }
+      db.exec("COMMIT");
+      pendingWrites.length = 0;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch (rollbackError) {}
+      throw error;
+    }
+  };
   const rows = db.prepare(`SELECT m.id,m.src,COALESCE(m.size,0) AS size,COALESCE(m.mtime,0) AS mtime
     FROM media m LEFT JOIN media_perceptual_hashes p ON p.media_id=m.id
     WHERE m.type='image' AND (p.media_id IS NULL OR p.source_size!=COALESCE(m.size,0) OR p.source_mtime!=COALESCE(m.mtime,0) OR p.status!=1)
@@ -83,6 +99,7 @@ async function main() {
   publish("running");
   for (const row of rows) {
     if (stopping || (maxItems && counters.processed >= maxItems)) break;
+    if (command === "pause") flushWrites();
     while (command === "pause" && !stopping) { publish("paused"); await wait(250); }
     const beforeBytes = Math.max(0, diskBytes() - baselineBytes);
     const limitStatus = diskLimitStatus(beforeBytes);
@@ -96,17 +113,19 @@ async function main() {
       const hash64 = await phash64({ ffmpegPath, inputPath: filePath, timeoutMs: 30000 });
       const after = fs.statSync(filePath);
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("FILE_CHANGED");
-      upsertReady.run(row.id, hash64, row.size, row.mtime, Date.now());
+      pendingWrites.push({ mediaId: row.id, hash64, size: row.size, mtime: row.mtime, computedAt: Date.now() });
       counters.succeeded += 1;
     } catch (error) {
       recentError = safeError(error);
-      upsertError.run(row.id, row.size, row.mtime, Date.now(), 1);
+      pendingWrites.push({ mediaId: row.id, size: row.size, mtime: row.mtime, computedAt: Date.now(), errorCode: 1 });
       counters.failed += 1;
     }
     counters.processed += 1;
+    if (pendingWrites.length >= 10) flushWrites();
     if (counters.processed % 10 === 0) publish("running", relative);
     if (counters.processed % 25 === 0) await wait(50);
   }
+  flushWrites();
   const finalStatus = stopping ? "stopped" : command === "pause" ? "paused" : "completed";
   publish(finalStatus);
   db.close();
@@ -114,7 +133,14 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.send?.({ type: "failed", error: safeError(error) });
+  const message = safeError(error);
+  try {
+    const failedDb = new DatabaseSync(databaseFile);
+    failedDb.exec("PRAGMA busy_timeout=5000");
+    failedDb.prepare("UPDATE perceptual_hash_state SET status='failed',updated_at=?,recent_error=? WHERE id=1").run(Date.now(), message);
+    failedDb.close();
+  } catch (stateError) {}
+  process.send?.({ type: "failed", error: message });
   if (process.connected) process.disconnect();
   process.exitCode = 1;
 });
