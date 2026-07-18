@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-07-18 - Fix upload image signature validation v100
+
+- Fixed normal PNG uploads being rejected when browser MIME metadata was empty, generic or conflicting. Image signatures are now authoritative; MIME conflicts use the detected format, extension conflicts report both formats precisely, unrecognized and unsupported actual formats have distinct errors, and RFC 5987 `filename*` is supported.
+- Kept streaming SHA-256 byte-exact and temporary-file-free, expanded JPEG/PNG/WebP/GIF/AVIF, malformed signature, quoted boundary, upload interruption and concurrency-slot regression coverage, and left the database schema, media files, sorting and hash index unchanged.
+
 ## 2026-07-18 - Unify gallery sorting and add exact image lookup v99
 
 - Replaced page-specific legacy sort modes with eight shared modes covering natural name, image count, video count and content-update time in both directions; added null-last and deterministic name/path tie breakers.

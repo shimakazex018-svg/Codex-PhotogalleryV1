@@ -76,7 +76,7 @@ Browser SPA
 
 排序由`gallery-sort.js`统一：`Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})`负责中文/英文/数字自然次序，主字段之后固定以名称正序和相对路径正序打破平局，缺失或非法值始终放末尾。根目录API先读取完整根集合、排序后再按`offset/limit`截取；子目录先排序再返回。搜索专用默认仍为`relevance`，用户显式选择8种排序时只对白名单枚举执行排序。
 
-上传图片查找不创建临时文件。`server.js`限制单并发和200 MiB，流式解析单文件multipart并同时计算SHA-256，扩展名/MIME/文件签名三重校验后调用`gallery-db.js`的索引查询；返回值只包含图库相对路径、现有hash路由和媒体ID，不暴露`PHOTOS_DIR`或数据库路径。数据库schema未变化。
+上传图片查找不创建临时文件。`server.js`限制单并发和200 MiB，流式解析单文件multipart并同时计算SHA-256；JPEG/PNG/WebP/GIF/AVIF文件签名是可信主判据，浏览器MIME仅用于辅助判断，扩展名冲突会返回实际格式的准确提示，RFC 5987 `filename*`安全解码后只保留基名。签名明确且声明无扩展名冲突的支持格式进入`gallery-db.js`索引查询，无法识别与已识别但不支持的格式使用不同错误码；返回值只包含图库相对路径、现有hash路由和媒体ID，不暴露`PHOTOS_DIR`或数据库路径。数据库schema未变化。
 
 灯箱使用两阶段图片显示：点击后立即复用卡片的按需WebP预览，当前原图完成网络加载和`decode()`后再替换。规范化原图URL是任务唯一键，任务状态覆盖`idle/queued/loading/loaded/decoding/ready/failed/aborted`；已加载或进行中的网络/解码Promise可复用。当前原图使用不计入普通并发的P0立即通道并设置`fetchPriority=high`，下一张为P1并提前解码，第二/第三张预测图为P3且只在当前图显示后调度；普通预加载最大并发2，缓存窗口最多5项，并按Save-Data/2G/3G降级。关闭灯箱或换路由会取消队列和旧会话任务并提升generation，render token阻止旧回调覆盖。列表只请求按需WebP预览，视口外图片保持懒加载并使用低请求优先级；视频数组不参与灯箱调度。
 

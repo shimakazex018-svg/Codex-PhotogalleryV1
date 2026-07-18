@@ -1,6 +1,6 @@
 # TESTING.md
 
-## Gallery sorting and image hash lookup v99
+## Gallery sorting and image hash lookup v100
 
 静态与自动测试：
 
@@ -15,7 +15,7 @@ node scripts/test-image-hash-lookup.js
 git diff --check
 ```
 
-`test-gallery-sort.js`使用TEMP SQLite覆盖8种枚举、`图册2/图册10`自然排序、大小写、中文、0值、空值、相同主值稳定次序、旧配置映射及先排序后分页。`test-image-hash-lookup.js`只在TEMP创建合成PNG字节和SQLite，绑定`127.0.0.1:48112`，覆盖同哈希多路径、改名、无命中、伪装文件、非支持格式、空文件、413、中断释放、零上传临时目录及`idx_media_hashes_sha256`查询计划；测试结束精确停止子PID并删除TEMP根。
+`test-gallery-sort.js`使用TEMP SQLite覆盖8种枚举、`图册2/图册10`自然排序、大小写、中文、0值、空值、相同主值稳定次序、旧配置映射及先排序后分页。`test-image-hash-lookup.js`只在TEMP创建真实PNG字节和SQLite，绑定`127.0.0.1:48112`，覆盖同哈希多路径、本地/上传SHA-256一致、空MIME、`application/octet-stream`、无扩展名、扩展名/MIME冲突、损坏PNG头、带参数MIME、`filename*`中文长文件名、JPEG/PNG/WebP/GIF/AVIF签名、HEIC准确拒绝、无法识别签名、空文件、413、上传中断、并发429及槽位释放、零上传临时目录和`idx_media_hashes_sha256`查询计划；测试结束精确停止子PID并删除TEMP根。
 
 响应式浏览器检查使用隔离端口和可丢弃DATA_DIR/PHOTOS_DIR，至少核对1440×900、820×1180、390×844：无页面级横向溢出，8项下拉可键盘操作并刷新保留，搜索态含`relevance`，上传入口可见且`accept=image/*`，控制台无新增持续错误。正式数据库只允许`DatabaseSync(...,{readOnly:true})`加`PRAGMA query_only=ON`进行计数和`EXPLAIN QUERY PLAN`；不得为本测试补全哈希或扫描媒体。
 
