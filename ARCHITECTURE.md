@@ -6,7 +6,7 @@
 
 ```text
 Browser SPA
-  ├─ static: index.html / app.js / gallery-sort.js / styles.css
+  ├─ static: index.html / app.js / gallery-sort.js / styles.css / release-notes.json
   └─ HTTP API
        └─ server.js
             ├─ gallery-db.js -> SQLite gallery.db
@@ -29,6 +29,7 @@ Browser SPA
 | `index.html` | 静态 HTML shell、顶部工具栏、状态区和灯箱结构 |
 | `app.js` | hash 路由、页面渲染、客户端状态、API 请求、灯箱、视频按需加载和设置页 |
 | `gallery-sort.js` | 浏览器和Node共同复用的8种排序枚举、旧值归一化、中文自然排序、空值与稳定次序规则 |
+| `release-notes.json` | 用户可见版本更新记录的唯一数据源；按发布时间倒序，历史未知时分显式保留日期精度；版本页不写访问日志或SQLite |
 | `styles.css` | 全部当前页面、响应式和状态样式 |
 | `server.js` | HTTP 服务、静态资源、API 路由、扫描任务、媒体/缩略图/HLS、日志和文件操作 |
 | `gallery-db.js` | SQLite基础schema、查询、用户标记、查重及媒体写事务；委托FTS核心同步 |
@@ -44,6 +45,7 @@ Browser SPA
 | `scripts/test-video-compatibility.js` | 仅使用唯一TEMP媒体/数据库的分类、增量、暂停、停止与超时回归 |
 | `scripts/test-gallery-sort.js` | 8种排序、旧配置、自然排序、空值、稳定次序和数据库分页前排序回归 |
 | `scripts/test-image-hash-lookup.js` | TEMP SQLite/媒体上的流式上传、哈希命中、安全校验、中断清理与查询计划回归 |
+| `test-release-notes.js` | 当前版本、静态缓存参数、发布时间顺序、文案长度和公开信息边界验证 |
 | `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、可恢复回收/恢复和空目录清理 |
 | `make-hls.ps1` | 手工 HLS 生成工具 |
 | `scripts/gallery-runtime-common.ps1` | V1.4.2 env 白名单解析、运行前校验和环境变量映射 |

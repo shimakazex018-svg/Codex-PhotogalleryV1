@@ -1,5 +1,19 @@
 # TESTING.md
 
+## Timestamped release identity and web release notes v102+
+
+每次正式发布在同一分钟内同步`APP_VERSION`、`index.html`的`styles.css`/`gallery-sort.js`/`app.js`缓存参数和`release-notes.json`第一项，然后执行：
+
+```powershell
+node --check app.js
+node --check test-release-notes.js
+node test-release-notes.js
+```
+
+自动门禁验证：第一项与页面版本一致、全部静态资源缓存版本一致、记录按日期倒序、每版1至3条、每条不超过30字符、公开文案不含Windows绝对路径或Git/PID/数据库内部信息，并保留友好加载失败提示。
+
+浏览器验证设置入口、页脚键盘/点击入口、最新项、中文时间和失败重试态；至少测1280×720、820×1180、390×844的页面级横向溢出。iPad/iPhone为视口模拟，不替代实体设备验收。详细发布规则见`docs/RELEASE_VERSIONING.md`。
+
 ## Perceptual image lookup v101
 
 ```powershell

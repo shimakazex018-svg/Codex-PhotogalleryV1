@@ -4,11 +4,13 @@
 
 ## Last Completed Task
 
-已发布v101相似图片查找：保留SHA-256完全匹配，新增标准64位pHash相似匹配、手动后台索引和磁盘硬限制。
+已发布`v102-20260718-2135`版本标识与网页更新记录：完整版本号包含正式完成时分，设置页和页脚可查看简短版本说明；未修改pHash代码、索引或数据库。
 
 ## Current State
 
-- 源码与正式运行站均为`v101`，Node PID 20976，监听`0.0.0.0:48102`；loopback和`192.168.31.153`均HTTP 200且只有一个48102监听。
+- 源码与正式运行站均为`v102-20260718-2135`，Node PID 20976，监听`0.0.0.0:48102`；loopback和`192.168.31.153`均HTTP 200且只有一个48102监听。
+- 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
+- 设置路由`#/__settings/release-notes`只在进入页面时读取静态JSON，默认20条、支持加载更多和失败重试；页脚完整版本号是同一路由的可访问链接。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
 - “更新时间”使用`collections.mtime`（epoch毫秒），来自目录/媒体/子图册内容mtime的最大值并随增量扫描更新；0或非法时间视为空值。名称使用`zh-CN`数字自然排序，平局固定名称正序、相对路径正序。
 - 搜索仍以`relevance`为专用默认值；显式选择8种模式时只接受白名单，图册候选在截取前排序，媒体候选保留有界FTS集合后使用同一稳定比较器。
@@ -25,7 +27,7 @@
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
 - 回收产物位于`TRASH_DIR\media-cleanup\<jobId>`：`files`保留原相对结构，另有`manifest.ndjson`、`summary.json`、`recycle.log`。
-- 设置导航包含收藏图册、观看历史、显示设置、图片查重、媒体库清理、视频兼容性和访问日志；视频兼容性路由为`#/__settings/video-compatibility`。
+- 设置导航包含收藏图册、观看历史、显示设置、图片查重、相似图片索引、媒体库清理、视频兼容性、访问日志和版本更新记录；视频兼容性路由为`#/__settings/video-compatibility`。
 - 首页只保留轮播和正常图册列表，不再渲染收藏/最近观看，也不在启动时请求`/api/favorites`或`/api/recent`。收藏和最近写入API、SQLite`user_marks`及localStorage兜底保持不变。
 - `gallery.db`新增幂等`access_logs`表和`idx_access_logs_time_id`索引；GET分页默认50、最大100，按`time DESC, id DESC`稳定排序。
 - 启动时流式、每250条一批导入旧`access-YYYY-MM-DD.log`，内容哈希防重复，原文件保留。新访问只写SQLite。
@@ -33,6 +35,8 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- 版本记录自动门禁通过；受控浏览器确认设置入口、最新项、页脚入口和中文无乱码，1280×720、820×1180、390×844均无页面级横向溢出。历史v99/v100/v101只显示已确认日期和“时分未记录”。
 
 - pHash自动测试通过：`phash64-v1`固定8字节，缩略图距离2、重压缩距离0、不同图片距离30，BLOB往返和480/512 MiB阈值通过。
 - 数据库副本10,000条净增868,352字节、WAL峰值906,432字节、integrity ok；全量486,028张预测约40.2 MiB，低于150 MiB目标。

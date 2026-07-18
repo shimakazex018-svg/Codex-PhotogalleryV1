@@ -24,7 +24,8 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v101";
+const APP_VERSION = "v102-20260718-2135";
+const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -61,6 +62,11 @@ const state = {
   duplicateStatus: null,
   duplicateSelectedIndex: 0,
   perceptualIndexStatus: null,
+  releaseNotes: [],
+  releaseNotesLoading: false,
+  releaseNotesLoaded: false,
+  releaseNotesError: "",
+  releaseNotesVisibleCount: RELEASE_NOTES_INITIAL_LIMIT,
   duplicateDeleteMarks: [],
   accessLogs: [],
   accessLogsLoading: false,
@@ -802,6 +808,7 @@ function settingsHashRoute() {
 
 function settingsSection() {
   const route = location.hash.replace(/^#\/?/, "");
+  if (route.includes("release-notes")) return "release-notes";
   if (route.includes("favorites")) return "favorites";
   if (route.includes("history")) return "history";
   if (route.includes("access-log")) return "access-log";
@@ -809,6 +816,92 @@ function settingsSection() {
   if (route.includes("video-compatibility")) return "video-compatibility";
   if (route.includes("perceptual")) return "perceptual";
   return route.includes("duplicates") ? "duplicates" : "display";
+}
+
+function formatReleaseDate(item) {
+  const releasedAt = String(item?.releasedAt || "");
+  if (!releasedAt) return "发布时间未记录";
+  if (item?.timePrecision === "date" || /^\d{4}-\d{2}-\d{2}$/.test(releasedAt)) {
+    const [year, month, day] = releasedAt.split("-");
+    return `${year}年${Number(month)}月${Number(day)}日（时分未记录）`;
+  }
+  const date = new Date(releasedAt);
+  if (!Number.isFinite(date.getTime())) return "发布时间未记录";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function normalizeReleaseNotes(payload) {
+  if (!Array.isArray(payload) || !payload.length) throw new Error("版本记录为空");
+  const notes = payload.map((item) => {
+    if (!item || typeof item.version !== "string" || typeof item.releasedAt !== "string" || !Array.isArray(item.items)) {
+      throw new Error("版本记录格式不正确");
+    }
+    const items = item.items.filter((entry) => typeof entry === "string" && entry.trim()).slice(0, 3);
+    if (!items.length) throw new Error("版本说明为空");
+    return { version: item.version, releasedAt: item.releasedAt, timePrecision: item.timePrecision || "minute", items };
+  });
+  if (notes[0].version !== APP_VERSION) throw new Error("当前版本与最新版本记录不一致");
+  return notes;
+}
+
+async function loadReleaseNotes(signal = state.pageAbortController?.signal) {
+  state.releaseNotesLoading = true;
+  state.releaseNotesError = "";
+  try {
+    const payload = await fetchJson(`./release-notes.json?v=${encodeURIComponent(APP_VERSION)}`, { signal });
+    state.releaseNotes = normalizeReleaseNotes(payload);
+    state.releaseNotesLoaded = true;
+    state.releaseNotesVisibleCount = RELEASE_NOTES_INITIAL_LIMIT;
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    state.releaseNotes = [];
+    state.releaseNotesLoaded = false;
+    state.releaseNotesError = "版本更新记录暂时无法加载，请稍后重试。";
+  } finally {
+    state.releaseNotesLoading = false;
+  }
+}
+
+function releaseNotesPageHtml() {
+  if (state.releaseNotesLoading) {
+    return `<section class="release-notes-page"><h1>版本更新记录</h1><div class="settings-card release-notes-message" role="status">正在加载版本更新记录……</div></section>`;
+  }
+  if (state.releaseNotesError) {
+    return `<section class="release-notes-page"><h1>版本更新记录</h1><div class="settings-card release-notes-message" role="alert"><p>${escapeHtml(state.releaseNotesError)}</p><button id="releaseNotesRetry" type="button">重新加载</button></div></section>`;
+  }
+  const visible = state.releaseNotes.slice(0, state.releaseNotesVisibleCount);
+  return `<section class="release-notes-page">
+    <h1>版本更新记录</h1>
+    <p>这里仅展示与使用相关的简短更新，最新版本排在最前。</p>
+    <div class="release-notes-list">
+      ${visible.map((item) => `<article class="settings-card release-note-card">
+        <header><h2>${escapeHtml(item.version)}</h2><time datetime="${escapeHtml(item.releasedAt)}">${escapeHtml(formatReleaseDate(item))}</time></header>
+        <ul>${item.items.map((entry) => `<li>${escapeHtml(entry)}</li>`).join("")}</ul>
+      </article>`).join("")}
+    </div>
+    ${visible.length < state.releaseNotes.length ? `<button class="release-notes-more" id="releaseNotesMore" type="button">加载更多</button>` : ""}
+  </section>`;
+}
+
+function bindReleaseNotesPage() {
+  document.querySelector("#releaseNotesMore")?.addEventListener("click", () => {
+    state.releaseNotesVisibleCount += RELEASE_NOTES_INITIAL_LIMIT;
+    renderSettingsPage();
+  });
+  document.querySelector("#releaseNotesRetry")?.addEventListener("click", async () => {
+    const loading = loadReleaseNotes(state.pageAbortController?.signal);
+    renderSettingsPage();
+    await loading;
+    if (settingsSection() === "release-notes") renderSettingsPage();
+  });
 }
 
 async function loadSqliteHome(showMessage = false) {
@@ -2821,9 +2914,11 @@ function bindVideoCompatibilityPage() {
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", perceptual: "相似图片索引", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志" };
+  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", perceptual: "相似图片索引", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志", "release-notes": "版本更新记录" };
   if (section !== "video-compatibility") stopVideoCompatibilityPolling();
-  recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
+  if (section !== "release-notes") {
+    recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
+  }
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <strong>\u8bbe\u7f6e</strong>`;
   view.innerHTML = `
     <section class="settings-page">
@@ -2836,9 +2931,10 @@ function renderSettingsPage() {
         <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
         <a class="${section === "video-compatibility" ? "active" : ""}" href="#/__settings/video-compatibility">视频兼容性检查</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
+        <a class="${section === "release-notes" ? "active" : ""}" href="#/__settings/release-notes">版本更新记录</a>
       </aside>
       <div class="settings-content">
-        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "perceptual" ? perceptualIndexPageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : `
+        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "perceptual" ? perceptualIndexPageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : section === "release-notes" ? releaseNotesPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -2877,6 +2973,7 @@ function renderSettingsPage() {
       }
     }));
   }
+  if (section === "release-notes") bindReleaseNotesPage();
 }
 
 function restoreToolbarSettings() {
@@ -2909,6 +3006,9 @@ async function ensureSettingsPage() {
   if (settingsSection() === "video-compatibility") {
     await loadVideoCompatibilityStatus();
     if (!state.videoCompatibilityResults.items.length) await loadVideoCompatibilityResults(1);
+  }
+  if (settingsSection() === "release-notes" && !state.releaseNotesLoaded && !state.releaseNotesLoading) {
+    await loadReleaseNotes(state.pageAbortController?.signal);
   }
   renderSettingsPage();
 }
@@ -4055,7 +4155,7 @@ setMediaFilter(state.mediaFilter, false);
 setLazyLoading(state.lazyLoading, false);
 setTheme(state.theme);
 setSortMode(state.gallerySort, false);
-if (versionFooter) versionFooter.textContent = `版本 ${APP_VERSION}`;
+if (versionFooter) versionFooter.innerHTML = `<a href="#/__settings/release-notes" aria-label="查看版本 ${escapeHtml(APP_VERSION)} 的更新记录">版本 ${escapeHtml(APP_VERSION)}</a>`;
 initBackToTopButton();
 initScrollRestoration();
 
