@@ -1187,13 +1187,17 @@ function readSingleMultipartImage(request) {
           return;
         }
         const headerText = pending.toString("utf8", opening.length, index);
-        const disposition = headerText.match(/content-disposition:\s*form-data;[^\r\n]*name="([^"]*)"[^\r\n]*filename="([^"]*)"/i);
+        const dispositionLine = headerText.match(/content-disposition:\s*form-data([^\r\n]*)/i)?.[1] || "";
+        const fieldName = dispositionLine.match(/(?:^|;)\s*name=(?:"([^"]*)"|([^;\s]*))/i);
+        const uploadedName = dispositionLine.match(/(?:^|;)\s*filename=(?:"([^"]*)"|([^;\s]*))/i);
         const type = headerText.match(/content-type:\s*([^\r\n;]+)/i);
-        if (!disposition || disposition[1] !== "image" || !disposition[2]) {
+        const parsedFieldName = fieldName?.[1] ?? fieldName?.[2] ?? "";
+        const parsedFileName = uploadedName?.[1] ?? uploadedName?.[2] ?? "";
+        if (parsedFieldName !== "image" || !parsedFileName) {
           fail(imageLookupError("NO_FILE", "The image field is required"));
           return;
         }
-        fileName = path.basename(disposition[2].replace(/\\/g, "/"));
+        fileName = path.basename(parsedFileName.replace(/\\/g, "/"));
         mimeType = String(type?.[1] || "").trim().toLowerCase();
         pending = pending.subarray(index + headerEnd.length);
         headersParsed = true;

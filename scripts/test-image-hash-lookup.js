@@ -67,6 +67,25 @@ async function upload(buffer, fileName, type) {
   return { status: response.status, payload: await response.json() };
 }
 
+function uploadUnquotedDisposition(buffer) {
+  return new Promise((resolve, reject) => {
+    const boundary = "gallery-unquoted-disposition";
+    const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=image; filename=renamed.png\r\nContent-Type: image/png\r\n\r\n`);
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([head, buffer, tail]);
+    const request = http.request({ host: "127.0.0.1", port, path: "/api/image-hash-lookup", method: "POST", headers: {
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "Content-Length": body.length,
+    } }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode, payload: JSON.parse(Buffer.concat(chunks).toString("utf8")) }));
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
 function sendAbortedUpload() {
   return new Promise((resolve) => {
     const boundary = "gallery-abort-test";
@@ -104,6 +123,10 @@ function sendAbortedUpload() {
     assert.ok(hit.payload.matches.every((item) => !/[A-Z]:\\/i.test(JSON.stringify(item))), "absolute paths must not leak");
     assert.strictEqual(hit.payload.coverage.hashedImages, 2);
     assert.strictEqual(hit.payload.coverage.totalImages, 2);
+
+    const unquoted = await uploadUnquotedDisposition(presentImage);
+    assert.strictEqual(unquoted.status, 200);
+    assert.strictEqual(unquoted.payload.matches.length, 2);
 
     const miss = await upload(absentImage, "absent.png", "image/png");
     assert.strictEqual(miss.status, 200);
