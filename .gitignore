@@ -20,6 +20,7 @@ hls/
 *.sqlite
 *.sqlite3
 *.log
+*.pid
 *.m3u8
 *.ts
 
