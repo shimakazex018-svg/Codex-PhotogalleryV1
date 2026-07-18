@@ -4,11 +4,11 @@
 
 ## Last Completed Task
 
-已发布`v102-20260718-2135`版本标识与网页更新记录：完整版本号包含正式完成时分，设置页和页脚可查看简短版本说明；未修改pHash代码、索引或数据库。
+已发布`v102-20260718-2137`版本标识与网页更新记录：完整版本号包含正式完成时分，设置页和页脚可查看简短版本说明；未修改pHash代码、索引或数据库。
 
 ## Current State
 
-- 源码与正式运行站均为`v102-20260718-2135`，Node PID 20976，监听`0.0.0.0:48102`；loopback和`192.168.31.153`均HTTP 200且只有一个48102监听。
+- 源码与正式运行站均为`v102-20260718-2137`，Node PID 20976，监听`0.0.0.0:48102`；loopback和`192.168.31.153`均HTTP 200且只有一个48102监听。
 - 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
 - 设置路由`#/__settings/release-notes`只在进入页面时读取静态JSON，默认20条、支持加载更多和失败重试；页脚完整版本号是同一路由的可访问链接。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。

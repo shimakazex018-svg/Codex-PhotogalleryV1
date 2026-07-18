@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-18 - Add timestamped release identity and web release notes v102-20260718-2135
+## 2026-07-18 - Add timestamped release identity and web release notes v102-20260718-2137
 
 - Added a formal `v<version>-YYYYMMDD-HHmm` identity using the actual `Asia/Shanghai` release-completion minute and applied the same full value to the page version and all static asset cache parameters.
 - Added the lazy-loaded settings route `#/__settings/release-notes`, a clickable footer version, a friendly retry state, responsive cards and a single `release-notes.json` data source.

@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前源码与正式前端版本标记均为`v102-20260718-2135`（`app.js` 中的`APP_VERSION`）；v102起使用正式发布完成时的Asia/Shanghai时分组成完整版本号。
+- 当前源码与正式前端版本标记均为`v102-20260718-2137`（`app.js` 中的`APP_VERSION`）；v102起使用正式发布完成时的Asia/Shanghai时分组成完整版本号。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
 
