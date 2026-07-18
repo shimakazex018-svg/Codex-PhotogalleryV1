@@ -16,6 +16,10 @@ function mediaId(collectionId, item) {
 function openDatabase(dbFile) {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   const db = new DatabaseSync(dbFile);
+  const perceptualSchemaExisted = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_perceptual_hashes'").get());
+  const perceptualBaselineBytes = [dbFile, `${dbFile}-wal`, `${dbFile}-shm`].reduce((sum, file) => {
+    try { return sum + fs.statSync(file).size; } catch (error) { return sum; }
+  }, 0);
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
@@ -134,7 +138,39 @@ function openDatabase(dbFile) {
 
     CREATE INDEX IF NOT EXISTS idx_media_hashes_sha256 ON media_hashes(sha256);
     CREATE INDEX IF NOT EXISTS idx_media_hashes_collection ON media_hashes(collection_id);
+
+    CREATE TABLE IF NOT EXISTS media_perceptual_hashes (
+      media_id TEXT PRIMARY KEY,
+      hash64 BLOB,
+      source_size INTEGER NOT NULL,
+      source_mtime REAL NOT NULL,
+      computed_at INTEGER NOT NULL,
+      status INTEGER NOT NULL DEFAULT 1,
+      error_code INTEGER,
+      CHECK ((status = 1 AND length(hash64) = 8 AND error_code IS NULL) OR
+             (status = 2 AND hash64 IS NULL AND error_code IS NOT NULL)),
+      FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
+
+    CREATE TABLE IF NOT EXISTS perceptual_hash_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      algorithm TEXT NOT NULL,
+      algorithm_version INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      processed INTEGER NOT NULL DEFAULT 0,
+      succeeded INTEGER NOT NULL DEFAULT 0,
+      failed INTEGER NOT NULL DEFAULT 0,
+      skipped INTEGER NOT NULL DEFAULT 0,
+      baseline_bytes INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      recent_error TEXT
+    );
   `);
+  if (!perceptualSchemaExisted) {
+    db.prepare(`INSERT OR IGNORE INTO perceptual_hash_state
+      (id,algorithm,algorithm_version,status,baseline_bytes,updated_at,recent_error)
+      VALUES (1,'phash64',1,'not_started',?,?,NULL)`).run(perceptualBaselineBytes, Date.now());
+  }
   return db;
 }
 
@@ -1046,6 +1082,63 @@ function findImagesBySha256(dbFile, sha256) {
   });
 }
 
+function getPerceptualHashStats(dbFile) {
+  return withDatabase(dbFile, (db) => {
+    const row = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM media WHERE type = 'image') AS total_images,
+      (SELECT COUNT(*) FROM media_perceptual_hashes WHERE status = 1 AND length(hash64) = 8) AS indexed_images,
+      (SELECT COUNT(*) FROM media_perceptual_hashes WHERE status = 2) AS failed_images`).get();
+    const state = db.prepare("SELECT * FROM perceptual_hash_state WHERE id = 1").get() || {};
+    const totalImages = Number(row.total_images || 0);
+    const indexedImages = Number(row.indexed_images || 0);
+    const currentBytes = [dbFile, `${dbFile}-wal`, `${dbFile}-shm`].reduce((sum, file) => {
+      try { return sum + fs.statSync(file).size; } catch (error) { return sum; }
+    }, 0);
+    const baselineBytes = Number(state.baseline_bytes || 0);
+    return {
+      algorithm: "phash64",
+      algorithmVersion: 1,
+      totalImages,
+      indexedImages,
+      failedImages: Number(row.failed_images || 0),
+      pendingImages: Math.max(0, totalImages - indexedImages),
+      coverage: totalImages ? indexedImages / totalImages : 0,
+      complete: totalImages > 0 && indexedImages >= totalImages,
+      taskStatus: state.status || "not_started",
+      processed: Number(state.processed || 0),
+      succeeded: Number(state.succeeded || 0),
+      failed: Number(state.failed || 0),
+      skipped: Number(state.skipped || 0),
+      baselineBytes,
+      bytesAdded: baselineBytes ? Math.max(0, currentBytes - baselineBytes) : 0,
+      updatedAt: Number(state.updated_at || 0),
+      recentError: state.recent_error || "",
+    };
+  });
+}
+
+function getMediaItemsByPerceptualIds(dbFile, ids = []) {
+  const mediaIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 50);
+  if (!mediaIds.length) return [];
+  return withDatabase(dbFile, (db) => {
+    const select = db.prepare(`SELECT m.id, m.title, m.file_name, m.src, c.title AS collection_title, c.path_parts
+      FROM media m JOIN collections c ON c.id = m.collection_id WHERE m.id = ? AND m.type = 'image'`);
+    return mediaIds.map((id) => select.get(id)).filter(Boolean).map((row) => {
+      const pathParts = parseJsonField(row.path_parts, []).map((part) => String(part || "")).filter(Boolean);
+      const fileName = row.file_name || row.title || "";
+      return {
+        mediaId: row.id,
+        fileName,
+        collectionName: row.collection_title || pathParts.at(-1) || "",
+        collectionPath: pathParts.join("/"),
+        mediaPath: [...pathParts, fileName].filter(Boolean).join("/"),
+        route: `#/${pathParts.map(encodeURIComponent).join("/")}`,
+        thumbnail: row.src || "",
+      };
+    });
+  });
+}
+
 function getImagesNeedingHash(dbFile, limitValue = 100) {
   const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 1000);
   return withDatabase(dbFile, (db) =>
@@ -1233,12 +1326,14 @@ function removeMediaRecords(dbFile, ids = []) {
     db.exec("BEGIN");
     try {
       const deleteHash = db.prepare("DELETE FROM media_hashes WHERE media_id = ?");
+      const deletePerceptualHash = db.prepare("DELETE FROM media_perceptual_hashes WHERE media_id = ?");
       const deleteMarks = db.prepare("DELETE FROM user_marks WHERE mark_type = 'duplicate-delete' AND (target_id = ? OR id = ?)");
       const deleteMedia = db.prepare("DELETE FROM media WHERE id = ?");
       let removed = 0;
       for (const id of mediaIds) {
         if (syncSearchIndex) searchFts.deleteMediaDocument(db, id);
         deleteHash.run(id);
+        deletePerceptualHash.run(id);
         deleteMarks.run(id, `duplicate-delete:${id}`);
         const result = deleteMedia.run(id);
         removed += result.changes || 0;
@@ -1306,6 +1401,8 @@ module.exports = {
   deleteAccessLogsBefore,
   getDuplicateHashStats,
   findImagesBySha256,
+  getPerceptualHashStats,
+  getMediaItemsByPerceptualIds,
   getImagesNeedingHash,
   upsertMediaHash,
   getExactDuplicateGroups,
