@@ -4,6 +4,7 @@
 
 - Fixed normal PNG uploads being rejected when browser MIME metadata was empty, generic or conflicting. Image signatures are now authoritative; MIME conflicts use the detected format, extension conflicts report both formats precisely, unrecognized and unsupported actual formats have distinct errors, and RFC 5987 `filename*` is supported.
 - Kept streaming SHA-256 byte-exact and temporary-file-free, expanded JPEG/PNG/WebP/GIF/AVIF, malformed signature, quoted boundary, upload interruption and concurrency-slot regression coverage, and left the database schema, media files, sorting and hash index unchanged.
+- Published v100 through the existing task-hosted runtime from Node PID 12052 to 26268; the sole 48102 listener, loopback/LAN HTTP 200, v100 assets, formal PNG/JPEG/WebP queries and browser console checks passed without rollback.
 
 ## 2026-07-18 - Unify gallery sorting and add exact image lookup v99
 
