@@ -6,6 +6,8 @@ const { spawn, spawnSync } = require("child_process");
 const readline = require("readline");
 const galleryDb = require("./gallery-db");
 const videoCompatibilityManager = require("./video-compatibility-manager");
+const perceptualManager = require("./perceptual-manager");
+const { phash64, similarityPercent } = require("./perceptual-hash");
 
 const rootDir = __dirname;
 
@@ -39,6 +41,7 @@ const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION
 const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
 const searchBackendMode = process.env.SEARCH_BACKEND_MODE || "auto";
 const imageHashLookupMaxBytes = Math.max(1, Number(process.env.IMAGE_HASH_LOOKUP_MAX_BYTES) || 200 * 1024 * 1024);
+const imageHashLookupTempDir = path.join(dataDir, "image-hash-lookup-temp");
 const imagePreviewMaxEdge = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_MAX_EDGE) || 768, 320), 1600);
 const imagePreviewQuality = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_QUALITY) || 78, 40), 95);
 const duplicateRecycleLimit = 50000;
@@ -63,6 +66,14 @@ const videoCompatibility = videoCompatibilityManager.createManager({
   ffmpegPath,
   videoCount: () => galleryDb.getVideoCount(galleryDbFile),
   log: logEvent,
+});
+const perceptualIndex = perceptualManager.createManager({
+  databaseFile: galleryDbFile,
+  photosDir,
+  ffmpegPath,
+  workerFile: path.join(rootDir, "perceptual-index-worker.js"),
+  queryWorkerFile: path.join(rootDir, "perceptual-query-worker.js"),
+  stats: () => galleryDb.getPerceptualHashStats(galleryDbFile),
 });
 
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
@@ -123,6 +134,7 @@ function ensureFolders() {
   fs.mkdirSync(imageThumbnailsDir, { recursive: true });
   fs.mkdirSync(hlsDir, { recursive: true });
   fs.mkdirSync(highlightDir, { recursive: true });
+  fs.mkdirSync(imageHashLookupTempDir, { recursive: true });
   fs.mkdirSync(trashDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
 }
@@ -1243,10 +1255,15 @@ function readSingleMultipartImage(request) {
     const marker = Buffer.from(`\r\n--${boundary}`);
     const headerEnd = Buffer.from("\r\n\r\n");
     let hash;
+    const tempPath = path.join(imageHashLookupTempDir, `${crypto.randomUUID()}.upload`);
+    let tempFd = null;
     try {
       hash = crypto.createHash("sha256");
+      tempFd = fs.openSync(tempPath, "wx");
     } catch (error) {
-      reject(imageLookupError("HASH_CALCULATION_FAILED", error.message, 500));
+      try { if (tempFd !== null) fs.closeSync(tempFd); } catch (closeError) {}
+      try { fs.rmSync(tempPath, { force: true }); } catch (removeError) {}
+      reject(imageLookupError("UPLOAD_FAILED", error.message, 500));
       request.resume();
       return;
     }
@@ -1261,6 +1278,9 @@ function readSingleMultipartImage(request) {
     function fail(error) {
       if (finished) return;
       finished = true;
+      try { if (tempFd !== null) fs.closeSync(tempFd); } catch (closeError) {}
+      tempFd = null;
+      try { fs.rmSync(tempPath, { force: true }); } catch (removeError) {}
       reject(error);
     }
 
@@ -1274,8 +1294,9 @@ function readSingleMultipartImage(request) {
       if (prefix.length < 512) prefix = Buffer.concat([prefix, bytes.subarray(0, 512 - prefix.length)]);
       try {
         hash.update(bytes);
+        fs.writeSync(tempFd, bytes);
       } catch (error) {
-        fail(imageLookupError("HASH_CALCULATION_FAILED", error.message, 500));
+        fail(imageLookupError("UPLOAD_FAILED", error.message, 500));
       }
     }
 
@@ -1331,7 +1352,9 @@ function readSingleMultipartImage(request) {
           } catch (error) {
             throw imageLookupError("HASH_CALCULATION_FAILED", error.message, 500);
           }
-          const file = { fileName, mimeType, size, prefix, sha256 };
+          fs.closeSync(tempFd);
+          tempFd = null;
+          const file = { fileName, mimeType, size, prefix, sha256, tempPath };
           validateUploadedImage(file);
           finished = true;
           resolve(file);
@@ -1371,25 +1394,56 @@ async function handleImageHashLookup(request, response) {
     return;
   }
   imageHashLookupActive = true;
+  let file = null;
   try {
-    const file = await readSingleMultipartImage(request);
+    file = await readSingleMultipartImage(request);
     let result;
     try {
       result = galleryDb.findImagesBySha256(galleryDbFile, file.sha256);
     } catch (error) {
       throw imageLookupError(fs.existsSync(galleryDbFile) ? "DATABASE_QUERY_FAILED" : "HASH_DATABASE_UNAVAILABLE", error.message, 503);
     }
+    let perceptualResult = { candidates: 0, matches: [] };
+    let perceptualLookupError = null;
+    try {
+      const uploadedHash64 = await phash64({ ffmpegPath, inputPath: file.tempPath, timeoutMs: 30000 });
+      perceptualResult = await perceptualIndex.query(uploadedHash64, 10);
+    } catch (error) {
+      perceptualLookupError = {
+        code: error?.code === "DECODE_FAILED" || error?.code === "INVALID_DECODE_OUTPUT"
+          ? "PERCEPTUAL_HASH_CALCULATION_FAILED"
+          : "PERCEPTUAL_HASH_DATABASE_UNAVAILABLE",
+        message: "相似图片查询暂时不可用，SHA-256 完全匹配结果仍然有效。",
+      };
+    }
+    const exactIds = new Set(result.matches.map((item) => item.mediaId));
+    const similarRows = perceptualResult.matches.filter((item) => !exactIds.has(item.mediaId));
+    const mediaById = new Map(galleryDb.getMediaItemsByPerceptualIds(galleryDbFile, similarRows.map((item) => item.mediaId)).map((item) => [item.mediaId, item]));
+    const similarMatches = similarRows.map((match) => ({
+      ...mediaById.get(match.mediaId),
+      matchType: match.hammingDistance <= 6 ? "highly_similar" : "possibly_similar",
+      hammingDistance: match.hammingDistance,
+      similarity: similarityPercent(match.hammingDistance),
+    })).filter((item) => item.mediaId);
+    const perceptualStats = galleryDb.getPerceptualHashStats(galleryDbFile);
     sendJson(response, {
       ok: true,
-      algorithm: "sha256",
+      algorithm: "sha256+phash64-v1",
       exactByteMatch: true,
       uploadedFile: { fileName: file.fileName, size: file.size, detectedFormat: file.detectedFormat },
       coverage: result.coverage,
       matches: result.matches,
+      exactMatches: result.matches.map((item) => ({ ...item, matchType: "exact" })),
+      similarMatches,
+      perceptualIndex: { ...perceptualStats, lookupAvailable: !perceptualLookupError, lookupError: perceptualLookupError },
+      perceptualCandidates: perceptualResult.candidates,
     });
   } catch (error) {
     sendImageLookupError(response, error);
   } finally {
+    if (file?.tempPath) {
+      try { fs.rmSync(file.tempPath, { force: true }); } catch (error) { console.warn("[image-hash-lookup-cleanup]", error.message); }
+    }
     imageHashLookupActive = false;
   }
 }
@@ -2747,6 +2801,29 @@ function handleRequest(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === "/api/perceptual-index/status") {
+    if (request.method !== "GET") { sendJsonError(response, 405, "Method not allowed"); return; }
+    try { sendJson(response, { ok: true, ...perceptualIndex.status() }); }
+    catch (error) { sendJsonError(response, 503, "Perceptual index database unavailable"); }
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith("/api/perceptual-index/")) {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    const action = requestUrl.pathname.slice("/api/perceptual-index/".length);
+    readRequestBody(request, (body) => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        if (action === "start") sendJson(response, { ok: true, ...perceptualIndex.start({ limit: payload.limit }) });
+        else if (action === "pause") sendJson(response, { ok: true, ...perceptualIndex.pause() });
+        else if (action === "resume") sendJson(response, { ok: true, ...perceptualIndex.resume() });
+        else if (action === "stop") sendJson(response, { ok: true, ...perceptualIndex.stop() });
+        else sendJsonError(response, 404, "Unknown perceptual index action");
+      } catch (error) { sendJsonError(response, error.statusCode || 400, error.message); }
+    });
+    return;
+  }
+
   if (requestUrl.pathname === "/api/video-playback-events") {
     if (request.method !== "POST") {
       sendJsonError(response, 405, "Method not allowed");
@@ -3124,6 +3201,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
     if (shuttingDown) return;
     shuttingDown = true;
     videoCompatibility.shutdown();
+    perceptualIndex.shutdown();
     if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
     httpServer.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
@@ -3132,6 +3210,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   process.once("SIGTERM", shutdown);
   process.once("exit", () => {
     videoCompatibility.shutdown();
+    perceptualIndex.shutdown();
     if (activeCompatibleVideoStream) terminateCompatibleVideoChild(activeCompatibleVideoStream.child);
   });
 }

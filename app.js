@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v100";
+const APP_VERSION = "v101";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -60,6 +60,7 @@ const state = {
   duplicateLoading: false,
   duplicateStatus: null,
   duplicateSelectedIndex: 0,
+  perceptualIndexStatus: null,
   duplicateDeleteMarks: [],
   accessLogs: [],
   accessLogsLoading: false,
@@ -806,6 +807,7 @@ function settingsSection() {
   if (route.includes("access-log")) return "access-log";
   if (route.includes("media-cleanup")) return "media-cleanup";
   if (route.includes("video-compatibility")) return "video-compatibility";
+  if (route.includes("perceptual")) return "perceptual";
   return route.includes("duplicates") ? "duplicates" : "display";
 }
 
@@ -878,19 +880,30 @@ function imageLookupCoverageText(coverage) {
 }
 
 function renderImageLookupPayload(payload) {
-  const matches = Array.isArray(payload.matches) ? payload.matches : [];
+  const matches = Array.isArray(payload.exactMatches) ? payload.exactMatches : (Array.isArray(payload.matches) ? payload.matches : []);
+  const similar = Array.isArray(payload.similarMatches) ? payload.similarMatches : [];
   const coverageText = imageLookupCoverageText(payload.coverage);
-  imageLookupStatus.textContent = matches.length
-    ? `找到 ${matches.length} 个完全相同的文件。${coverageText}`
-    : `${payload.coverage?.complete ? "未在当前图库中找到完全相同的图片。" : "未在已建立哈希的图片中找到完全相同图片。"}${coverageText}`;
-  imageLookupResults.innerHTML = matches.map((item) => `
+  const perceptual = payload.perceptualIndex || {};
+  const perceptualCoverage = `相似图片索引覆盖：${Number(perceptual.indexedImages || 0).toLocaleString("zh-CN")} / ${Number(perceptual.totalImages || 0).toLocaleString("zh-CN")}（${(Number(perceptual.coverage || 0) * 100).toFixed(1)}%）`;
+  imageLookupStatus.textContent = `${matches.length ? `找到 ${matches.length} 个完全相同文件。` : (payload.coverage?.complete ? "未在当前图库中找到完全相同的图片。" : "未在已建立哈希的图片中找到完全相同图片。")}${coverageText} ${perceptualCoverage}`;
+  const resultHtml = (items, title) => items.length ? `<section class="image-lookup-group"><h3>${title}</h3>${items.map((item) => `
     <a class="image-lookup-result" href="${escapeHtml(item.route || "#/")}" data-image-lookup-result>
+      ${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="" loading="lazy" />` : ""}
+      <div>
       <strong>${escapeHtml(item.fileName || "未命名图片")}</strong>
       <span>${escapeHtml(item.collectionName || "未命名图册")}</span>
+      ${Number.isFinite(item.hammingDistance) ? `<small>${item.matchType === "highly_similar" ? "高度相似" : "可能相似"} · ${Number(item.similarity).toFixed(1)}% · 汉明距离 ${item.hammingDistance}</small>` : ""}
       <small>图册：${escapeHtml(item.collectionPath || "-")}</small>
       <small>图片：${escapeHtml(item.mediaPath || "-")}</small>
+      </div>
     </a>
-  `).join("");
+  `).join("")}</section>` : "";
+  const high = similar.filter((item) => item.matchType === "highly_similar");
+  const possible = similar.filter((item) => item.matchType === "possibly_similar");
+  const similarEmptyText = perceptual.lookupAvailable === false
+    ? (perceptual.lookupError?.message || "相似图片查询暂时不可用，SHA-256 完全匹配结果仍然有效。")
+    : (perceptual.complete ? "未找到相似结果。" : "未在已建立感知哈希的图片中找到相似结果。");
+  imageLookupResults.innerHTML = `${resultHtml(matches, "完全相同")}${resultHtml(high, "高度相似")}${resultHtml(possible, "可能相似")}${!similar.length ? `<p class="image-lookup-empty">${escapeHtml(similarEmptyText)}</p>` : ""}<p class="image-lookup-note">相似度由 64 位感知哈希的汉明距离换算，仅用于筛选候选图片，最终结果可能需要人工确认。</p>`;
 }
 
 async function lookupSelectedImage(file) {
@@ -2354,6 +2367,52 @@ function duplicatePageHtml() {
   `;
 }
 
+async function loadPerceptualIndexStatus() {
+  try { state.perceptualIndexStatus = await fetchJson("/api/perceptual-index/status"); }
+  catch (error) { state.perceptualIndexStatus = { status: "unavailable", recentError: "无法读取相似图片索引状态。" }; }
+}
+
+function perceptualIndexPageHtml() {
+  const item = state.perceptualIndexStatus || {};
+  const total = Number(item.totalImages || 0);
+  const indexed = Number(item.indexedImages || 0);
+  const coverage = total ? indexed / total * 100 : 0;
+  const bytes = Number(item.bytesAdded || 0);
+  const active = Boolean(item.active);
+  return `<section class="perceptual-index-page">
+    <h1>相似图片索引</h1>
+    <p>使用标准 64 位 pHash 建立视觉相似索引；SHA-256 完全匹配仍独立保留。任务默认单 worker，发布后不会自动全量运行。</p>
+    <div class="settings-card perceptual-index-status">
+      <strong>状态：${escapeHtml(item.status || item.taskStatus || "not_started")}</strong>
+      <span>已索引 ${indexed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}（${coverage.toFixed(1)}%）</span>
+      <span>本轮处理 ${Number(item.processed || 0).toLocaleString("zh-CN")}，成功 ${Number(item.succeeded || 0).toLocaleString("zh-CN")}，失败 ${Number(item.failed || item.failedImages || 0).toLocaleString("zh-CN")}</span>
+      <span>本轮新增占用 ${(bytes / 1024 / 1024).toFixed(2)} MiB / 512 MiB</span>
+      ${Number(item.imagesPerSecond || 0) > 0 ? `<span>速度 ${Number(item.imagesPerSecond).toFixed(2)} 张/秒，预计剩余 ${Math.ceil(Number(item.estimatedRemainingSeconds || 0) / 60).toLocaleString("zh-CN")} 分钟</span>` : ""}
+      ${item.current ? `<small>当前：${escapeHtml(item.current)}</small>` : ""}
+      ${item.recentError ? `<small class="error-text">${escapeHtml(item.recentError)}</small>` : ""}
+    </div>
+    <div class="perceptual-index-actions">
+      <button id="perceptualStart" type="button" ${active ? "disabled" : ""}>开始/继续增量建立</button>
+      <button id="perceptualPause" type="button" ${item.status === "running" ? "" : "disabled"}>暂停</button>
+      <button id="perceptualResume" type="button" ${item.status === "paused" ? "" : "disabled"}>继续</button>
+      <button id="perceptualStop" type="button" ${active ? "" : "disabled"}>停止</button>
+    </div>
+    <p class="settings-note">默认阈值：高度相似 ≤6，可能相似 7–10。大幅裁剪、镜像、90°旋转、水印或构图变化不保证命中。</p>
+  </section>`;
+}
+
+function bindPerceptualIndexPage() {
+  const run = async (action) => {
+    await postJson(`/api/perceptual-index/${action}`).catch(() => null);
+    await loadPerceptualIndexStatus();
+    renderSettingsPage();
+  };
+  document.querySelector("#perceptualStart")?.addEventListener("click", () => run("start"));
+  document.querySelector("#perceptualPause")?.addEventListener("click", () => run("pause"));
+  document.querySelector("#perceptualResume")?.addEventListener("click", () => run("resume"));
+  document.querySelector("#perceptualStop")?.addEventListener("click", () => run("stop"));
+}
+
 function renderDuplicatePage() {
   renderCrumbs();
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <a href="#/__settings">\u8bbe\u7f6e</a> / <strong>\u56fe\u7247\u67e5\u91cd</strong>`;
@@ -2762,7 +2821,7 @@ function bindVideoCompatibilityPage() {
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志" };
+  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", perceptual: "相似图片索引", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志" };
   if (section !== "video-compatibility") stopVideoCompatibilityPolling();
   recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <strong>\u8bbe\u7f6e</strong>`;
@@ -2773,12 +2832,13 @@ function renderSettingsPage() {
         <a class="${section === "history" ? "active" : ""}" href="#/__settings/history">观看历史</a>
         <a class="${section === "display" ? "active" : ""}" href="#/__settings">\u663e\u793a\u8bbe\u7f6e</a>
         <a class="${section === "duplicates" ? "active" : ""}" href="#/__settings/duplicates">\u56fe\u7247\u67e5\u91cd</a>
+        <a class="${section === "perceptual" ? "active" : ""}" href="#/__settings/perceptual">相似图片索引</a>
         <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
         <a class="${section === "video-compatibility" ? "active" : ""}" href="#/__settings/video-compatibility">视频兼容性检查</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
       </aside>
       <div class="settings-content">
-        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : `
+        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "perceptual" ? perceptualIndexPageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -2791,6 +2851,7 @@ function renderSettingsPage() {
   const toolbarSettings = document.querySelector("#toolbarSettings");
   if (mount && toolbarSettings) mount.appendChild(toolbarSettings);
   if (section === "duplicates") bindDuplicatePage();
+  if (section === "perceptual") bindPerceptualIndexPage();
   if (section === "favorites") bindFavoriteButtons();
   if (section === "media-cleanup") bindMediaCleanupPage();
   if (section === "video-compatibility") bindVideoCompatibilityPage();
@@ -2837,6 +2898,7 @@ async function ensureSettingsPage() {
   if (settingsSection() === "duplicates" && !state.duplicateGroups.length && !state.duplicateLoading) {
     await Promise.all([loadDuplicateStatus(), loadDuplicateDeleteMarks(), loadDuplicates(0)]);
   }
+  if (settingsSection() === "perceptual") await loadPerceptualIndexStatus();
   if (settingsSection() === "access-log" && !state.accessLogsLoaded && !state.accessLogsLoading) {
     await loadAccessLogs(1);
   }

@@ -342,6 +342,21 @@ a {
   margin-bottom: 16px;
 }
 
+.image-lookup-group h3 { margin: 12px 0 8px; color: var(--accent); }
+.image-lookup-result { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; align-items: center; }
+.image-lookup-result > img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: #111; }
+.image-lookup-result > div { display: grid; gap: 3px; min-width: 0; }
+.image-lookup-empty, .image-lookup-note { color: var(--muted); font-size: 0.9rem; }
+.perceptual-index-status { display: grid; gap: 8px; margin: 16px 0; }
+.perceptual-index-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.perceptual-index-actions button { min-height: 40px; }
+.error-text { color: #ff8ba7; }
+
+@media (max-width: 520px) {
+  .image-lookup-result { grid-template-columns: 56px minmax(0, 1fr); }
+  .image-lookup-result > img { width: 56px; height: 56px; }
+}
+
 .image-lookup-result {
   display: grid;
   gap: 4px;
