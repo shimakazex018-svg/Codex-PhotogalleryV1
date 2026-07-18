@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>&#20889;&#30495;&#22270;&#38598;</title>
-    <link rel="stylesheet" href="./styles.css?v=98" />
+    <link rel="stylesheet" href="./styles.css?v=99" />
   </head>
   <body>
     <header class="topbar">
@@ -15,6 +15,8 @@
           <span>&#25628;&#32034;</span>
           <input id="searchBox" type="search" placeholder="&#25628;&#32034;&#27169;&#29305;&#25110;&#20316;&#21697;" autocomplete="off" />
         </label>
+        <button class="image-lookup-button" id="imageLookupButton" type="button" title="&#19978;&#20256;&#22270;&#29255;&#26597;&#25214;" aria-label="&#19978;&#20256;&#22270;&#29255;&#26597;&#25214;">&#19978;&#20256;&#22270;&#29255;&#26597;&#25214;</button>
+        <input id="imageLookupInput" type="file" accept="image/*" hidden />
         <div class="toolbar-settings" id="toolbarSettings">
         <div class="density" aria-label="&#27599;&#34892;&#22270;&#29255;&#25968;&#37327;">
           <span>&#27599;&#34892;</span>
@@ -38,7 +40,7 @@
         </div>
         <div class="sort-toggle" aria-label="&#25490;&#24207;">
           <span>&#25490;&#24207;</span>
-          <button id="sortToggle" type="button"></button>
+          <select id="sortSelect" aria-label="&#22270;&#20876;&#25490;&#24207;&#26041;&#24335;"></select>
         </div>
         <button class="top-button" id="topButton" type="button">&#32622;&#39030;</button>
         <button class="refresh-button" id="refreshButton" type="button">&#21047;&#26032;&#22270;&#29255;&#30446;&#24405;</button>
@@ -53,6 +55,23 @@
       <section id="view"></section>
       <footer class="version-footer" id="versionFooter"></footer>
     </main>
+
+    <div class="image-lookup-overlay" id="imageLookupDialog" hidden>
+      <section class="image-lookup-dialog" role="dialog" aria-modal="true" aria-labelledby="imageLookupTitle" tabindex="-1">
+        <div class="image-lookup-heading">
+          <h2 id="imageLookupTitle">&#19978;&#20256;&#22270;&#29255;&#26597;&#25214;</h2>
+          <button id="imageLookupClose" type="button" aria-label="&#20851;&#38381;&#22270;&#29255;&#26597;&#25214;">&times;</button>
+        </div>
+        <p class="image-lookup-help">&#25353;&#21407;&#22987;&#25991;&#20214;&#23383;&#33410;&#30340; SHA-256 &#26597;&#25214;&#23436;&#20840;&#30456;&#21516;&#30340;&#22270;&#29255;&#65292;&#19981;&#21253;&#21547;&#30456;&#20284;&#22270;&#25628;&#32034;&#12290;</p>
+        <div class="image-lookup-file" id="imageLookupFile"></div>
+        <div class="image-lookup-status" id="imageLookupStatus" role="status" aria-live="polite"></div>
+        <div class="image-lookup-results" id="imageLookupResults"></div>
+        <div class="image-lookup-actions">
+          <button id="imageLookupChooseAgain" type="button">&#37325;&#26032;&#36873;&#25321;</button>
+          <button id="imageLookupClear" type="button">&#28165;&#31354;&#32467;&#26524;</button>
+        </div>
+      </section>
+    </div>
 
     <div class="lightbox" id="lightbox" aria-hidden="true">
       <button class="lightbox-close" id="closeLightbox" type="button" aria-label="&#20851;&#38381;">&times;</button>
@@ -73,6 +92,7 @@
       </svg>
     </button>
 
-    <script src="./app.js?v=98"></script>
+    <script src="./gallery-sort.js?v=99"></script>
+    <script src="./app.js?v=99"></script>
   </body>
 </html>

@@ -154,7 +154,7 @@ a {
 .fit-toggle button,
 .lazy-toggle button,
 .theme-toggle button,
-.sort-toggle button,
+.sort-toggle select,
 .media-filter button,
 .top-button,
 .duplicates-button,
@@ -178,7 +178,7 @@ a {
 .fit-toggle button,
 .lazy-toggle button,
 .theme-toggle button,
-.sort-toggle button,
+.sort-toggle select,
 .media-filter button {
   min-width: 72px;
   padding: 0 10px;
@@ -190,11 +190,18 @@ a {
 .density button.active,
 .fit-toggle button.active,
 .lazy-toggle button.active,
-.sort-toggle button.active,
+.sort-toggle select:focus,
 .media-filter button.active {
   border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+}
+
+.sort-toggle select {
+  appearance: auto;
+  max-width: 168px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
 }
 
 .lazy-toggle button:not(.active),
@@ -236,6 +243,123 @@ a {
 
 .settings-panel .toolbar-settings {
   display: flex;
+}
+
+.image-lookup-button {
+  min-height: 36px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.image-lookup-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.image-lookup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.image-lookup-overlay[hidden] {
+  display: none;
+}
+
+.image-lookup-dialog {
+  width: min(680px, 100%);
+  max-height: min(82vh, 760px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.38);
+  outline: none;
+}
+
+.image-lookup-heading,
+.image-lookup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.image-lookup-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.image-lookup-heading button,
+.image-lookup-actions button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.image-lookup-heading button {
+  min-width: 38px;
+  padding: 0;
+  font-size: 24px;
+}
+
+.image-lookup-help,
+.image-lookup-file,
+.image-lookup-status {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.image-lookup-status {
+  margin: 12px 0;
+  color: var(--text);
+}
+
+.image-lookup-results {
+  display: grid;
+  gap: 8px;
+  max-height: 44vh;
+  overflow: auto;
+  margin-bottom: 16px;
+}
+
+.image-lookup-result {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.image-lookup-result:hover,
+.image-lookup-result:focus {
+  border-color: var(--accent);
+}
+
+.image-lookup-result small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .access-log-page {
@@ -983,6 +1107,24 @@ a {
 }
 
 @media (max-width: 760px) {
+  .image-lookup-button {
+    width: 42px;
+    min-width: 42px;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+
+  .image-lookup-button::before {
+    content: "⌕";
+    font-size: 22px;
+  }
+
+  .image-lookup-dialog {
+    max-height: 92vh;
+    padding: 14px;
+  }
+
   .highlight-carousel {
     margin-bottom: 30px;
   }
@@ -1510,7 +1652,7 @@ a {
   .fit-toggle button,
   .lazy-toggle button,
   .theme-toggle button,
-  .sort-toggle button,
+  .sort-toggle select,
   .media-filter button,
   .top-button,
   .refresh-button {
@@ -1521,7 +1663,7 @@ a {
 
   .fit-toggle button,
   .lazy-toggle button,
-  .sort-toggle button,
+  .sort-toggle select,
   .media-filter button {
     min-width: 58px;
   }

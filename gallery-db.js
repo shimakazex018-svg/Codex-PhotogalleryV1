@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
 const searchFts = require("./search-fts");
+const gallerySort = require("./gallery-sort");
 
 function json(value) {
   return JSON.stringify(value || null);
@@ -422,21 +423,23 @@ function upsertScanState(dbFile, state) {
 function getRootCollections(dbFile, options = {}) {
   const limit = Math.min(Math.max(Number(options.limit) || 500, 1), 500);
   const offset = Math.max(Number(options.offset) || 0, 0);
-  return withDatabase(dbFile, (db) =>
-    db
+  const sort = gallerySort.normalizeSortMode(options.sort);
+  return withDatabase(dbFile, (db) => {
+    const items = db
       .prepare(
         `SELECT c.*, (SELECT COUNT(*) FROM collections child WHERE child.parent_id = c.id) AS child_count
          FROM collections c
          WHERE c.parent_id IS NULL
-         ORDER BY c.sort_order
-         LIMIT ? OFFSET ?`
+         ORDER BY c.sort_order`
       )
-      .all(limit, offset)
-      .map(rowToCollection)
-  );
+      .all()
+      .map(rowToCollection);
+    return gallerySort.sortCollections(items, sort).slice(offset, offset + limit);
+  });
 }
 
-function getCollection(dbFile, id) {
+function getCollection(dbFile, id, options = {}) {
+  const sort = gallerySort.normalizeSortMode(options.sort);
   return withDatabase(dbFile, (db) => {
     const collection = rowToCollection(
       db
@@ -448,7 +451,7 @@ function getCollection(dbFile, id) {
         .get(id)
     );
     if (!collection) return null;
-    const children = db
+    const children = gallerySort.sortCollections(db
       .prepare(
         `SELECT c.*, (SELECT COUNT(*) FROM collections child WHERE child.parent_id = c.id) AS child_count
          FROM collections c
@@ -456,7 +459,7 @@ function getCollection(dbFile, id) {
          ORDER BY c.sort_order`
       )
       .all(id)
-      .map(rowToCollection);
+      .map(rowToCollection), sort);
     return { ...collection, children };
   });
 }
@@ -585,12 +588,13 @@ function search(dbFile, query, limitValue = 50, options = {}) {
   const q = searchFts.normalizeSearchQuery(query);
   const queryCodePointLength = Array.from(q).length;
   const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 60);
+  const requestedSort = options.sort === "relevance" || !options.sort ? "relevance" : gallerySort.normalizeSortMode(options.sort);
   if (queryCodePointLength < 2) return { query: q, collections: [], media: [], hasMore: false, minimumQueryLength: 2 };
 
   const escaped = escapeLike(q);
   const prefixUpperBound = `${q}\uffff`;
   const contains = `%${escaped}%`;
-  const fetchLimit = limit + 1;
+  const fetchLimit = requestedSort === "relevance" ? limit + 1 : 10000;
   const openStartedAt = performance.now();
   const db = openDatabase(dbFile);
   const databaseOpenMs = performance.now() - openStartedAt;
@@ -627,11 +631,16 @@ function search(dbFile, query, limitValue = 50, options = {}) {
       appendUniqueRows(collectionRows, collectionIds, containsRows, fetchLimit);
     }
 
-    const collectionHasMore = collectionRows.length > limit;
-    const limitedCollectionRows = collectionRows.slice(0, limit);
+    const collectionSortStartedAt = performance.now();
+    const sortedCollections = requestedSort === "relevance"
+      ? collectionRows.map(rowToCollection)
+      : gallerySort.sortCollections(collectionRows.map(rowToCollection), requestedSort);
+    sortMs += performance.now() - collectionSortStartedAt;
+    const collectionHasMore = sortedCollections.length > limit;
+    const limitedCollections = sortedCollections.slice(0, limit);
     const exactCollectionMatch = exactRows.length > 0;
     const preferredCollectionMatch = exactCollectionMatch || prefixMatchCount > 0;
-    const mediaLimit = preferredCollectionMatch ? 0 : Math.max(limit - limitedCollectionRows.length, 0);
+    const mediaLimit = preferredCollectionMatch ? 0 : Math.max(limit - limitedCollections.length, 0);
     let mediaRows = [];
 
     const twoCharacterMediaAllowed = queryCodePointLength === 2 && behavior.actual !== "unavailable";
@@ -665,11 +674,13 @@ function search(dbFile, query, limitValue = 50, options = {}) {
 
     const mediaHasMore = mediaRows.length > mediaLimit;
     const transformStartedAt = performance.now();
-    const collections = limitedCollectionRows.map(rowToCollection);
-    const media = mediaRows.slice(0, mediaLimit).map(rowToMedia);
+    const collections = limitedCollections;
+    const mediaCandidates = mediaRows.map(rowToMedia);
+    const media = (requestedSort === "relevance" ? mediaCandidates : gallerySort.sortCollections(mediaCandidates, requestedSort)).slice(0, mediaLimit);
     transformMs += performance.now() - transformStartedAt;
     const payload = {
       query: q,
+      sort: requestedSort,
       collections,
       media,
       hasMore: collectionHasMore || mediaHasMore,
@@ -993,6 +1004,48 @@ function getDuplicateHashStats(dbFile) {
   });
 }
 
+function findImagesBySha256(dbFile, sha256) {
+  const normalizedHash = String(sha256 || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error("Invalid SHA-256 value");
+  return withDatabase(dbFile, (db) => {
+    const coverage = db.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM media WHERE type = 'image') AS total_images,
+         (SELECT COUNT(*) FROM media_hashes WHERE sha256 != '') AS hashed_images`
+    ).get();
+    const rows = db.prepare(
+      `SELECT m.id, m.collection_id, m.title, m.file_name, c.title AS collection_title, c.path_parts
+       FROM media_hashes h INDEXED BY idx_media_hashes_sha256
+       JOIN media m ON m.id = h.media_id
+       JOIN collections c ON c.id = m.collection_id
+       WHERE h.sha256 = ? AND m.type = 'image'
+       ORDER BY m.collection_id, m.sort_order, m.id`
+    ).all(normalizedHash);
+    const totalImages = Number(coverage.total_images || 0);
+    const hashedImages = Number(coverage.hashed_images || 0);
+    return {
+      coverage: {
+        hashedImages,
+        totalImages,
+        ratio: totalImages ? hashedImages / totalImages : 0,
+        complete: totalImages > 0 && hashedImages >= totalImages,
+      },
+      matches: rows.map((row) => {
+        const pathParts = parseJsonField(row.path_parts, []).map((part) => String(part || "")).filter(Boolean);
+        const fileName = row.file_name || row.title || "";
+        return {
+          mediaId: row.id,
+          fileName,
+          collectionName: row.collection_title || pathParts.at(-1) || "",
+          collectionPath: pathParts.join("/"),
+          mediaPath: [...pathParts, fileName].filter(Boolean).join("/"),
+          route: `#/${pathParts.map(encodeURIComponent).join("/")}`,
+        };
+      }),
+    };
+  });
+}
+
 function getImagesNeedingHash(dbFile, limitValue = 100) {
   const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 1000);
   return withDatabase(dbFile, (db) =>
@@ -1252,6 +1305,7 @@ module.exports = {
   getAccessLogsPage,
   deleteAccessLogsBefore,
   getDuplicateHashStats,
+  findImagesBySha256,
   getImagesNeedingHash,
   upsertMediaHash,
   getExactDuplicateGroups,

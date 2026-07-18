@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v98";
+const APP_VERSION = "v99";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -91,8 +91,10 @@ const state = {
   mediaFilter: localStorage.getItem("galleryMediaFilter") || "all",
   lazyLoading: localStorage.getItem("galleryLazyLoading") !== "off",
   theme: localStorage.getItem("galleryTheme") || "day",
-  modelSort: localStorage.getItem("galleryModelSort") || "name",
-  workSort: localStorage.getItem("galleryWorkSort") || "name",
+  gallerySort: GallerySort.normalizeSortMode(
+    localStorage.getItem("gallerySort") || localStorage.getItem("galleryWorkSort") || localStorage.getItem("galleryModelSort") || "name",
+  ),
+  searchSort: localStorage.getItem("gallerySearchSort") || "relevance",
   recentViews: readRecentViews(),
   favorites: readFavorites(),
   recentViewsLoaded: false,
@@ -147,7 +149,17 @@ const coverFitToggle = document.querySelector("#coverFitToggle");
 const lazyLoadingToggle = document.querySelector("#lazyLoadingToggle");
 const themeToggle = document.querySelector("#themeToggle");
 const searchBox = document.querySelector("#searchBox");
-const sortToggle = document.querySelector("#sortToggle");
+const sortSelect = document.querySelector("#sortSelect");
+const imageLookupButton = document.querySelector("#imageLookupButton");
+const imageLookupInput = document.querySelector("#imageLookupInput");
+const imageLookupDialog = document.querySelector("#imageLookupDialog");
+const imageLookupDialogPanel = imageLookupDialog.querySelector(".image-lookup-dialog");
+const imageLookupClose = document.querySelector("#imageLookupClose");
+const imageLookupChooseAgain = document.querySelector("#imageLookupChooseAgain");
+const imageLookupClear = document.querySelector("#imageLookupClear");
+const imageLookupFile = document.querySelector("#imageLookupFile");
+const imageLookupStatus = document.querySelector("#imageLookupStatus");
+const imageLookupResults = document.querySelector("#imageLookupResults");
 const lightbox = document.querySelector("#lightbox");
 const lightboxImage = document.querySelector("#lightboxImage");
 const closeLightbox = document.querySelector("#closeLightbox");
@@ -158,21 +170,10 @@ const zoomResetImage = document.querySelector("#zoomResetImage");
 const zoomInImage = document.querySelector("#zoomInImage");
 const openImagePath = document.querySelector("#openImagePath");
 
-const modelSortOptions = [
-  { mode: "name", label: "名称" },
-  { mode: "works", label: "作品数" },
-  { mode: "images", label: "图片数" },
-  { mode: "mtime", label: "最近" },
-];
-
-const workSortOptions = [
-  { mode: "name", label: "名称" },
-  { mode: "images", label: "图片数" },
-  { mode: "videos", label: "视频数" },
-  { mode: "mtime", label: "最近" },
-];
+const gallerySortOptions = GallerySort.SORT_OPTIONS;
 
 const favoritePayloads = new Map();
+let imageLookupAbortController = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
@@ -190,8 +191,8 @@ function currentScrollRouteKey() {
     hash,
     `q=${encodeURIComponent(state.searchQuery)}`,
     `filter=${state.mediaFilter}`,
-    `modelSort=${state.modelSort}`,
-    `workSort=${state.workSort}`,
+    `sort=${state.gallerySort}`,
+    `searchSort=${state.searchSort}`,
   ].join("|");
 }
 
@@ -592,56 +593,43 @@ function matchesSearch(values, query = state.searchQuery) {
   return searchableText(...values).includes(normalizedQuery);
 }
 
-function currentSortScope() {
-  return parseRoute().modelId ? "works" : "models";
+function updateSortSelect() {
+  const searchActive = Boolean(state.searchQuery);
+  const options = searchActive ? [{ mode: "relevance", label: "相关性" }, ...gallerySortOptions] : gallerySortOptions;
+  const mode = searchActive ? state.searchSort : state.gallerySort;
+  sortSelect.innerHTML = options.map((item) => `<option value="${item.mode}">${item.label}</option>`).join("");
+  sortSelect.value = mode;
+  const option = options.find((item) => item.mode === mode) || options[0];
+  sortSelect.setAttribute("aria-label", `${searchActive ? "搜索结果" : "图册"}排序方式，当前为${option.label}`);
 }
 
-function sortOptionsForScope(scope) {
-  return scope === "works" ? workSortOptions : modelSortOptions;
-}
-
-function sortModeForScope(scope) {
-  return scope === "works" ? state.workSort : state.modelSort;
-}
-
-function updateSortToggle() {
-  const scope = currentSortScope();
-  const mode = sortModeForScope(scope);
-  const option = sortOptionsForScope(scope).find((item) => item.mode === mode) || sortOptionsForScope(scope)[0];
-  sortToggle.textContent = option.label;
-  sortToggle.classList.add("active");
-  sortToggle.setAttribute("aria-label", `切换排序方式，当前按${option.label}排序`);
-}
-
-function setSortMode(scope, mode, rerender = true) {
-  const options = sortOptionsForScope(scope);
-  const nextMode = options.some((item) => item.mode === mode) ? mode : options[0].mode;
+function setSortMode(mode, rerender = true) {
+  if (state.searchQuery) {
+    state.searchSort = mode === "relevance" ? "relevance" : GallerySort.normalizeSortMode(mode);
+    localStorage.setItem("gallerySearchSort", state.searchSort);
+    updateSortSelect();
+    if (rerender) {
+      state.searchCache.clear();
+      state.sqliteSearch = { query: state.searchQuery, loading: false, collections: [], media: [] };
+      render();
+    }
+    return;
+  }
+  const nextMode = GallerySort.normalizeSortMode(mode);
   if (rerender) saveCurrentScrollPosition(true);
-  if (scope === "works") {
-    state.workSort = nextMode;
-    localStorage.setItem("galleryWorkSort", nextMode);
-  } else {
-    state.modelSort = nextMode;
-    localStorage.setItem("galleryModelSort", nextMode);
-  }
-  updateSortToggle();
+  state.gallerySort = nextMode;
+  localStorage.setItem("gallerySort", nextMode);
+  updateSortSelect();
   if (rerender) {
+    state.sqliteCollections.clear();
+    state.searchCache.clear();
     prepareScrollNavigation("new");
-    render();
+    loadGallery(false).catch(() => render());
   }
-}
-
-function cycleSortMode() {
-  const scope = currentSortScope();
-  const options = sortOptionsForScope(scope);
-  const currentMode = sortModeForScope(scope);
-  const currentIndex = Math.max(0, options.findIndex((item) => item.mode === currentMode));
-  const nextMode = options[(currentIndex + 1) % options.length].mode;
-  setSortMode(scope, nextMode);
 }
 
 function compareText(a, b) {
-  return String(a || "").localeCompare(String(b || ""), "zh-Hans-CN", { numeric: true });
+  return GallerySort.compareText(a, b);
 }
 
 function stableSorted(items, compare) {
@@ -652,21 +640,11 @@ function stableSorted(items, compare) {
 }
 
 function sortModels(models) {
-  return stableSorted(models, (a, b) => {
-    if (state.modelSort === "works") return ((b.count || 0) + (b.nestedCount || 0)) - ((a.count || 0) + (a.nestedCount || 0));
-    if (state.modelSort === "images") return (b.totalImageCount || b.imageCount || 0) - (a.totalImageCount || a.imageCount || 0);
-    if (state.modelSort === "mtime") return (b.mtime || 0) - (a.mtime || 0);
-    return compareText(a.name || a.folder, b.name || b.folder);
-  });
+  return GallerySort.sortCollections(models, state.gallerySort);
 }
 
 function sortWorks(works) {
-  return stableSorted(works, (a, b) => {
-    if (state.workSort === "images") return (b.totalImageCount || b.count || b.imageCount || 0) - (a.totalImageCount || a.count || a.imageCount || 0);
-    if (state.workSort === "videos") return (b.totalVideoCount || b.videoCount || 0) - (a.totalVideoCount || a.videoCount || 0);
-    if (state.workSort === "mtime") return (b.mtime || 0) - (a.mtime || 0);
-    return compareText(a.title || a.folder, b.title || b.folder);
-  });
+  return GallerySort.sortCollections(works, state.gallerySort);
 }
 
 function sortSearchWorkResults(results) {
@@ -727,6 +705,8 @@ function sqliteMediaToGalleryMedia(item) {
   };
   if (item.type === "image") {
     return {
+      mediaId: item.id,
+      collectionId: item.collectionId,
       file: item.file || item.title || "",
       title: item.title || item.file || "",
       src: item.src || "",
@@ -835,7 +815,7 @@ async function loadSqliteHome(showMessage = false) {
   }
 
   const [payload, highlightsPayload] = await Promise.all([
-    fetchJson(`/api/collections/root?limit=${HOME_COLLECTION_LIMIT}`, { signal: state.pageAbortController?.signal }),
+    fetchJson(`/api/collections/root?limit=${HOME_COLLECTION_LIMIT}&sort=${encodeURIComponent(state.gallerySort)}`, { signal: state.pageAbortController?.signal }),
     fetchJson("/api/highlights", { signal: state.pageAbortController?.signal }).catch((error) => {
       if (error.name === "AbortError") throw error;
       return { items: [] };
@@ -856,6 +836,105 @@ async function fetchJson(url, options = {}) {
   const response = await fetch(url, { cache: "no-store", ...options });
   if (!response.ok) throw new Error(`${url} failed`);
   return response.json();
+}
+
+function formatFileSize(size) {
+  const bytes = Number(size || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function openImageLookupDialog() {
+  imageLookupDialog.hidden = false;
+  document.body.classList.add("modal-open");
+  requestAnimationFrame(() => imageLookupDialogPanel.focus());
+}
+
+function closeImageLookupDialog() {
+  imageLookupAbortController?.abort();
+  imageLookupAbortController = null;
+  imageLookupDialog.hidden = true;
+  document.body.classList.remove("modal-open");
+  imageLookupButton.disabled = false;
+  imageLookupButton.focus();
+}
+
+function clearImageLookup() {
+  imageLookupAbortController?.abort();
+  imageLookupAbortController = null;
+  imageLookupInput.value = "";
+  imageLookupFile.textContent = "";
+  imageLookupStatus.textContent = "";
+  imageLookupResults.innerHTML = "";
+  imageLookupButton.disabled = false;
+}
+
+function imageLookupCoverageText(coverage) {
+  const hashed = Number(coverage?.hashedImages || 0);
+  const total = Number(coverage?.totalImages || 0);
+  const ratio = total ? ((hashed / total) * 100).toFixed(2) : "0.00";
+  return `当前哈希数据库覆盖：已建立哈希 ${hashed.toLocaleString("zh-CN")} 张 / 图片总数 ${total.toLocaleString("zh-CN")} 张，覆盖率 ${ratio}%`;
+}
+
+function renderImageLookupPayload(payload) {
+  const matches = Array.isArray(payload.matches) ? payload.matches : [];
+  const coverageText = imageLookupCoverageText(payload.coverage);
+  imageLookupStatus.textContent = matches.length
+    ? `找到 ${matches.length} 个完全相同的文件。${coverageText}`
+    : `${payload.coverage?.complete ? "未在当前图库中找到完全相同的图片。" : "未在已建立哈希的图片中找到完全相同图片。"}${coverageText}`;
+  imageLookupResults.innerHTML = matches.map((item) => `
+    <a class="image-lookup-result" href="${escapeHtml(item.route || "#/")}" data-image-lookup-result>
+      <strong>${escapeHtml(item.fileName || "未命名图片")}</strong>
+      <span>${escapeHtml(item.collectionName || "未命名图册")}</span>
+      <small>图册：${escapeHtml(item.collectionPath || "-")}</small>
+      <small>图片：${escapeHtml(item.mediaPath || "-")}</small>
+    </a>
+  `).join("");
+}
+
+async function lookupSelectedImage(file) {
+  if (!file) return;
+  openImageLookupDialog();
+  imageLookupFile.textContent = `${file.name} / ${formatFileSize(file.size)}`;
+  imageLookupStatus.textContent = "正在计算并查询图片哈希……";
+  imageLookupResults.innerHTML = "";
+  imageLookupButton.disabled = true;
+  imageLookupAbortController?.abort();
+  imageLookupAbortController = new AbortController();
+  try {
+    const body = new FormData();
+    body.append("image", file, file.name);
+    const response = await fetch("/api/image-hash-lookup", {
+      method: "POST",
+      body,
+      cache: "no-store",
+      signal: imageLookupAbortController.signal,
+    });
+    const payload = await response.json().catch(() => ({ ok: false, message: "服务器返回了无法识别的响应。" }));
+    if (!response.ok || !payload.ok) throw new Error(payload.message || "图片查询失败。");
+    renderImageLookupPayload(payload);
+  } catch (error) {
+    if (error.name !== "AbortError") imageLookupStatus.textContent = error.message || "图片查询失败。";
+  } finally {
+    imageLookupAbortController = null;
+    imageLookupButton.disabled = false;
+  }
+}
+
+function trapImageLookupFocus(event) {
+  if (event.key !== "Tab" || imageLookupDialog.hidden) return;
+  const focusable = [...imageLookupDialog.querySelectorAll("button:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")];
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 async function postJson(url, payload = {}) {
@@ -1048,7 +1127,7 @@ async function loadSqliteCollection(parts) {
   let collection = state.sqliteCollections.get(id);
   const needsChildren = collection && (collection.childCount || 0) > 0 && !(collection.children || []).length;
   if (!collection || !Array.isArray(collection.children) || needsChildren) {
-    collection = cacheSqliteCollection(await fetchJson(`/api/collections/${parts.map(encodeURIComponent).join("/")}`, { signal: state.pageAbortController?.signal }));
+    collection = cacheSqliteCollection(await fetchJson(`/api/collections/${parts.map(encodeURIComponent).join("/")}?sort=${encodeURIComponent(state.gallerySort)}`, { signal: state.pageAbortController?.signal }));
   }
 
   if (!collection) throw new Error("collection missing");
@@ -1106,12 +1185,13 @@ function applySqliteSearchPayload(query, payload, requestStartedAt = 0) {
 function requestSqliteSearch() {
   const query = state.searchQuery;
   if (searchCharacterLength(query) < SEARCH_MIN_QUERY_LENGTH || state.sqliteSearch.loading || state.sqliteSearch.query !== query) return;
-  const cached = state.searchCache.get(query);
+  const cacheKey = `${query}|${state.searchSort}`;
+  const cached = state.searchCache.get(cacheKey);
   if (cached && Date.now() - cached.storedAt < SEARCH_CACHE_TTL_MS) {
     applySqliteSearchPayload(query, cached.payload);
     return;
   }
-  if (cached) state.searchCache.delete(query);
+  if (cached) state.searchCache.delete(cacheKey);
 
   state.sqliteSearch.loading = true;
   const requestSequence = ++state.searchRequestSequence;
@@ -1123,10 +1203,10 @@ function requestSqliteSearch() {
     state.searchAbortController = new AbortController();
     const requestStartedAt = performance.now();
     const perfParameter = SEARCH_PERF_DEBUG ? "&perf=1" : "";
-    fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}${perfParameter}`, { signal: state.searchAbortController.signal })
+    fetchJson(`/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_RESULT_LIMIT}&sort=${encodeURIComponent(state.searchSort)}${perfParameter}`, { signal: state.searchAbortController.signal })
     .then((payload) => {
       if (state.searchQuery !== query || requestSequence !== state.searchRequestSequence) return;
-      state.searchCache.set(query, { storedAt: Date.now(), payload });
+      state.searchCache.set(cacheKey, { storedAt: Date.now(), payload });
       if (state.searchCache.size > 20) state.searchCache.delete(state.searchCache.keys().next().value);
       applySqliteSearchPayload(query, payload, requestStartedAt);
     })
@@ -1823,11 +1903,10 @@ function storedItemTimestamp(item, field) {
 }
 
 function favoriteItemsForDisplay() {
-  return stableSorted(state.favorites || [], (a, b) => {
-    if (state.modelSort === "mtime") return storedItemTimestamp(b, "favoritedAt") - storedItemTimestamp(a, "favoritedAt");
-    if (state.modelSort === "name") return compareText(a.title, b.title);
-    return 0;
-  });
+  return GallerySort.sortCollections((state.favorites || []).map((item) => ({
+    ...item,
+    mtime: storedItemTimestamp(item, "mtime") || storedItemTimestamp(item, "updatedAt") || storedItemTimestamp(item, "favoritedAt") || null,
+  })), state.gallerySort);
 }
 
 function renderFavorites() {
@@ -1878,6 +1957,9 @@ function modelFavoriteItem(model) {
     meta: modelMeta(model),
     hash: encodeHash([model.id]),
     cover: mediaCover(model.coverThumb || model.cover, model.images || [], model.videos || []),
+    imageCount: model.totalImageCount ?? model.imageCount ?? null,
+    videoCount: model.totalVideoCount ?? model.videoCount ?? null,
+    mtime: model.mtime || null,
   };
 }
 
@@ -1889,6 +1971,9 @@ function workFavoriteItem(model, work) {
     meta: `${model.name} / ${workMeta(work)}`,
     hash: encodeHash(work.id.split("/")),
     cover: mediaCover(work.coverThumb || work.cover, work.images || [], work.videos || []),
+    imageCount: work.totalImageCount ?? work.imageCount ?? work.count ?? null,
+    videoCount: work.totalVideoCount ?? work.videoCount ?? null,
+    mtime: work.mtime || null,
   };
 }
 
@@ -1901,6 +1986,9 @@ function collectionFavoriteItem(collection) {
     meta: collectionMeta(collection),
     hash,
     cover: collection.coverThumb || collection.cover || "",
+    imageCount: collection.totalImageCount ?? collection.imageCount ?? null,
+    videoCount: collection.totalVideoCount ?? collection.videoCount ?? null,
+    mtime: collection.mtime || null,
   };
 }
 
@@ -3523,7 +3611,7 @@ function render() {
   restoreToolbarSettings();
   clearHighlightCarouselTimer();
   clearImageBatchLoading();
-  updateSortToggle();
+  updateSortSelect();
   queueMicrotask(setupLazyPreviewImages);
   queueMicrotask(requestScrollRestoration);
 
@@ -3829,7 +3917,17 @@ lazyLoadingToggle.addEventListener("click", () => setLazyLoading(!state.lazyLoad
 themeToggle.addEventListener("click", () => setTheme(state.theme === "night" ? "day" : "night"));
 searchBox.addEventListener("input", () => setSearchQuery(searchBox.value));
 searchBox.addEventListener("search", () => setSearchQuery(searchBox.value));
-sortToggle.addEventListener("click", cycleSortMode);
+sortSelect.addEventListener("change", () => setSortMode(sortSelect.value));
+imageLookupButton.addEventListener("click", () => imageLookupInput.click());
+imageLookupInput.addEventListener("change", () => lookupSelectedImage(imageLookupInput.files?.[0]));
+imageLookupChooseAgain.addEventListener("click", () => imageLookupInput.click());
+imageLookupClear.addEventListener("click", clearImageLookup);
+imageLookupClose.addEventListener("click", closeImageLookupDialog);
+imageLookupDialog.addEventListener("click", (event) => {
+  if (event.target === imageLookupDialog) closeImageLookupDialog();
+  if (event.target.closest("[data-image-lookup-result]")) closeImageLookupDialog();
+});
+imageLookupDialog.addEventListener("keydown", trapImageLookupFocus);
 
 refreshButton.addEventListener("click", startBackgroundScan);
 topButton.addEventListener("click", () => {
@@ -3872,6 +3970,10 @@ lightboxImage.addEventListener("pointermove", moveLightboxDrag);
 lightboxImage.addEventListener("pointerup", endLightboxDrag);
 lightboxImage.addEventListener("pointercancel", endLightboxDrag);
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !imageLookupDialog.hidden) {
+    closeImageLookupDialog();
+    return;
+  }
   if (!lightbox.classList.contains("open")) return;
   showLightboxControls();
   if (event.key === "Escape") hideLightbox();
@@ -3890,8 +3992,7 @@ setCoverFit(state.coverFit);
 setMediaFilter(state.mediaFilter, false);
 setLazyLoading(state.lazyLoading, false);
 setTheme(state.theme);
-setSortMode("models", state.modelSort, false);
-setSortMode("works", state.workSort, false);
+setSortMode(state.gallerySort, false);
 if (versionFooter) versionFooter.textContent = `版本 ${APP_VERSION}`;
 initBackToTopButton();
 initScrollRestoration();

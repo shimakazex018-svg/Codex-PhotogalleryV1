@@ -38,6 +38,7 @@ const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERA
 const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
 const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
 const searchBackendMode = process.env.SEARCH_BACKEND_MODE || "auto";
+const imageHashLookupMaxBytes = Math.max(1, Number(process.env.IMAGE_HASH_LOOKUP_MAX_BYTES) || 200 * 1024 * 1024);
 const imagePreviewMaxEdge = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_MAX_EDGE) || 768, 320), 1600);
 const imagePreviewQuality = Math.min(Math.max(Number(process.env.IMAGE_PREVIEW_QUALITY) || 78, 40), 95);
 const duplicateRecycleLimit = 50000;
@@ -46,6 +47,7 @@ const imageThumbnailSources = new Map();
 const imagePreviewJobs = new Map();
 let imagePreviewQueue = Promise.resolve();
 let activeCompatibleVideoStream = null;
+let imageHashLookupActive = false;
 const videoPlaybackEventKeys = new Map();
 let videoMetadataCache = null;
 let videoMetadataDirty = false;
@@ -1070,6 +1072,211 @@ function sendJsonError(response, status, message) {
   response.end(JSON.stringify({ error: message }));
 }
 
+function imageLookupError(code, message, statusCode = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function sendImageLookupError(response, error) {
+  if (response.writableEnded || response.destroyed) return;
+  const knownCodes = new Set([
+    "NO_FILE", "TOO_MANY_FILES", "FILE_TOO_LARGE", "EMPTY_FILE", "UNSUPPORTED_IMAGE_TYPE",
+    "INVALID_IMAGE_SIGNATURE", "UPLOAD_FAILED", "HASH_CALCULATION_FAILED", "HASH_DATABASE_UNAVAILABLE",
+    "HASH_DATABASE_INCOMPLETE", "DATABASE_QUERY_FAILED", "REQUEST_ABORTED", "UPLOAD_BUSY", "INTERNAL_ERROR",
+  ]);
+  const code = knownCodes.has(error?.code) ? error.code : "INTERNAL_ERROR";
+  const messages = {
+    NO_FILE: "请选择一张图片。",
+    TOO_MANY_FILES: "单次只能上传一张图片。",
+    FILE_TOO_LARGE: `图片不能超过 ${Math.ceil(imageHashLookupMaxBytes / 1024 / 1024)} MB。`,
+    EMPTY_FILE: "不能上传空文件。",
+    UNSUPPORTED_IMAGE_TYPE: "不支持的图片格式。当前支持 JPEG、PNG、WebP、GIF 和 AVIF。",
+    INVALID_IMAGE_SIGNATURE: "文件内容与图片格式不一致。",
+    UPLOAD_FAILED: "图片上传失败。",
+    HASH_CALCULATION_FAILED: "图片哈希计算失败。",
+    HASH_DATABASE_UNAVAILABLE: "图片哈希数据库当前不可用。",
+    HASH_DATABASE_INCOMPLETE: "图片哈希数据库尚未完整覆盖图库。",
+    DATABASE_QUERY_FAILED: "图片哈希数据库查询失败。",
+    REQUEST_ABORTED: "图片上传已中断。",
+    UPLOAD_BUSY: "已有图片正在查询，请稍后再试。",
+    INTERNAL_ERROR: "图片查询发生内部错误。",
+  };
+  response.writeHead(Number(error?.statusCode) || 500, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  response.end(JSON.stringify({ ok: false, code, message: messages[code] }));
+}
+
+function detectImageFormat(prefix) {
+  if (prefix.length >= 3 && prefix[0] === 0xff && prefix[1] === 0xd8 && prefix[2] === 0xff) return "jpeg";
+  if (prefix.length >= 8 && prefix.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
+  if (prefix.length >= 12 && prefix.toString("ascii", 0, 4) === "RIFF" && prefix.toString("ascii", 8, 12) === "WEBP") return "webp";
+  if (prefix.length >= 6 && ["GIF87a", "GIF89a"].includes(prefix.toString("ascii", 0, 6))) return "gif";
+  if (prefix.length >= 16 && prefix.toString("ascii", 4, 8) === "ftyp" && /avif|avis/.test(prefix.toString("ascii", 8, 32))) return "avif";
+  return "";
+}
+
+function validateUploadedImage(file) {
+  const extension = path.extname(file.fileName).toLowerCase();
+  const extensionFormats = new Map([[".jpg", "jpeg"], [".jpeg", "jpeg"], [".png", "png"], [".webp", "webp"], [".gif", "gif"], [".avif", "avif"]]);
+  const mimeFormats = new Map([["image/jpeg", "jpeg"], ["image/png", "png"], ["image/webp", "webp"], ["image/gif", "gif"], ["image/avif", "avif"]]);
+  const extensionFormat = extensionFormats.get(extension);
+  const mimeFormat = mimeFormats.get(String(file.mimeType || "").toLowerCase());
+  if (!extensionFormat || !mimeFormat) throw imageLookupError("UNSUPPORTED_IMAGE_TYPE", "Unsupported image type", 415);
+  const signatureFormat = detectImageFormat(file.prefix);
+  if (!signatureFormat || extensionFormat !== signatureFormat || mimeFormat !== signatureFormat) {
+    throw imageLookupError("INVALID_IMAGE_SIGNATURE", "Image signature mismatch", 415);
+  }
+}
+
+function readSingleMultipartImage(request) {
+  return new Promise((resolve, reject) => {
+    const contentType = String(request.headers["content-type"] || "");
+    const boundaryMatch = contentType.match(/^multipart\/form-data;\s*boundary=(?:"([^"]+)"|([^;\s]+))/i);
+    if (!boundaryMatch) {
+      reject(imageLookupError("NO_FILE", "multipart/form-data with one image is required"));
+      request.resume();
+      return;
+    }
+    const contentLength = Number(request.headers["content-length"] || 0);
+    if (contentLength > imageHashLookupMaxBytes + 64 * 1024) {
+      reject(imageLookupError("FILE_TOO_LARGE", "Image is too large", 413));
+      request.resume();
+      return;
+    }
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+    const opening = Buffer.from(`--${boundary}\r\n`);
+    const marker = Buffer.from(`\r\n--${boundary}`);
+    const headerEnd = Buffer.from("\r\n\r\n");
+    const hash = crypto.createHash("sha256");
+    let pending = Buffer.alloc(0);
+    let headersParsed = false;
+    let finished = false;
+    let fileName = "";
+    let mimeType = "";
+    let size = 0;
+    let prefix = Buffer.alloc(0);
+
+    function fail(error) {
+      if (finished) return;
+      finished = true;
+      reject(error);
+    }
+
+    function consumeFileBytes(bytes) {
+      if (!bytes.length || finished) return;
+      size += bytes.length;
+      if (size > imageHashLookupMaxBytes) {
+        fail(imageLookupError("FILE_TOO_LARGE", "Image is too large", 413));
+        return;
+      }
+      if (prefix.length < 32) prefix = Buffer.concat([prefix, bytes.subarray(0, 32 - prefix.length)]);
+      hash.update(bytes);
+    }
+
+    function drain(final = false) {
+      if (finished) return;
+      if (!headersParsed) {
+        const index = pending.indexOf(headerEnd);
+        if (index < 0) {
+          if (pending.length > 16 * 1024) fail(imageLookupError("UPLOAD_FAILED", "Multipart headers are too large"));
+          return;
+        }
+        if (!pending.subarray(0, opening.length).equals(opening)) {
+          fail(imageLookupError("UPLOAD_FAILED", "Invalid multipart opening boundary"));
+          return;
+        }
+        const headerText = pending.toString("utf8", opening.length, index);
+        const disposition = headerText.match(/content-disposition:\s*form-data;[^\r\n]*name="([^"]*)"[^\r\n]*filename="([^"]*)"/i);
+        const type = headerText.match(/content-type:\s*([^\r\n;]+)/i);
+        if (!disposition || disposition[1] !== "image" || !disposition[2]) {
+          fail(imageLookupError("NO_FILE", "The image field is required"));
+          return;
+        }
+        fileName = path.basename(disposition[2].replace(/\\/g, "/"));
+        mimeType = String(type?.[1] || "").trim().toLowerCase();
+        pending = pending.subarray(index + headerEnd.length);
+        headersParsed = true;
+      }
+
+      const markerIndex = pending.indexOf(marker);
+      if (markerIndex >= 0) {
+        const suffix = pending.subarray(markerIndex + marker.length);
+        if (suffix.length < 2 && !final) return;
+        consumeFileBytes(pending.subarray(0, markerIndex));
+        if (finished) return;
+        if (suffix.subarray(0, 2).toString("ascii") !== "--") {
+          fail(imageLookupError("TOO_MANY_FILES", "Only one image is allowed"));
+          return;
+        }
+        if (!size) {
+          fail(imageLookupError("EMPTY_FILE", "Empty image", 400));
+          return;
+        }
+        try {
+          const file = { fileName, mimeType, size, prefix, sha256: hash.digest("hex") };
+          validateUploadedImage(file);
+          finished = true;
+          resolve(file);
+        } catch (error) {
+          fail(error);
+        }
+        return;
+      }
+      const keep = marker.length + 4;
+      if (pending.length > keep) {
+        const consumeLength = pending.length - keep;
+        consumeFileBytes(pending.subarray(0, consumeLength));
+        pending = pending.subarray(consumeLength);
+      }
+      if (final && !finished) fail(imageLookupError("UPLOAD_FAILED", "Multipart closing boundary is missing"));
+    }
+
+    request.on("data", (chunk) => {
+      if (finished) return;
+      pending = Buffer.concat([pending, chunk]);
+      drain(false);
+    });
+    request.once("end", () => drain(true));
+    request.once("aborted", () => fail(imageLookupError("REQUEST_ABORTED", "Upload aborted", 400)));
+    request.once("error", () => fail(imageLookupError("UPLOAD_FAILED", "Upload failed", 400)));
+  });
+}
+
+async function handleImageHashLookup(request, response) {
+  if (request.method !== "POST") {
+    sendImageLookupError(response, imageLookupError("UPLOAD_FAILED", "Method not allowed", 405));
+    return;
+  }
+  if (imageHashLookupActive) {
+    sendImageLookupError(response, imageLookupError("UPLOAD_BUSY", "Lookup busy", 429));
+    request.resume();
+    return;
+  }
+  imageHashLookupActive = true;
+  try {
+    const file = await readSingleMultipartImage(request);
+    let result;
+    try {
+      result = galleryDb.findImagesBySha256(galleryDbFile, file.sha256);
+    } catch (error) {
+      throw imageLookupError(fs.existsSync(galleryDbFile) ? "DATABASE_QUERY_FAILED" : "HASH_DATABASE_UNAVAILABLE", error.message, 503);
+    }
+    sendJson(response, {
+      ok: true,
+      algorithm: "sha256",
+      exactByteMatch: true,
+      uploadedFile: { fileName: file.fileName, size: file.size },
+      coverage: result.coverage,
+      matches: result.matches,
+    });
+  } catch (error) {
+    sendImageLookupError(response, error);
+  } finally {
+    imageHashLookupActive = false;
+  }
+}
+
 function sendImagePreview(requestUrl, response) {
   let descriptor;
   try {
@@ -1341,6 +1548,7 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
       items: galleryDb.getRootCollections(galleryDbFile, {
         limit: requestUrl.searchParams.get("limit") || "",
         offset: requestUrl.searchParams.get("offset") || "",
+        sort: requestUrl.searchParams.get("sort") || "",
       }),
     }));
     return true;
@@ -1349,7 +1557,7 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
   if (requestUrl.pathname.startsWith("/api/collections/")) {
     const id = decodeURIComponent(requestUrl.pathname.slice("/api/collections/".length));
     try {
-      const collection = galleryDb.getCollection(galleryDbFile, id);
+      const collection = galleryDb.getCollection(galleryDbFile, id, { sort: requestUrl.searchParams.get("sort") || "" });
       if (!collection) {
         sendJsonError(response, 404, "Collection not found");
       } else {
@@ -1359,7 +1567,7 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
       if (isSqliteCorruption(error)) {
         try {
           rebuildGalleryDbFromJson();
-          const collection = galleryDb.getCollection(galleryDbFile, id);
+          const collection = galleryDb.getCollection(galleryDbFile, id, { sort: requestUrl.searchParams.get("sort") || "" });
           if (!collection) {
             sendJsonError(response, 404, "Collection not found");
           } else {
@@ -1404,6 +1612,7 @@ function handleIndexApi(requestUrl, response, requestReceivedAt = performance.no
       const payload = galleryDb.search(galleryDbFile, query, limit, {
         includePerformance: searchPerfLoggingEnabled,
         searchMode: searchBackendMode,
+        sort: requestUrl.searchParams.get("sort") || "relevance",
       });
       const databasePerformance = payload.performance || {};
       if (!includePerformance) delete payload.performance;
@@ -2341,6 +2550,11 @@ function sendFile(request, response, filePath) {
 function handleRequest(request, response) {
   const requestReceivedAt = performance.now();
   const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+
+  if (requestUrl.pathname === "/api/image-hash-lookup") {
+    handleImageHashLookup(request, response);
+    return;
+  }
 
   if (requestUrl.pathname === "/api/config") {
     sendJson(response, {
