@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v95";
+const APP_VERSION = "v96";
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
 const MEDIA_PAGE_LIMIT = 40;
@@ -77,6 +77,7 @@ const state = {
   mediaCleanupDirection: "asc",
   mediaCleanupPollTimer: null,
   mediaCleanupLoading: false,
+  adminCapabilities: null,
   lastAccessLogKey: "",
   columns: Number(localStorage.getItem("galleryColumns") || 4),
   coverFit: localStorage.getItem("galleryCoverFit") || "crop",
@@ -813,13 +814,15 @@ async function loadSqliteHome(showMessage = false) {
     setStatus(text.refreshing);
   }
 
-  const [payload, highlightsPayload] = await Promise.all([
+  const [payload, highlightsPayload, capabilities] = await Promise.all([
     fetchJson(`/api/collections/root?limit=${HOME_COLLECTION_LIMIT}`, { signal: state.pageAbortController?.signal }),
     fetchJson("/api/highlights", { signal: state.pageAbortController?.signal }).catch((error) => {
       if (error.name === "AbortError") throw error;
       return { items: [] };
     }),
+    fetchJson("/api/admin/capabilities", { signal: state.pageAbortController?.signal }).catch(() => ({ authorized: false, scope: "denied" })),
   ]);
+  state.adminCapabilities = capabilities;
   const collections = (Array.isArray(payload.items) ? payload.items : []).map(cacheSqliteCollection);
   state.gallery = {
     generatedAt: new Date().toISOString(),
@@ -1042,6 +1045,9 @@ async function loadSqliteCollection(parts) {
   }
 
   (collection.children || []).forEach(cacheSqliteCollection);
+  if (!(collection.children || []).length && expectedMedia > 0) {
+    collection.recycleStatus = await fetchJson(`/api/collection-recycle/status?collectionId=${encodeURIComponent(collection.id)}`, { signal: state.pageAbortController?.signal }).catch(() => null);
+  }
   return collection;
 }
 
@@ -1760,6 +1766,36 @@ function favoriteButtonHtml(item) {
   `;
 }
 
+function collectionRecycleButtonHtml(collection) {
+  const status = collection?.recycleStatus;
+  if (!status || !state.adminCapabilities?.canMarkCollectionRecycle || (!status.eligible && !status.item)) return "";
+  const item = status.item;
+  const recycling = item?.status === "recycling";
+  return `<div class="collection-recycle-action">
+    <button class="collection-recycle-button${item ? " active" : ""}" type="button" data-collection-recycle="${escapeHtml(collection.id)}"
+      ${recycling ? "disabled" : ""} aria-pressed="${item ? "true" : "false"}">${recycling ? "回收中" : "回收"}</button>
+    ${item ? `<div class="collection-recycle-time">标记：${escapeHtml(new Date(item.markedAt).toLocaleString())}<br>最早：${escapeHtml(new Date(item.eligibleAt).toLocaleString())}<br>计划：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}</div>` : ""}
+  </div>`;
+}
+
+function bindCollectionRecycleButtons() {
+  view.querySelectorAll("[data-collection-recycle]").forEach((button) => button.addEventListener("click", async () => {
+    const collectionId = button.dataset.collectionRecycle;
+    const collection = state.sqliteCollections.get(collectionId);
+    const active = collection?.recycleStatus?.item;
+    if (!active && !confirm("该图集将在至少1小时后，于整点移入回收站。在执行前可以再次点击取消。")) return;
+    button.disabled = true;
+    try {
+      await postJson(active ? "/api/collection-recycle/cancel" : "/api/collection-recycle/mark", { collectionId });
+      collection.recycleStatus = await fetchJson(`/api/collection-recycle/status?collectionId=${encodeURIComponent(collectionId)}`);
+      render();
+    } catch (error) {
+      button.disabled = false;
+      alert(active ? "取消回收标记失败。" : "标记回收失败，图集可能已不再符合条件。");
+    }
+  }));
+}
+
 function syncFavoriteButtonStates() {
   view.querySelectorAll("[data-favorite-id]").forEach((button) => {
     const active = isFavorited(button.dataset.favoriteId);
@@ -2018,7 +2054,6 @@ function renderModelGrid(models) {
             <a class="model-card" href="${encodeHash([model.id])}" ${scrollAnchorAttribute("model", model.id)}>
               <div class="cover">
                 ${coverHtml(model.coverThumb || model.cover, model.name)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <h2 class="model-title">${escapeHtml(model.name)}</h2>
               <div class="meta">
@@ -2041,7 +2076,6 @@ function renderSearchWorkGrid(results) {
             <a class="work-card" href="${encodeHash(pathParts)}" ${scrollAnchorAttribute("work", work.id)}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(work.title)}</h2>
@@ -2065,7 +2099,7 @@ function renderSqliteSearchMediaGrid(items) {
             <a class="work-card" href="${sqliteHashFromId(item.collectionId)}" ${scrollAnchorAttribute("search-media", item.id || media.src || item.title)}>
               <div class="cover">
                 ${coverHtml(mediaResultCover(media), media.title || item.title)}
-                <span class="badge">${escapeHtml(item.type === "video" ? text.videos : text.photos)}</span>
+                <span class="media-badge">${escapeHtml(item.type === "video" ? text.videos : text.photos)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(media.title || item.title || item.file || "")}</h2>
@@ -2904,6 +2938,7 @@ function renderCollection(collection) {
   const hasChildren = children.length > 0;
   const hasMedia = images.length > 0 || videos.length > 0;
   const favorite = favoriteButtonHtml(collectionFavoriteItem(collection));
+  const actions = `${favorite}${collectionRecycleButtonHtml(collection)}`;
 
   if (!hasChildren && hasMedia) {
     recordRecentView({
@@ -2916,7 +2951,7 @@ function renderCollection(collection) {
       collectionId: collection.id,
       title: collection.level === 1 ? `Tag: ${collection.title}` : collection.title,
       meta: collectionMeta(collection),
-      actions: favorite,
+      actions,
       images,
       videos,
       poster: collection.cover,
@@ -2936,12 +2971,13 @@ function renderCollection(collection) {
       <section class="detail-header">
         <div class="title-row">
           <h1 class="view-title">${collection.level === 1 ? `Tag: ${escapeHtml(collection.title)}` : escapeHtml(collection.title)}</h1>
-          ${favorite}
+          ${actions}
         </div>
       </section>
       <div class="empty-state">${escapeHtml(collection.title)}${text.noWorksSuffix}</div>
     `;
     bindFavoriteButtons();
+    bindCollectionRecycleButtons();
     return;
   }
 
@@ -2967,7 +3003,7 @@ function renderCollection(collection) {
     <section class="detail-header">
       <div class="title-row">
         <h1 class="view-title">${collection.level === 1 ? `Tag: ${escapeHtml(collection.title)}` : escapeHtml(collection.title)}</h1>
-        ${favorite}
+        ${actions}
       </div>
       <div class="detail-meta">${escapeHtml(collectionMeta(collection))}</div>
       ${videos.length ? renderMediaFilter({ videos }) : ""}
@@ -2979,6 +3015,7 @@ function renderCollection(collection) {
   `;
   bindDetailMediaControls(mediaFilter);
   bindFavoriteButtons();
+  bindCollectionRecycleButtons();
 }
 
 function renderWorkGrid(model, works, pathParts) {
@@ -2990,7 +3027,6 @@ function renderWorkGrid(model, works, pathParts) {
             <a class="work-card" href="${encodeHash([...pathParts, work.folder])}" ${scrollAnchorAttribute("work", work.id || [...pathParts, work.folder].join("/"))}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(work.title)}</h2>
@@ -3013,7 +3049,6 @@ function renderCollectionGrid(collections) {
             <a class="work-card" href="${encodeHash(collection.pathParts || collection.id.split("/"))}" ${scrollAnchorAttribute("collection", collection.id)}>
               <div class="cover">
                 ${coverHtml(collection.coverThumb || collection.cover, collection.title)}
-                <span class="badge">${escapeHtml(collection.pathParts?.[0] ? titleFromName(collection.pathParts[0]) : collection.title)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(collection.title)}</h2>
@@ -3243,6 +3278,7 @@ function renderMediaDetail({ collectionId = "", title, meta, actions = "", image
 
   bindDetailMediaControls(filter);
   bindFavoriteButtons();
+  bindCollectionRecycleButtons();
 }
 
 function renderDetail(model, work) {
