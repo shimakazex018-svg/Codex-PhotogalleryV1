@@ -162,6 +162,7 @@ node --check duplicates-worker.js
 ## 9. Git workflow
 
 - 一个 commit 只承担一个清晰职责。
+- 多分支正式收敛前必须审计全部分支、标签、Worktree、独有提交和运行进程；删除已合并分支或Worktree前，先建立必要的archive引用，并以`merge-base --is-ancestor`、干净状态和无进程占用为门禁。
 - 提交前检查 diff、语法、文档、敏感信息和运行数据。
 - 保留现有 release tag 作为不可变回滚点。
 - 不提交旧项目、旧 `.git`、生产数据或用户媒体。

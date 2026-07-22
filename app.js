@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v102-20260718-2139";
+const APP_VERSION = "vNext-dev";
 const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
@@ -92,6 +92,7 @@ const state = {
   videoCompatibilityLoading: false,
   videoCompatibilityPollTimer: null,
   videoPlaybackEvents: new Set(),
+  adminCapabilities: null,
   lastAccessLogKey: "",
   columns: Number(localStorage.getItem("galleryColumns") || 4),
   coverFit: localStorage.getItem("galleryCoverFit") || "crop",
@@ -909,13 +910,16 @@ async function loadSqliteHome(showMessage = false) {
     setStatus(text.refreshing);
   }
 
-  const [payload, highlightsPayload] = await Promise.all([
+  const [payload, highlightsPayload, capabilities] = await Promise.all([
     fetchJson(`/api/collections/root?limit=${HOME_COLLECTION_LIMIT}&sort=${encodeURIComponent(state.gallerySort)}`, { signal: state.pageAbortController?.signal }),
     fetchJson("/api/highlights", { signal: state.pageAbortController?.signal }).catch((error) => {
       if (error.name === "AbortError") throw error;
       return { items: [] };
     }),
+    fetchJson("/api/admin/capabilities", { signal: state.pageAbortController?.signal }).catch(() => ({ authorized: false, scope: "denied" })),
   ]);
+  state.adminCapabilities = capabilities;
+  imageLookupButton.hidden = !capabilities.canRunImageLookup;
   const collections = (Array.isArray(payload.items) ? payload.items : []).map(cacheSqliteCollection);
   state.gallery = {
     generatedAt: new Date().toISOString(),
@@ -1252,6 +1256,9 @@ async function loadSqliteCollection(parts) {
   }
 
   (collection.children || []).forEach(cacheSqliteCollection);
+  if (!(collection.children || []).length && expectedMedia > 0) {
+    collection.recycleStatus = await fetchJson(`/api/collection-recycle/status?collectionId=${encodeURIComponent(collection.id)}`, { signal: state.pageAbortController?.signal }).catch(() => null);
+  }
   return collection;
 }
 
@@ -1975,6 +1982,36 @@ function favoriteButtonHtml(item) {
   `;
 }
 
+function collectionRecycleButtonHtml(collection) {
+  const status = collection?.recycleStatus;
+  if (!status || !state.adminCapabilities?.canMarkCollectionRecycle || (!status.eligible && !status.item)) return "";
+  const item = status.item;
+  const recycling = item?.status === "recycling";
+  return `<div class="collection-recycle-action">
+    <button class="collection-recycle-button${item ? " active" : ""}" type="button" data-collection-recycle="${escapeHtml(collection.id)}"
+      ${recycling ? "disabled" : ""} aria-pressed="${item ? "true" : "false"}">${recycling ? "回收中" : "回收"}</button>
+    ${item ? `<div class="collection-recycle-time">标记：${escapeHtml(new Date(item.markedAt).toLocaleString())}<br>最早：${escapeHtml(new Date(item.eligibleAt).toLocaleString())}<br>计划：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}</div>` : ""}
+  </div>`;
+}
+
+function bindCollectionRecycleButtons() {
+  view.querySelectorAll("[data-collection-recycle]").forEach((button) => button.addEventListener("click", async () => {
+    const collectionId = button.dataset.collectionRecycle;
+    const collection = state.sqliteCollections.get(collectionId);
+    const active = collection?.recycleStatus?.item;
+    if (!active && !confirm("该图集将在至少1小时后，于整点移入回收站。在执行前可以再次点击取消。")) return;
+    button.disabled = true;
+    try {
+      await postJson(active ? "/api/collection-recycle/cancel" : "/api/collection-recycle/mark", { collectionId });
+      collection.recycleStatus = await fetchJson(`/api/collection-recycle/status?collectionId=${encodeURIComponent(collectionId)}`);
+      render();
+    } catch (error) {
+      button.disabled = false;
+      alert(active ? "取消回收标记失败。" : "标记回收失败，图集可能已不再符合条件。");
+    }
+  }));
+}
+
 function syncFavoriteButtonStates() {
   view.querySelectorAll("[data-favorite-id]").forEach((button) => {
     const active = isFavorited(button.dataset.favoriteId);
@@ -2241,7 +2278,6 @@ function renderModelGrid(models) {
             <a class="model-card" href="${encodeHash([model.id])}" ${scrollAnchorAttribute("model", model.id)}>
               <div class="cover">
                 ${coverHtml(model.coverThumb || model.cover, model.name)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <h2 class="model-title">${escapeHtml(model.name)}</h2>
               <div class="meta">
@@ -2264,7 +2300,6 @@ function renderSearchWorkGrid(results) {
             <a class="work-card" href="${encodeHash(pathParts)}" ${scrollAnchorAttribute("work", work.id)}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(work.title)}</h2>
@@ -2288,7 +2323,7 @@ function renderSqliteSearchMediaGrid(items) {
             <a class="work-card" href="${sqliteHashFromId(item.collectionId)}" ${scrollAnchorAttribute("search-media", item.id || media.src || item.title)}>
               <div class="cover">
                 ${coverHtml(mediaResultCover(media), media.title || item.title)}
-                <span class="badge">${escapeHtml(item.type === "video" ? text.videos : text.photos)}</span>
+                <span class="media-badge">${escapeHtml(item.type === "video" ? text.videos : text.photos)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(media.title || item.title || item.file || "")}</h2>
@@ -2472,6 +2507,7 @@ function perceptualIndexPageHtml() {
   const coverage = total ? indexed / total * 100 : 0;
   const bytes = Number(item.bytesAdded || 0);
   const active = Boolean(item.active);
+  const canManage = Boolean(state.adminCapabilities?.canRunSimilarityIndex);
   return `<section class="perceptual-index-page">
     <h1>相似图片索引</h1>
     <p>使用标准 64 位 pHash 建立视觉相似索引；SHA-256 完全匹配仍独立保留。任务默认单 worker，发布后不会自动全量运行。</p>
@@ -2485,10 +2521,10 @@ function perceptualIndexPageHtml() {
       ${item.recentError ? `<small class="error-text">${escapeHtml(item.recentError)}</small>` : ""}
     </div>
     <div class="perceptual-index-actions">
-      <button id="perceptualStart" type="button" ${active ? "disabled" : ""}>开始/继续增量建立</button>
-      <button id="perceptualPause" type="button" ${item.status === "running" ? "" : "disabled"}>暂停</button>
-      <button id="perceptualResume" type="button" ${item.status === "paused" ? "" : "disabled"}>继续</button>
-      <button id="perceptualStop" type="button" ${active ? "" : "disabled"}>停止</button>
+      <button id="perceptualStart" type="button" ${!canManage || active ? "disabled" : ""}>开始/继续增量建立</button>
+      <button id="perceptualPause" type="button" ${canManage && item.status === "running" ? "" : "disabled"}>暂停</button>
+      <button id="perceptualResume" type="button" ${canManage && item.status === "paused" ? "" : "disabled"}>继续</button>
+      <button id="perceptualStop" type="button" ${canManage && active ? "" : "disabled"}>停止</button>
     </div>
     <p class="settings-note">默认阈值：高度相似 ≤6，可能相似 7–10。大幅裁剪、镜像、90°旋转、水印或构图变化不保证命中。</p>
   </section>`;
@@ -2823,29 +2859,30 @@ function videoCompatibilityPageHtml() {
   const results = state.videoCompatibilityResults || { items: [], total: 0, page: 1, pageSize: 50, pages: 1 };
   const active = videoCompatibilityActive(status.status);
   const paused = status.status === "paused";
+  const canManage = Boolean(state.adminCapabilities?.canRunVideoCompatibilityCheck);
   const progress = status.total ? Math.min(Math.round((Number(status.processed || 0) / Number(status.total)) * 100), 100) : 0;
   return `
     <section class="media-cleanup-page">
       <div class="media-cleanup-heading">
         <div><h1>视频兼容性检查</h1><p>只读取数据库中的视频记录；FFprobe并发2，疑似视频短片段解码并发1，不修改原视频、不生成永久转码缓存。</p></div>
         <div class="media-cleanup-actions">
-          <button id="videoCompatibilityIncremental" type="button" ${active || paused ? "disabled" : ""}>扫描新增或变化</button>
-          <button id="videoCompatibilityFull" type="button" ${active || paused ? "disabled" : ""}>全量重新分类</button>
-          <button id="videoCompatibilityPause" type="button" ${status.status !== "running" ? "disabled" : ""}>暂停</button>
-          <button id="videoCompatibilityResume" type="button" ${!paused ? "disabled" : ""}>继续</button>
-          <button id="videoCompatibilityStop" type="button" ${!active && !paused ? "disabled" : ""}>停止</button>
+          <button id="videoCompatibilityIncremental" type="button" ${!canManage || active || paused ? "disabled" : ""}>扫描新增或变化</button>
+          <button id="videoCompatibilityFull" type="button" ${!canManage || active || paused ? "disabled" : ""}>全量重新分类</button>
+          <button id="videoCompatibilityPause" type="button" ${canManage && status.status === "running" ? "" : "disabled"}>暂停</button>
+          <button id="videoCompatibilityResume" type="button" ${canManage && paused ? "" : "disabled"}>继续</button>
+          <button id="videoCompatibilityStop" type="button" ${canManage && (active || paused) ? "" : "disabled"}>停止</button>
         </div>
       </div>
       <div class="media-cleanup-summary">
-        ${mediaCleanupStat("数据库视频", status.total || summary.total || 0)}
-        ${mediaCleanupStat("已处理", status.processed || 0)}
-        ${mediaCleanupStat("待处理", Math.max(Number(status.total || 0) - Number(status.processed || 0), 0))}
-        ${mediaCleanupStat("本轮跳过", status.skipped || 0)}
-        ${mediaCleanupStat("可直接播放", counts.direct_safe || 0)}
-        ${mediaCleanupStat("设备依赖", counts.device_dependent || 0)}
-        ${mediaCleanupStat("需要兼容流", counts.fallback_required || 0)}
-        ${mediaCleanupStat("异常", counts.invalid || 0)}
-        ${mediaCleanupStat("抽样进度", `${status.sample_processed || 0}/${status.sample_total || 0}`)}
+        ${cleanupMetric("数据库视频", status.total || summary.total || 0)}
+        ${cleanupMetric("已处理", status.processed || 0)}
+        ${cleanupMetric("待处理", Math.max(Number(status.total || 0) - Number(status.processed || 0), 0))}
+        ${cleanupMetric("本轮跳过", status.skipped || 0)}
+        ${cleanupMetric("可直接播放", counts.direct_safe || 0)}
+        ${cleanupMetric("设备依赖", counts.device_dependent || 0)}
+        ${cleanupMetric("需要兼容流", counts.fallback_required || 0)}
+        ${cleanupMetric("异常", counts.invalid || 0)}
+        ${cleanupMetric("抽样进度", `${status.sample_processed || 0}/${status.sample_total || 0}`)}
       </div>
       <div class="media-cleanup-root"><strong>状态</strong><code>${escapeHtml(status.status || "not_started")} · ${escapeHtml(status.phase || "metadata")} · ${progress}% · 规则 ${escapeHtml(status.rules_version || "")}</code></div>
       <div class="media-cleanup-root"><strong>当前文件</strong><code>${escapeHtml(status.current || "无")}</code></div>
@@ -3326,6 +3363,7 @@ function renderCollection(collection) {
   const hasChildren = children.length > 0;
   const hasMedia = images.length > 0 || videos.length > 0;
   const favorite = favoriteButtonHtml(collectionFavoriteItem(collection));
+  const actions = `${favorite}${collectionRecycleButtonHtml(collection)}`;
 
   if (!hasChildren && hasMedia) {
     recordRecentView({
@@ -3338,7 +3376,7 @@ function renderCollection(collection) {
       collectionId: collection.id,
       title: collection.level === 1 ? `Tag: ${collection.title}` : collection.title,
       meta: collectionMeta(collection),
-      actions: favorite,
+      actions,
       images,
       videos,
       poster: collection.cover,
@@ -3358,12 +3396,13 @@ function renderCollection(collection) {
       <section class="detail-header">
         <div class="title-row">
           <h1 class="view-title">${collection.level === 1 ? `Tag: ${escapeHtml(collection.title)}` : escapeHtml(collection.title)}</h1>
-          ${favorite}
+          ${actions}
         </div>
       </section>
       <div class="empty-state">${escapeHtml(collection.title)}${text.noWorksSuffix}</div>
     `;
     bindFavoriteButtons();
+    bindCollectionRecycleButtons();
     return;
   }
 
@@ -3389,7 +3428,7 @@ function renderCollection(collection) {
     <section class="detail-header">
       <div class="title-row">
         <h1 class="view-title">${collection.level === 1 ? `Tag: ${escapeHtml(collection.title)}` : escapeHtml(collection.title)}</h1>
-        ${favorite}
+        ${actions}
       </div>
       <div class="detail-meta">${escapeHtml(collectionMeta(collection))}</div>
       ${videos.length ? renderMediaFilter({ videos }) : ""}
@@ -3401,6 +3440,7 @@ function renderCollection(collection) {
   `;
   bindDetailMediaControls(mediaFilter);
   bindFavoriteButtons();
+  bindCollectionRecycleButtons();
 }
 
 function renderWorkGrid(model, works, pathParts) {
@@ -3412,7 +3452,6 @@ function renderWorkGrid(model, works, pathParts) {
             <a class="work-card" href="${encodeHash([...pathParts, work.folder])}" ${scrollAnchorAttribute("work", work.id || [...pathParts, work.folder].join("/"))}>
               <div class="cover">
                 ${coverHtml(work.coverThumb || work.cover, work.title)}
-                <span class="badge">${escapeHtml(model.name)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(work.title)}</h2>
@@ -3435,7 +3474,6 @@ function renderCollectionGrid(collections) {
             <a class="work-card" href="${encodeHash(collection.pathParts || collection.id.split("/"))}" ${scrollAnchorAttribute("collection", collection.id)}>
               <div class="cover">
                 ${coverHtml(collection.coverThumb || collection.cover, collection.title)}
-                <span class="badge">${escapeHtml(collection.pathParts?.[0] ? titleFromName(collection.pathParts[0]) : collection.title)}</span>
               </div>
               <div class="work-info">
                 <h2 class="work-title">${escapeHtml(collection.title)}</h2>
@@ -3723,6 +3761,7 @@ function renderMediaDetail({ collectionId = "", title, meta, actions = "", image
 
   bindDetailMediaControls(filter);
   bindFavoriteButtons();
+  bindCollectionRecycleButtons();
 }
 
 function renderDetail(model, work) {
@@ -3786,7 +3825,10 @@ function render() {
   if (settingsHashRoute()) {
     renderEmpty(text.refreshing);
     ensureSettingsPage().catch((error) => {
-      if (error.name !== "AbortError") renderEmpty(text.cannotRead);
+      if (error.name !== "AbortError") {
+        console.error("Settings page failed:", error);
+        renderEmpty(text.cannotRead);
+      }
     });
     return;
   }

@@ -1,5 +1,19 @@
 # DECISIONS.md
 
+## DEC-029：分叉正式功能线采用可追溯合并后快进main
+
+### Decision
+以包含v99至v102功能的`codex/fts5-integration-v96`为集成基线，在独立Worktree用`--no-ff`合入`origin/main`的v96新增功能；逐文件解决冲突并补齐统一管理授权、维护任务互斥和组合回归测试。发布前为两侧HEAD建立annotated archive标签，正式main只通过`--ff-only`接收已验证集成提交，不重写已发布历史。
+
+### Reason
+两条线各自包含不能丢失的正式功能，任何单边覆盖、rebase或强推都会破坏已发布历史或造成回退。独立集成Worktree、archive引用和祖先检查同时提供可审计性、回滚锚点与安全清理依据。
+
+### Impact
+集成提交保留双亲历史；所有管理型API统一受`adminAuthorizer`和维护任务互斥约束。正式媒体、回收目录和数据库不参与隔离测试，部署只执行幂等schema初始化。
+
+### Status
+有效；用于2026-07-22的v103收敛发布及后续同类多分支正式收敛。
+
 ## DEC-025：视频兼容性采用只读分层扫描与报告驱动播放
 
 ### Decision
@@ -55,6 +69,29 @@ v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索
 
 ### Status
 阶段A定型有效；仅完整副本和隔离脚本验证，正式数据库、API、扫描器、前端版本和部署均未修改。
+## DEC-028：末级图集使用持久延迟回收队列
+
+### Decision
+仅服务端复核为非根、无ReparsePoint、无子目录、至少一个文件且全部为标准媒体的图集可标记；`eligibleAt=markedAt+60分钟`，`scheduledAt`为其后的第一个整点。执行时再次复核，同盘目录rename到`TRASH_DIR`相同相对路径，冲突追加短ID且绝不覆盖。
+
+### Status
+有效，v96实施；没有自动标记或移动正式图集。
+
+## DEC-027：每日04:00由Node协调回收后异步扫描
+
+### Decision
+复用`startScanTask()`子进程，每日按本地时间重新计算触发；`maintenance_state`保证已完成日期不重复，繁忙时记录并10分钟后重试。04:00与整点重合时先完成到期回收批次，再启动一次索引扫描。
+
+### Status
+有效，v96实施。
+
+## DEC-026：管理写权限统一为socket CIDR加Origin
+
+### Decision
+localhost始终是`local`；启用远程管理后，只有`request.socket.remoteAddress`命中显式标记的LAN/ZeroTier CIDR且Origin允许时才获得管理写能力。`X-Forwarded-For`仅可用于旧日志显示，绝不参与授权；Explorer保持local-only。
+
+### Status
+有效，v96实施。
 
 ## DEC-021：搜索先做有界分段查询并保留FTS5为独立阶段
 
@@ -79,7 +116,7 @@ v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索
 v86的`File.Delete`无法恢复，且正式`PHOTOS_DIR`与`TRASH_DIR`跨盘，简单rename会失败。扫描后文件变化、复制中断、目标冲突和重复提交都需要可审计、可续跑的状态模型。
 
 ### Impact
-回收前实时检查目标盘容量并逐项复核路径、ReparsePoint、大小、mtime和媒体扩展名。目标冲突使用`.__recycle_<shortID>`，不覆盖；恢复冲突记录`RestoreConflict`。浏览器只读取聚合状态和分页扫描结果，不加载完整manifest。`ALLOW_REMOTE_DELETE=0`保持不变，recycle/restore无论该变量为何值都只允许localhost。
+回收前实时检查目标盘容量并逐项复核路径、ReparsePoint、大小、mtime和媒体扩展名。目标冲突使用`.__recycle_<shortID>`，不覆盖；恢复冲突记录`RestoreConflict`。浏览器只读取聚合状态和分页扫描结果，不加载完整manifest。`ALLOW_REMOTE_DELETE=0`保持不变；v96起recycle/restore由DEC-022统一管理写权限替代localhost特判。
 
 ### Status
 有效，前端`v91`实施；隔离同盘、强制跨盘、故障注入、幂等、API边界和恢复测试通过，正式媒体尚未移动。

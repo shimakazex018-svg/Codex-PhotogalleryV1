@@ -1,5 +1,13 @@
 # TESTING.md
 
+## Full-branch convergence and v103 release gate
+
+多分支正式收敛必须先在唯一隔离Runtime运行，不得引用正式`PHOTOS_DIR`、`TRASH_DIR`或`gallery.db`。门禁包括：全部JS语法、全部PowerShell解析、`git diff --check`、冲突标记扫描、release notes、统一管理授权、04:00调度、图集回收、访问日志、8种排序、SHA/pHash、FTS5能力/迁移/查询/60条上限/性能日志、视频兼容，以及媒体清理recycle/restore安全测试。
+
+浏览器至少验证1440x900、1024x768、768x1024、390x844无页面级横向溢出；检查搜索、排序、设置导航、pHash、视频兼容、版本记录、功能badge、灯箱和`video preload=none`，并确认控制台warning/error为0。结束后精确停止隔离PID，删除唯一TEMP根并确认PID、worker、lock、partial、数据库、媒体和日志均不残留。
+
+正式验收只允许读操作：三个48102入口HTTP 200、版本/资源参数一致、能力和维护状态正确、队列未增加；不得触发正式扫描、索引、回收、restore或兼容处理。
+
 ## Timestamped release identity and web release notes v102+
 
 每次正式发布在同一分钟内同步`APP_VERSION`、`index.html`的`styles.css`/`gallery-sort.js`/`app.js`缓存参数和`release-notes.json`第一项，然后执行：
@@ -111,6 +119,22 @@ node --check gallery-db.js
 node --check duplicates-worker.js
 git diff --check
 ```
+
+## v96 trusted admin and scheduled collection recycle
+
+使用bundled/正式Node执行：
+
+```powershell
+node scripts/test-admin-auth.js
+node scripts/test-daily-index-scheduler.js
+node scripts/test-collection-recycle.js
+```
+
+通过标准：三项均`PASS`，TEMP根均为`false`。权限覆盖local/LAN/ZeroTier/拒绝/XFF/Origin；调度覆盖03:59、04:00、04:30、busy重试资格和同日completed幂等；回收覆盖父目录、TXT、HEIC、标记/取消、重启恢复、到期批次、目标冲突不覆盖和单次索引。
+
+隔离浏览器覆盖1440×900、1024×768、768×1024、390×844：末级显示收藏/回收，按钮至少44px且无横向溢出；父目录不显示回收；`.badge`名称覆盖为0，下方标题保留。正式验收禁止标记或移动真实图集。
+
+2026-07-22正式v96验收：Node从PID 20976切换为28744，监听PID与Host PID 29872匹配。loopback/LAN/ZeroTier均HTTP 200并加载v96，能力scope分别为local/trusted-lan/trusted-zerotier；伪造XFF不改变sourceAddress。三个入口用错误确认得到400、用不存在collectionId得到409而不是403；恶意Origin为403，LAN Explorer为403。04:00后启动补扫描用97.120秒完成，目录签名未变并跳过完整重建；正式队列总数0，正式媒体移动0。
 
 PowerShell worker 还必须通过解析器检查：
 

@@ -1,5 +1,15 @@
 [
   {
+    "version": "vNext-dev",
+    "releasedAt": "2026-07-22",
+    "timePrecision": "date",
+    "items": [
+      "整合搜索、排序与图片查找。",
+      "整合视频检查与相似图片索引。",
+      "统一远程管理与图集回收。"
+    ]
+  },
+  {
     "version": "v102-20260718-2139",
     "releasedAt": "2026-07-18T21:39:00+08:00",
     "timePrecision": "minute",

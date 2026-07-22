@@ -4,11 +4,12 @@
 
 ## Last Completed Task
 
-已发布`v102-20260718-2139`版本标识与网页更新记录：完整版本号包含正式完成时分，设置页和页脚可查看简短版本说明；未修改pHash代码、索引或数据库。
+正在`codex/consolidate-all-features-vNext`中收敛此前分叉的v102功能线和main v96功能线。开发版本为`vNext-dev`；正式48102在发布前继续运行main的`v96`，未修改或移动正式媒体。
 
 ## Current State
 
-- 源码与正式运行站均为`v102-20260718-2139`，Node PID 20976，监听`0.0.0.0:48102`；loopback和`192.168.31.153`均HTTP 200且只有一个48102监听。
+- 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
+- 正式48102仍为`v96`，Node PID 28744、Host PID 29872；loopback、LAN和ZeroTier入口均HTTP 200，正式图集回收队列为0。
 - 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
 - 设置路由`#/__settings/release-notes`只在进入页面时读取静态JSON，默认20条、支持加载更多和失败重试；页脚完整版本号是同一路由的可访问链接。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
@@ -23,6 +24,8 @@
 - `direct_safe`与`device_dependent`使用原始懒加载Range URL；只有报告标记`fallback_required`的媒体ID进入兼容流，`invalid`显示不可用。兼容接口不接受客户端文件路径，同时只保留一条FFmpeg。
 - 候选`/api/search`默认50/最大60总结果，图集流程不变；2字符只搜媒体title精确/前缀，3字符以上ready时使用mapped trigram FTS。auto不可用时安全降级，不自动`SCAN media`；legacy-like只能显式启用。
 - 正式库已包含`media_search_documents`、`media_search_fts`和最小`search_fts_state`，三表状态ready；正式配置为`SEARCH_BACKEND_MODE=auto`，实际模式fts5。
+- 正式配置启用`REMOTE_ADMIN_ENABLED=1`、LAN `192.168.31.0/24`、ZeroTier `192.168.192.0/24`和每日本地时间04:00扫描。
+- v96部署前离线备份为`D:\GalleryRuntime\backups\v96-20260722-093842`，数据库SHA-256为`8318A3BD30A7F6C22EC2F786519F74911D812F7C6A3571843B8F141721BF0011`。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
 - 批准回收job仅为`20260714-232613-22183b82`。旧`/api/media-cleanup/delete`返回410；`/recycle`和`/restore`只允许localhost，不接受客户端路径。
@@ -77,6 +80,10 @@
 - 两字媒体专属词`扫码`为图集0、media LIKE 4、title前缀4、trigram 0；候选`idx_media_title_nocase`范围计划生效。50k汉字bigram小样本为4/4、0误差、约3.23MB，但未纳入正式推荐结构。
 - 隔离`test-fts5-prototype.js`通过正式目标拒绝、mapped构建、中文标题、解码路径、两字前缀、计划和三层一致性；完整报告见`docs/SEARCH_FTS5_PROTOTYPE_V96.md`。
 - 补v95图集索引后的合并全套参考重跑在600秒上限被终止且未覆盖旧结果；`--skip-reference --skip-consistency`隔离性能重跑4秒通过。完整正确性/一致性来自同schema/同源的前一完整跑，最终重建`integrity_check=ok`。
+- v96启动补扫描从`2026-07-22T01:40:44.043Z`到`01:42:21.163Z`完成，`changed=false`、`skippedFullScan=true`，子进程退出且网站持续响应。
+- 三个正式入口能力scope分别为local/trusted-lan/trusted-zerotier；错误确认400、不存在collectionId 409、恶意Origin 403、LAN Explorer 403。伪造`X-Forwarded-For`没有改变socket来源判定。
+- 正式`collection_recycle_queue` API总数为0；没有标记、回收或移动任何真实图集。
+
 - 正式库只读确认7287个collections、474470条media；原计划为`SCAN c`/`SCAN media`和两个ORDER BY临时B-tree，正式v91十二词API为6.0-16.7秒。
 - 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约37-39ms，高频/路径/数字等约12-85ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
 - 隔离浏览器精确图集收到/首批渲染35.1/36.3ms，Maleah 60卡片18.2/25.9ms；60/60懒加载、0原图卡片URL、0video、快速旧词未覆盖新词、单字符不查询、控制台0 warning/error。
@@ -99,6 +106,7 @@
 
 - FTS5额外生产级扩展和浏览器自动化验收已停止，不再是项目待办或部署门槛。
 - trigram不支持两字中间包含；当前推荐只允许两字`title`精确/前缀。URL解码相对路径会有意移除`photos`固定根和编码字节串的偶然LIKE语义，同时新增自然中文路径命中。
+- v96部署前必须备份正式`gallery.db`和`gallery.env`；首次打开会幂等创建维护状态与图集回收队列表，部署验收必须确认队列为空。
 - v91正式部署验收没有创建正式manifest，也没有移动`E:\A_秀人`任何文件。实际回收仍必须由用户在localhost输入`MOVE`或“移入回收站”。
 - 跨盘复制按附件要求校验文件大小和扫描mtime，不计算全文件哈希；未来若需要更强证明可增加可选SHA-256，但会增加约一轮磁盘读取。
 
@@ -109,7 +117,7 @@
 
 ## Recommended Next Task
 
-用户在`http://192.168.31.153:48102/`完成人工Chrome搜索与页面验收；不需要修复或自动控制Chrome Extension。
+完成集成代码、唯一TEMP Runtime和四视口浏览器验收；仅在全部门禁通过后备份并正式发布，且不代替用户标记或移动真实图集。
 
 ## Notes for Next Codex Session
 

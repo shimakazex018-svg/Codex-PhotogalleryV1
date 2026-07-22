@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-22 - Converge v102 and main v96 feature lines for v103
+
+- Audited all local/remote branches, tags, Worktrees, reflogs and unreachable commits; created annotated pre-integration archive tags for both diverged heads before any cleanup.
+- Merged main into the v102 feature baseline in an isolated Worktree without rebase or history rewrite, preserving FTS5 search, eight sort modes, SHA/pHash lookup, video compatibility, release notes, trusted remote administration, daily 04:00 maintenance and delayed collection recycle.
+- Unified all current management endpoints under socket/CIDR/Origin authorization and shared maintenance mutual exclusion; fixed the merged video-compatibility settings renderer to use the current metric component.
+- Passed the isolated syntax, PowerShell, database migration, search, authorization, scheduling, recycle, cleanup, pHash, video and responsive-browser gates without reading or changing formal media.
+
 ## 2026-07-18 - Add timestamped release identity and web release notes v102-20260718-2139
 
 - Added a formal `v<version>-YYYYMMDD-HHmm` identity using the actual `Asia/Shanghai` release-completion minute and applied the same full value to the page version and all static asset cache parameters.
@@ -419,3 +426,10 @@ All notable repository-baseline changes are documented here. Functional behavior
 - Audited mobile bandwidth, shallow directory loading, image/video rendering, pagination, caching, and request cancellation without changing business code.
 - Confirmed that 20 Runtime carousel files occupied 150.15 MiB and that disabled thumbnail generation can make thumbnail URLs return original images.
 - Added `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md`; browser transfer metrics remain pending manual DevTools verification.
+# 2026-07-22 v96
+
+- 统一受信任LAN/ZeroTier管理权限，加入socket CIDR、Origin保护和能力接口，Explorer仍仅本机。
+- 加入每日04:00幂等异步索引扫描、维护任务协调与整点图集回收队列。
+- 图集回收只接受collectionId，服务端双重复核末级纯媒体资格，同盘保留相对路径且冲突不覆盖；操作写入SQLite网页日志。
+- 移除所有卡片封面名称覆盖标签，保留下方标题、媒体徽标、懒加载和原有网格。
+- 正式部署前离线备份`gallery.db`与`gallery.env`；三个正式入口加载v96并获得预期scope。启动补扫描跳过未变化全库，正式回收队列为空且没有移动真实图集。

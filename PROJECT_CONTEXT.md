@@ -6,12 +6,13 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前源码与正式前端版本标记均为`v102-20260718-2139`（`app.js` 中的`APP_VERSION`）；v102起使用正式发布完成时的Asia/Shanghai时分组成完整版本号。
+- 当前发布候选前端版本标记为`vNext-dev`（发布时统一替换为v103时间戳版本）。
 - 当前稳定发布标签：`v1.3-release`。
-- 当前开发分支：`codex/fts5-integration-v96`；v96已从该分支部署到正式Runtime，未合并main或push。
+- 当前集成分支：`codex/consolidate-all-features-vNext`；它从v102功能线创建并以`--no-ff`合入main的统一受信任管理、每日04:00扫描与图集延迟回收。合并后main将成为唯一正式源码真相。
 
 ## Current implementation state
 
+- 2026-07-22确认此前存在v102功能线（FTS5、排序、哈希/pHash、视频兼容和时间戳版本体系）与main v96功能线（统一远程管理权限、04:00维护和延迟回收）的真实分叉；统一集成保留两侧功能，并把新增管理接口全部接入同一授权和互斥维护门禁。
 - 当前业务代码已经完成旧项目功能镜像、工程标准化和轻度死代码清理。
 - GitHub 仓库已经发布 `main` 和既有版本标签。
 - 正式`main`已包含媒体清理worker、API、设置页和v85灯箱调度，并已部署、验证和普通推送；功能Worktree与远程功能分支暂时保留。
@@ -54,6 +55,8 @@
 - 设置页媒体库清理：单 PowerShell 子进程扫描、可停止进度、分页报告，以及 localhost 显式确认回收/恢复；永久删除 API 已移除；
 - 2026-07-15 v91正式只读回归jobId为`20260715-133504-77ec5bd2`：482450文件、7288目录、472490图片、2109视频、7851非媒体（4204588435 bytes）、0错误、`incomplete=false`，耗时246.612秒，移动/恢复/目录清理均为0。正式回收批准job仍固定为`20260714-232613-22183b82`。
 - SQLite访问日志、服务端分页和365天自动保留；
+- `REMOTE_ADMIN_ENABLED`启用后，管理写请求仅接受socket来源命中的标记CIDR并校验Origin；LAN/ZeroTier与localhost共享管理能力，Explorer仍仅本机。
+- Node本地时间每日04:00先处理到期图集回收，再通过扫描子进程幂等刷新SQLite；末级纯媒体目录有至少1小时撤销期并在后续整点同盘移入相对回收路径。
 - 可选手工 HLS 生成与静态访问。
 
 ## Current data and generated paths

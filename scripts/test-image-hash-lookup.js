@@ -144,8 +144,11 @@ async function verifyConcurrentSlot() {
     const hit = await upload(presentImage, "different-name.png", "image/png");
     assert.strictEqual(hit.status, 200);
     assert.strictEqual(hit.payload.matches.length, 2);
-    assert.strictEqual(hit.payload.algorithm, "sha256");
+    assert.strictEqual(hit.payload.algorithm, "sha256+phash64-v1");
     assert.strictEqual(hit.payload.exactByteMatch, true);
+    assert.ok(Array.isArray(hit.payload.exactMatches));
+    assert.ok(Array.isArray(hit.payload.similarMatches));
+    assert.ok(hit.payload.perceptualIndex && typeof hit.payload.perceptualIndex === "object");
     assert.strictEqual(hit.payload.uploadedFile.detectedFormat, "png");
     assert.strictEqual(crypto.createHash("sha256").update(presentImage).digest("hex"), presentHash, "local SHA-256 must equal the indexed upload hash");
     assert.ok(hit.payload.matches.every((item) => !/[A-Z]:\\/i.test(JSON.stringify(item))), "absolute paths must not leak");

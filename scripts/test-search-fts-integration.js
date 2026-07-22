@@ -2,17 +2,16 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { DatabaseSync } = require("node:sqlite");
 const galleryDb = require("../gallery-db");
 const searchFts = require("../search-fts");
 
-const root = path.resolve(__dirname, "..", "tmp", "fts5-integration-test");
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "Codex-PhotogalleryV1-FTS5Integration-"));
 const dbFile = path.join(root, "gallery.db");
 const mediaRoot = path.join(root, "media");
-fs.rmSync(root, { recursive: true, force: true });
-fs.mkdirSync(root, { recursive: true });
 fs.mkdirSync(mediaRoot, { recursive: true });
 
 function gallery(title = "晨晨写真001", src = "/photos/模特/%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84/sample-001.jpg") {
@@ -147,3 +146,5 @@ console.log(JSON.stringify({
   },
   finalStatus: status,
 }, null, 2));
+fs.rmSync(root, { recursive: true, force: true });
+console.log(`TEMP_ROOT_EXISTS=${fs.existsSync(root)}`);
