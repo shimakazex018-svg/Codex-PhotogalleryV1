@@ -164,7 +164,7 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId: cleanupJobId, confirmation: "DELETE" }),
     });
-    assert.equal(recoveredDelete.status, 409);
+    assert.equal(recoveredDelete.status, 410);
 
     const page1 = await fetch(`${baseUrl}/api/access-log?page=1&pageSize=50`).then((response) => response.json());
     const page2 = await fetch(`${baseUrl}/api/access-log?page=2&pageSize=50`).then((response) => response.json());

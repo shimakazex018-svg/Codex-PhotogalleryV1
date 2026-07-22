@@ -131,7 +131,11 @@ try {
         $stdout=Join-Path $apiRoot 'server.out.log'; $stderr=Join-Path $apiRoot 'server.err.log'
         $serverProcess=$null
         try {
-            $serverProcess=Start-Process -FilePath $NodePath -ArgumentList 'server.js' -WorkingDirectory $project -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $startInfo=[System.Diagnostics.ProcessStartInfo]::new($NodePath,'server.js')
+            $startInfo.WorkingDirectory=$project
+            $startInfo.UseShellExecute=$true
+            $startInfo.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden
+            $serverProcess=[System.Diagnostics.Process]::Start($startInfo)
             $base="http://127.0.0.1:$port"
             $ready=$false
             for($attempt=0;$attempt -lt 50;$attempt++){ try { $null=Invoke-RestMethod "$base/api/media-cleanup/status" -TimeoutSec 2; $ready=$true; break } catch { Start-Sleep -Milliseconds 100 } }
