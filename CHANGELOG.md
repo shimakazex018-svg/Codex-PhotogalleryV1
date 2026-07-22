@@ -7,6 +7,7 @@
 - Added persistent `retry-waiting` handling for `EPERM`/`EBUSY`: five-minute spacing, at most twelve retries, restart-safe counters/timestamps and append-only structured failure logs.
 - Kept failed and ineligible recycle states visible with their reason, retry count, next retry time, active Node-owned files and manual retry controls.
 - Expanded the isolated collection recycle test for normal response cleanup, interrupted image streams, video Range locks, automatic retry, terminal failure, forced release, Chinese paths and schema migration.
+- Published the fix as `v104-20260722-2129` after a verified SQLite backup and precise 48102 restart; loopback, LAN and ZeroTier returned HTTP 200, the legacy failed task remained untouched, and no formal media was moved or deleted.
 
 ## 2026-07-22 - Make delayed collection recycle marking silent
 
