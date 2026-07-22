@@ -5,6 +5,9 @@ const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const readline = require("readline");
 const galleryDb = require("./gallery-db");
+const { createAdminAuthorizer } = require("./admin-auth");
+const { imageExtensions, videoExtensions, isMediaExtension } = require("./media-types");
+const { dailyDue, nextDailyTime } = require("./maintenance-schedule");
 
 const rootDir = __dirname;
 
@@ -30,7 +33,14 @@ const port = Number(process.env.PORT || 48101);
 const host = process.env.HOST || "0.0.0.0";
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
 const ffprobePath = process.env.FFPROBE_PATH || (path.basename(ffmpegPath).toLowerCase().startsWith("ffmpeg") ? path.join(path.dirname(ffmpegPath), process.platform === "win32" ? "ffprobe.exe" : "ffprobe") : "ffprobe");
-const allowRemoteDelete = process.env.ALLOW_REMOTE_DELETE === "1" || process.env.ALLOW_REMOTE_DELETE === "true";
+const remoteAdminEnabled = /^(1|true)$/i.test(process.env.REMOTE_ADMIN_ENABLED || "");
+const remoteAdminCidrs = process.env.REMOTE_ADMIN_CIDRS || "";
+const remoteAdminOrigins = process.env.REMOTE_ADMIN_ORIGINS || `http://127.0.0.1:${port},http://localhost:${port}`;
+const adminAuthorizer = createAdminAuthorizer({ enabled: remoteAdminEnabled, cidrs: remoteAdminCidrs, origins: remoteAdminOrigins });
+const dailyIndexScanEnabled = /^(1|true)$/i.test(process.env.DAILY_INDEX_SCAN_ENABLED || "");
+const dailyIndexScanHour = Math.min(Math.max(Number(process.env.DAILY_INDEX_SCAN_HOUR) || 4, 0), 23);
+const dailyIndexScanMinute = Math.min(Math.max(Number(process.env.DAILY_INDEX_SCAN_MINUTE) || 0, 0), 59);
+const collectionRecycleTestIntervalMs = process.env.NODE_ENV === "test" ? Math.max(Number(process.env.COLLECTION_RECYCLE_TEST_INTERVAL_MS) || 0, 0) : 0;
 const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
 const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
 const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
@@ -47,8 +57,6 @@ let videoMetadataProbeStartedAt = 0;
 const videoMetadataProbeBudgetMs = 10000;
 const videoMetadataProbeTimeoutMs = 5000;
 
-const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
-const videoExtensions = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
 const staticAssetExtensions = new Set([".css", ".js"]);
 const oneWeekSeconds = 7 * 24 * 60 * 60;
 const highlightSelectionVersion = 3;
@@ -66,6 +74,11 @@ let scanTask = {
   errorMessage: "",
   result: null,
 };
+let scanTaskChild = null;
+let scanCompletionCallbacks = [];
+let collectionRecycleRunning = false;
+let hourlyCollectionRecycleTimer = null;
+let dailyIndexScanTimer = null;
 let duplicateTask = {
   id: "",
   status: "idle",
@@ -79,6 +92,7 @@ let duplicateTask = {
   stats: null,
 };
 let duplicateTaskChild = null;
+let duplicateRecycleRunning = false;
 let mediaCleanupTask = {
   id: "",
   status: "idle",
@@ -164,6 +178,11 @@ function appendAccessLog(request, entry) {
     pathParts: Array.isArray(entry.pathParts) ? entry.pathParts.map((part) => String(part || "")) : [],
   };
   return galleryDb.insertAccessLog(galleryDbFile, payload);
+}
+
+function appendOperationLog(entry) {
+  return galleryDb.insertAccessLog(galleryDbFile, { time: new Date().toISOString(), ip: entry.ip || "", host: "", userAgent: "", type: entry.type,
+    title: entry.title || "", model: entry.model || "", work: entry.work || "", hash: entry.hash || "", pathParts: entry.pathParts || [] });
 }
 
 async function importLegacyAccessLogs() {
@@ -1316,8 +1335,33 @@ function scanTaskSnapshot() {
   };
 }
 
-function startScanTask() {
-  if (scanTask.status === "running") return scanTaskSnapshot();
+function maintenanceBusy(exclude = "") {
+  return (!exclude.includes("scan") && scanTask.status === "running")
+    || (!exclude.includes("duplicates") && duplicateTask.status === "running")
+    || (!exclude.includes("duplicate-recycle") && duplicateRecycleRunning)
+    || (!exclude.includes("media-cleanup") && Boolean(mediaCleanupChild))
+    || (!exclude.includes("collection-recycle") && collectionRecycleRunning);
+}
+
+function finishScanCallbacks() {
+  const callbacks = scanCompletionCallbacks;
+  scanCompletionCallbacks = [];
+  for (const callback of callbacks) {
+    try { callback(scanTaskSnapshot()); } catch (error) { logEvent("scan-completion-callback-failed", { error: error.message }); }
+  }
+}
+
+function startScanTask(options = {}) {
+  if (scanTask.status === "running") {
+    if (typeof options.onComplete === "function") scanCompletionCallbacks.push(options.onComplete);
+    return scanTaskSnapshot();
+  }
+  if (maintenanceBusy("scan")) {
+    const error = new Error("Another maintenance task is moving or processing media.");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (typeof options.onComplete === "function") scanCompletionCallbacks.push(options.onComplete);
 
   const id = `${Date.now()}`;
   scanTask = {
@@ -1339,6 +1383,7 @@ function startScanTask() {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  scanTaskChild = child;
 
   let stdout = "";
   let stderr = "";
@@ -1378,9 +1423,12 @@ function startScanTask() {
     scanTask.errorCount = 1;
     scanTask.errorMessage = error.message;
     scanTask.currentDirectory = "Scan failed";
+    if (scanTaskChild === child) scanTaskChild = null;
+    finishScanCallbacks();
   });
 
   child.on("close", (code) => {
+    if (scanTaskChild === child) scanTaskChild = null;
     if (scanTask.id !== id || scanTask.status !== "running") return;
     scanTask.finishedAt = new Date().toISOString();
     if (code === 0) {
@@ -1392,6 +1440,7 @@ function startScanTask() {
       scanTask.errorMessage = stderr.trim() || `Scan process exited with code ${code}`;
       scanTask.currentDirectory = "Scan failed";
     }
+    finishScanCallbacks();
   });
 
   return scanTaskSnapshot();
@@ -1422,6 +1471,11 @@ function duplicateTaskSnapshot() {
 
 function startDuplicateTask(requestInfo = {}) {
   if (duplicateTask.status === "running") return duplicateTaskSnapshot();
+  if (maintenanceBusy("duplicates")) {
+    const error = new Error("Another maintenance task is running.");
+    error.statusCode = 409;
+    throw error;
+  }
 
   const id = `${Date.now()}`;
   const statsBefore = safeDuplicateStats();
@@ -1592,13 +1646,9 @@ function recycleDuplicateItems(request, response, mode) {
     sendJsonError(response, 405, "Method not allowed");
     return;
   }
-  const remoteAllowed = allowRemoteDelete || isLocalRequest(request);
-  if (!remoteAllowed) {
-    sendJsonError(response, 403, "Deleting files is only available from this server PC.");
-    return;
-  }
-
   readRequestBody(request, (body) => {
+    if (maintenanceBusy("duplicate-recycle")) { sendJsonError(response, 409, "Another maintenance task is running."); return; }
+    duplicateRecycleRunning = true;
     try {
       const payload = JSON.parse(body || "{}");
       const limit = Math.min(Math.max(Number(payload.limit || duplicateRecycleLimit), 1), duplicateRecycleLimit);
@@ -1631,7 +1681,7 @@ function recycleDuplicateItems(request, response, mode) {
         recycled: deletedIds.length,
         failed: failed.length,
         skipped: skipped.length,
-        allowRemoteDelete,
+        requestedScope: adminAuthorizer.capability(request).scope,
       });
       sendJson(response, {
         ok: true,
@@ -1646,7 +1696,7 @@ function recycleDuplicateItems(request, response, mode) {
       });
     } catch (error) {
       sendJsonError(response, 500, error.message);
-    }
+    } finally { duplicateRecycleRunning = false; }
   });
 }
 
@@ -1694,6 +1744,15 @@ function sendUserMarks(request, response, markType, limit) {
 function isLocalRequest(request) {
   const remoteAddress = request.socket.remoteAddress || "";
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress);
+}
+
+function requireAdminWrite(request, response, action) {
+  try {
+    return adminAuthorizer.authorize(request, action);
+  } catch (error) {
+    sendJsonError(response, error.statusCode || 403, error.message);
+    return null;
+  }
 }
 
 function readRequestBody(request, callback) {
@@ -1799,7 +1858,8 @@ function mediaCleanupSnapshot() {
     canRecycle: eligibleComplete && availableBytes >= requiredBytes && !mediaCleanupChild,
     canRestore: manifestExists && Number(eligibleRecycleSummary?.restorableFileCount || 0) > 0 && !mediaCleanupChild,
     recoveredFromDisk: Boolean(mediaCleanupTask.restored),
-    localDeleteOnly: true,
+    localDeleteOnly: false,
+    adminAuthorizationRequired: true,
     trashPath: trashDir,
     sameVolume: path.parse(photosDir).root.toLowerCase() === path.parse(trashDir).root.toLowerCase(),
     allowedRecycleJobId: mediaCleanupAllowedRecycleJobId,
@@ -1868,6 +1928,11 @@ function startMediaCleanupScan() {
     error.statusCode = 409;
     throw error;
   }
+  if (maintenanceBusy("media-cleanup")) {
+    const error = new Error("Another maintenance task is running.");
+    error.statusCode = 409;
+    throw error;
+  }
   if (!fs.existsSync(mediaCleanupWorkerPath)) throw new Error("Media cleanup worker is missing.");
   const id = cleanupJobId();
   mediaCleanupTask = { id, status: "scanning", startedAt: new Date().toISOString(), finishedAt: "", errorMessage: "", summary: null, restored: false };
@@ -1888,11 +1953,6 @@ function stopMediaCleanupScan() {
 }
 
 function startMediaCleanupOperation(request, payload, mode) {
-  if (!isLocalRequest(request)) {
-    const error = new Error(`${mode === "Restore" ? "Restoring" : "Recycling"} files is only available from this server PC.`);
-    error.statusCode = 403;
-    throw error;
-  }
   const id = String(payload.jobId || "");
   const confirmation = String(payload.confirmation || "").trim();
   const confirmations = mode === "Restore" ? ["RESTORE", "恢复"] : ["MOVE", "移入回收站"];
@@ -1903,6 +1963,11 @@ function startMediaCleanupOperation(request, payload, mode) {
   }
   if (mediaCleanupChild) {
     const error = new Error("A media cleanup task is already running.");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (maintenanceBusy("media-cleanup")) {
+    const error = new Error("Another maintenance task is running.");
     error.statusCode = 409;
     throw error;
   }
@@ -1985,6 +2050,160 @@ async function queryMediaCleanupResults(requestUrl) {
   selected.sort(compare);
   const items = selected.slice(offset, offset + pageSize).map(({ fullPath, ...record }) => record);
   return { jobId: id, page, pageSize, total, items, safetyOffsetLimit: mediaCleanupOffsetMax };
+}
+
+function localDateKey(value = new Date()) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function hasReparsePointBetween(root, target) {
+  let current = path.resolve(root);
+  if (fs.lstatSync(current).isSymbolicLink()) return true;
+  const relative = path.relative(current, path.resolve(target));
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return relative !== "";
+  for (const part of relative.split(path.sep)) {
+    current = path.join(current, part);
+    const stats = fs.lstatSync(current);
+    if (stats.isSymbolicLink()) return true;
+  }
+  return false;
+}
+
+function collectionRecycleEligibility(collectionId) {
+  const collection = galleryDb.getCollection(galleryDbFile, String(collectionId || ""));
+  if (!collection) return { eligible: false, reason: "collection-not-found" };
+  const parts = Array.isArray(collection.pathParts) ? collection.pathParts : [];
+  if (!parts.length || parts.some((part) => !part || part === "." || part === ".." || /[\\/]/.test(part))) return { eligible: false, reason: "invalid-collection-path" };
+  const sourcePath = path.resolve(photosDir, ...parts);
+  if (!isInsideDir(photosDir, sourcePath) || sourcePath === path.resolve(photosDir)) return { eligible: false, reason: "outside-media-root" };
+  if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isDirectory()) return { eligible: false, reason: "directory-missing" };
+  if (hasReparsePointBetween(photosDir, sourcePath)) return { eligible: false, reason: "reparse-point" };
+  const entries = fs.readdirSync(sourcePath, { withFileTypes: true });
+  if (entries.some((entry) => entry.isDirectory() || entry.isSymbolicLink())) return { eligible: false, reason: "contains-subdirectory" };
+  const files = entries.filter((entry) => entry.isFile());
+  if (!files.length) return { eligible: false, reason: "empty-directory" };
+  if (files.some((entry) => !isMediaExtension(path.extname(entry.name)))) return { eligible: false, reason: "contains-non-media" };
+  const queue = galleryDb.getActiveCollectionRecycle(galleryDbFile, collection.id);
+  const latest = queue || galleryDb.getLatestCollectionRecycle(galleryDbFile, collection.id);
+  const blocked = queue || (latest && ["failed", "skipped-ineligible"].includes(latest.status));
+  return { eligible: !blocked, reason: queue ? "already-queued" : blocked ? "failed-awaiting-review" : "", collectionId: collection.id, title: collection.title,
+    relativePath: parts.join(path.sep), pathParts: parts, sourcePath, queue };
+}
+
+function recycleSchedule(markedAt) {
+  const eligible = new Date(markedAt.getTime() + 60 * 60 * 1000);
+  const scheduled = new Date(eligible);
+  if (scheduled.getMinutes() || scheduled.getSeconds() || scheduled.getMilliseconds()) scheduled.setHours(scheduled.getHours() + 1, 0, 0, 0);
+  else scheduled.setMinutes(0, 0, 0);
+  return { eligibleAt: eligible.toISOString(), scheduledAt: scheduled.toISOString() };
+}
+
+function markCollectionRecycle(request, collectionId, auth) {
+  const eligibility = collectionRecycleEligibility(collectionId);
+  if (!eligibility.eligible) { const error = new Error(`Collection is not eligible: ${eligibility.reason}`); error.statusCode = 409; throw error; }
+  const marked = new Date();
+  const schedule = recycleSchedule(marked);
+  const item = galleryDb.createCollectionRecycle(galleryDbFile, { id: crypto.randomUUID(), collectionId: eligibility.collectionId,
+    relativePath: eligibility.relativePath, title: eligibility.title, markedAt: marked.toISOString(), ...schedule,
+    sourcePathSnapshot: eligibility.sourcePath, requestedIp: auth.sourceAddress, requestedScope: auth.scope });
+  appendOperationLog({ ip: auth.sourceAddress, type: "collection-recycle-mark", title: "图集回收标记", work: eligibility.title, pathParts: eligibility.pathParts });
+  return { ok: true, item };
+}
+
+function cancelCollectionRecycle(request, collectionId, auth) {
+  const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
+  if (!active || active.status !== "pending") { const error = new Error("Pending recycle mark was not found."); error.statusCode = 409; throw error; }
+  const result = galleryDb.cancelCollectionRecycle(galleryDbFile, collectionId);
+  appendOperationLog({ ip: auth.sourceAddress, type: "collection-recycle-cancel", title: "取消图集回收", work: active.title, pathParts: active.relativePath.split(path.sep) });
+  return { ok: true, ...result };
+}
+
+function collectionRecycleTarget(relativePath, id) {
+  const base = path.resolve(trashDir, relativePath);
+  if (!isInsideDir(trashDir, base)) throw new Error("Recycle target is outside TRASH_DIR.");
+  if (!fs.existsSync(base)) return { path: base, conflict: false };
+  const suffix = String(id).replace(/-/g, "").slice(0, 8);
+  let candidate = `${base}.__recycle_${suffix}`;
+  let attempt = 1;
+  while (fs.existsSync(candidate)) { attempt += 1; candidate = `${base}.__recycle_${suffix}-${attempt}`; }
+  return { path: candidate, conflict: true };
+}
+
+function processCollectionRecycleBatch(now = new Date()) {
+  if (collectionRecycleRunning || maintenanceBusy("collection-recycle")) return { status: "skipped-busy", processed: 0, moved: 0 };
+  collectionRecycleRunning = true;
+  let moved = 0; const movedIds = [];
+  const due = galleryDb.getDueCollectionRecycles(galleryDbFile, now.toISOString(), 100);
+  try {
+    for (const item of due) {
+      galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status: "recycling", startedAt: new Date().toISOString() });
+      appendOperationLog({ type: "collection-recycle-start", title: "开始图集回收", work: item.title, pathParts: item.relativePath.split(path.sep) });
+      try {
+        const check = collectionRecycleEligibility(item.collectionId);
+        if (!check.eligible && check.reason !== "already-queued") throw Object.assign(new Error(check.reason), { ineligible: true });
+        const sourcePath = check.sourcePath;
+        const target = collectionRecycleTarget(item.relativePath, item.id);
+        if (path.parse(sourcePath).root.toLowerCase() !== path.parse(target.path).root.toLowerCase()) throw new Error("Collection recycle requires PHOTOS_DIR and TRASH_DIR on the same volume.");
+        if (isInsideDir(sourcePath, target.path) || isInsideDir(target.path, sourcePath)) throw new Error("Source and recycle target must not be nested.");
+        fs.mkdirSync(path.dirname(target.path), { recursive: true });
+        fs.renameSync(sourcePath, target.path);
+        moved += 1;
+        movedIds.push(item.id);
+        galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status: target.conflict ? "conflict-renamed" : "recycled", finishedAt: new Date().toISOString(), recyclePath: path.relative(trashDir, target.path) });
+        appendOperationLog({ type: "collection-recycle-success", title: "图集回收成功", work: item.title, pathParts: item.relativePath.split(path.sep) });
+      } catch (error) {
+        const status = error.ineligible ? "skipped-ineligible" : "failed";
+        galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status, finishedAt: new Date().toISOString(), error: error.message });
+        appendOperationLog({ type: `collection-recycle-${status}`, title: status === "failed" ? "图集回收失败" : "图集资格变化，已跳过", work: item.title, pathParts: item.relativePath.split(path.sep) });
+      }
+    }
+  } finally { collectionRecycleRunning = false; }
+  return { status: "completed", processed: due.length, moved, movedIds };
+}
+
+function startIndexAfterRecycle(reason, scheduledDate = "") {
+  const batch = processCollectionRecycleBatch();
+  if (maintenanceBusy("scan")) return { status: "skipped-busy", batch };
+  const startedAt = new Date().toISOString();
+  if (scheduledDate) galleryDb.upsertMaintenanceState(galleryDbFile, { taskKey: "daily-index-scan", scheduledDate, startedAt, status: "running", result: batch });
+  startScanTask({ onComplete: (result) => {
+    if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status });
+    if (scheduledDate) galleryDb.upsertMaintenanceState(galleryDbFile, { taskKey: "daily-index-scan", scheduledDate, startedAt, finishedAt: new Date().toISOString(), status: result.status, result, error: result.errorMessage });
+    logEvent("scheduled-index-scan-finished", { reason, status: result.status, scheduledDate });
+  }});
+  return { status: "running", batch };
+}
+
+function scheduleHourlyCollectionRecycle() {
+  clearTimeout(hourlyCollectionRecycleTimer);
+  const now = new Date(); const next = new Date(now); next.setHours(now.getHours() + 1, 0, 0, 0);
+  const delay = collectionRecycleTestIntervalMs || Math.max(next.getTime() - now.getTime(), 1000);
+  hourlyCollectionRecycleTimer = setTimeout(() => { const batch = processCollectionRecycleBatch(); const current = new Date(); const dailyWindow = dailyIndexScanEnabled && current.getHours() === dailyIndexScanHour && current.getMinutes() === dailyIndexScanMinute;
+    if (batch.moved && !dailyWindow && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } }); scheduleHourlyCollectionRecycle(); }, delay);
+}
+
+function runDailyIndexScanIfDue() {
+  if (!dailyIndexScanEnabled) return;
+  const now = new Date(); const date = localDateKey(now);
+  const state = galleryDb.getMaintenanceState(galleryDbFile, "daily-index-scan", date);
+  if (!dailyDue(now, dailyIndexScanHour, dailyIndexScanMinute, state)) return;
+  try {
+    const result = startIndexAfterRecycle("daily-index-scan", date);
+    if (result.status === "skipped-busy") {
+      galleryDb.upsertMaintenanceState(galleryDbFile, { taskKey: "daily-index-scan", scheduledDate: date, status: "skipped-busy", result });
+      dailyIndexScanTimer = setTimeout(runDailyIndexScanIfDue, 10 * 60 * 1000);
+    }
+  } catch (error) {
+    galleryDb.upsertMaintenanceState(galleryDbFile, { taskKey: "daily-index-scan", scheduledDate: date, finishedAt: new Date().toISOString(), status: "failed", error: error.message });
+  }
+}
+
+function scheduleDailyIndexScan() {
+  clearTimeout(dailyIndexScanTimer);
+  if (!dailyIndexScanEnabled) return;
+  runDailyIndexScanIfDue();
+  const now = new Date(); const next = nextDailyTime(now, dailyIndexScanHour, dailyIndexScanMinute);
+  dailyIndexScanTimer = setTimeout(() => { runDailyIndexScanIfDue(); scheduleDailyIndexScan(); }, Math.max(next.getTime() - now.getTime(), 1000));
 }
 
 function photoUrlToPath(src) {
@@ -2195,6 +2414,15 @@ function handleRequest(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === "/api/admin/capabilities") {
+    const capability = adminAuthorizer.capability(request);
+    sendJson(response, { authorized: capability.authorized, scope: capability.scope, sourceAddress: capability.sourceAddress,
+      canScan: capability.authorized, canRecycle: capability.authorized, canRestore: capability.authorized,
+      canRunDuplicateScan: capability.authorized, canRunSimilarityIndex: false, canRunVideoCompatibilityCheck: false,
+      canMarkCollectionRecycle: capability.authorized, canOpenServerExplorer: capability.scope === "local" });
+    return;
+  }
+
   if (requestUrl.pathname === "/api/image-preview") {
     sendImagePreview(requestUrl, response);
     return;
@@ -2249,6 +2477,7 @@ function handleRequest(request, response) {
   }
 
   if (requestUrl.pathname === "/api/duplicate-delete-marks") {
+    if (request.method !== "GET" && !requireAdminWrite(request, response, "duplicate-mark")) return;
     sendUserMarks(request, response, "duplicate-delete", 500);
     return;
   }
@@ -2267,6 +2496,7 @@ function handleRequest(request, response) {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
+    if (!requireAdminWrite(request, response, requestUrl.pathname.endsWith("/start") ? "media-cleanup-scan" : "media-cleanup-stop")) return;
     try {
       sendJson(response, requestUrl.pathname.endsWith("/start") ? startMediaCleanupScan() : stopMediaCleanupScan());
     } catch (error) {
@@ -2296,6 +2526,7 @@ function handleRequest(request, response) {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
+    if (!requireAdminWrite(request, response, requestUrl.pathname.endsWith("/restore") ? "media-cleanup-restore" : "media-cleanup-recycle")) return;
     readRequestBody(request, (body) => {
       try {
         const mode = requestUrl.pathname.endsWith("/restore") ? "Restore" : "Recycle";
@@ -2312,7 +2543,8 @@ function handleRequest(request, response) {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
-    sendJson(response, startScanTask());
+    if (!requireAdminWrite(request, response, "gallery-scan")) return;
+    try { sendJson(response, startScanTask()); } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
 
@@ -2326,12 +2558,15 @@ function handleRequest(request, response) {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
-    sendJson(response, startDuplicateTask({
+    const auth = requireAdminWrite(request, response, "duplicate-scan");
+    if (!auth) return;
+    try { sendJson(response, startDuplicateTask({
       remoteAddress: request.socket.remoteAddress || "",
       host: request.headers.host || "",
       referer: request.headers.referer || "",
       userAgent: request.headers["user-agent"] || "",
-    }));
+      requestedScope: auth.scope,
+    })); } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
 
@@ -2345,6 +2580,7 @@ function handleRequest(request, response) {
       sendJsonError(response, 405, "Method not allowed");
       return;
     }
+    if (!requireAdminWrite(request, response, "duplicate-stop")) return;
     sendJson(response, stopDuplicateTask());
     return;
   }
@@ -2360,17 +2596,47 @@ function handleRequest(request, response) {
   }
 
   if (requestUrl.pathname === "/api/duplicates/recycle") {
+    if (!requireAdminWrite(request, response, "duplicate-recycle")) return;
     recycleDuplicateItems(request, response, "selected");
     return;
   }
 
   if (requestUrl.pathname === "/api/duplicates/recycle-auto") {
+    if (!requireAdminWrite(request, response, "duplicate-recycle-auto")) return;
     recycleDuplicateItems(request, response, "auto");
     return;
   }
 
   if (requestUrl.pathname === "/api/refresh-index") {
-    sendDbResponse(response, refreshGalleryIndex);
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    if (!requireAdminWrite(request, response, "gallery-index-refresh")) return;
+    try { sendJson(response, startScanTask()); } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/collection-recycle/status") {
+    const collectionId = requestUrl.searchParams.get("collectionId") || "";
+    try {
+      const check = collectionRecycleEligibility(collectionId);
+      const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
+      sendJson(response, { collectionId, eligible: check.eligible, reason: check.reason, item: active,
+        canMark: adminAuthorizer.capability(request).authorized && check.eligible });
+    } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/collection-recycle/queue") {
+    sendDbResponse(response, () => galleryDb.getCollectionRecyclePage(galleryDbFile, requestUrl.searchParams.get("page"), requestUrl.searchParams.get("pageSize")));
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/collection-recycle/mark" || requestUrl.pathname === "/api/collection-recycle/cancel") {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    const auth = requireAdminWrite(request, response, requestUrl.pathname.endsWith("/mark") ? "collection-recycle-mark" : "collection-recycle-cancel");
+    if (!auth) return;
+    readRequestBody(request, (body) => { try { const payload=JSON.parse(body||"{}"); const collectionId=String(payload.collectionId||"");
+      sendJson(response, requestUrl.pathname.endsWith("/mark") ? markCollectionRecycle(request, collectionId, auth) : cancelCollectionRecycle(request, collectionId, auth));
+    } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); } });
     return;
   }
 
@@ -2549,6 +2815,10 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   restoreLatestMediaCleanupTask();
   scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
+  const startupRecycleBatch = processCollectionRecycleBatch();
+  if (startupRecycleBatch.moved && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of startupRecycleBatch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } });
+  scheduleHourlyCollectionRecycle();
+  scheduleDailyIndexScan();
 
   http.createServer(handleRequest).listen(port, host, () => {
     console.log(`Photo gallery site started: http://localhost:${port}`);

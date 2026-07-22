@@ -115,6 +115,42 @@ function openDatabase(dbFile) {
 
     CREATE INDEX IF NOT EXISTS idx_access_logs_time_id ON access_logs(time DESC, id DESC);
 
+    CREATE TABLE IF NOT EXISTS maintenance_state (
+      task_key TEXT NOT NULL,
+      scheduled_date TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT,
+      status TEXT NOT NULL,
+      result TEXT,
+      error TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(task_key, scheduled_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS collection_recycle_queue (
+      id TEXT PRIMARY KEY,
+      collection_id TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      marked_at TEXT NOT NULL,
+      eligible_at TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT,
+      source_path_snapshot TEXT NOT NULL,
+      recycle_path TEXT,
+      error TEXT,
+      requested_ip TEXT,
+      requested_scope TEXT,
+      index_refresh_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_recycle_active
+      ON collection_recycle_queue(collection_id) WHERE status IN ('pending', 'recycling');
+    CREATE INDEX IF NOT EXISTS idx_collection_recycle_due ON collection_recycle_queue(status, scheduled_at);
+
     CREATE TABLE IF NOT EXISTS media_hashes (
       media_id TEXT PRIMARY KEY,
       collection_id TEXT NOT NULL,
@@ -862,6 +898,78 @@ function deleteAccessLogsBefore(dbFile, cutoffIso) {
   });
 }
 
+function getMaintenanceState(dbFile, taskKey, scheduledDate) {
+  return withDatabase(dbFile, (db) => db.prepare("SELECT * FROM maintenance_state WHERE task_key = ? AND scheduled_date = ?").get(taskKey, scheduledDate) || null);
+}
+
+function upsertMaintenanceState(dbFile, item) {
+  const now = new Date().toISOString();
+  return withDatabase(dbFile, (db) => {
+    db.prepare(`INSERT INTO maintenance_state (task_key, scheduled_date, started_at, finished_at, status, result, error, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(task_key, scheduled_date) DO UPDATE SET started_at=excluded.started_at, finished_at=excluded.finished_at,
+      status=excluded.status, result=excluded.result, error=excluded.error, updated_at=excluded.updated_at`)
+      .run(item.taskKey, item.scheduledDate, item.startedAt || null, item.finishedAt || null, item.status, json(item.result), item.error || null, now);
+    return getMaintenanceStateFromDb(db, item.taskKey, item.scheduledDate);
+  });
+}
+
+function getMaintenanceStateFromDb(db, taskKey, scheduledDate) {
+  return db.prepare("SELECT * FROM maintenance_state WHERE task_key = ? AND scheduled_date = ?").get(taskKey, scheduledDate) || null;
+}
+
+function rowToRecycle(row) {
+  if (!row) return null;
+  return { id: row.id, collectionId: row.collection_id, relativePath: row.relative_path, title: row.title, status: row.status,
+    markedAt: row.marked_at, eligibleAt: row.eligible_at, scheduledAt: row.scheduled_at, startedAt: row.started_at || "",
+    finishedAt: row.finished_at || "", recyclePath: row.recycle_path || "", error: row.error || "",
+    requestedIp: row.requested_ip || "", requestedScope: row.requested_scope || "", indexRefreshError: row.index_refresh_error || "" };
+}
+
+function createCollectionRecycle(dbFile, item) {
+  return withDatabase(dbFile, (db) => {
+    db.prepare(`INSERT INTO collection_recycle_queue (id, collection_id, relative_path, title, status, marked_at, eligible_at, scheduled_at,
+      source_path_snapshot, requested_ip, requested_scope, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`)
+      .run(item.id, item.collectionId, item.relativePath, item.title, item.markedAt, item.eligibleAt, item.scheduledAt, item.sourcePathSnapshot,
+        item.requestedIp || "", item.requestedScope || "", item.markedAt);
+    return rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE id = ?").get(item.id));
+  });
+}
+
+function getActiveCollectionRecycle(dbFile, collectionId) {
+  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? AND status IN ('pending','recycling') ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
+}
+
+function getLatestCollectionRecycle(dbFile, collectionId) {
+  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
+}
+
+function cancelCollectionRecycle(dbFile, collectionId, now = new Date().toISOString()) {
+  return withDatabase(dbFile, (db) => {
+    const result = db.prepare("UPDATE collection_recycle_queue SET status='cancelled', finished_at=?, updated_at=? WHERE collection_id=? AND status='pending'").run(now, now, collectionId);
+    return { cancelled: result.changes || 0 };
+  });
+}
+
+function getDueCollectionRecycles(dbFile, now, limit = 100) {
+  return withDatabase(dbFile, (db) => db.prepare("SELECT * FROM collection_recycle_queue WHERE status='pending' AND scheduled_at <= ? ORDER BY scheduled_at, id LIMIT ?").all(now, Math.min(Math.max(Number(limit)||100,1),200)).map(rowToRecycle));
+}
+
+function updateCollectionRecycle(dbFile, id, changes) {
+  const allowed = { status:"status", startedAt:"started_at", finishedAt:"finished_at", recyclePath:"recycle_path", error:"error", indexRefreshError:"index_refresh_error" };
+  const entries = Object.entries(changes).filter(([key]) => allowed[key]);
+  return withDatabase(dbFile, (db) => {
+    if (entries.length) db.prepare(`UPDATE collection_recycle_queue SET ${entries.map(([key]) => `${allowed[key]}=?`).join(", ")}, updated_at=? WHERE id=?`).run(...entries.map(([,value]) => value || null), new Date().toISOString(), id);
+    return rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE id=?").get(id));
+  });
+}
+
+function getCollectionRecyclePage(dbFile, pageValue=1, pageSizeValue=50) {
+  const page=Math.max(Number(pageValue)||1,1), pageSize=Math.min(Math.max(Number(pageSizeValue)||50,1),100);
+  return withDatabase(dbFile, (db) => { const total=Number(db.prepare("SELECT COUNT(*) count FROM collection_recycle_queue").get().count||0); const totalPages=total?Math.ceil(total/pageSize):0; const safePage=totalPages?Math.min(page,totalPages):1;
+    const items=db.prepare("SELECT * FROM collection_recycle_queue ORDER BY marked_at DESC LIMIT ? OFFSET ?").all(pageSize,(safePage-1)*pageSize).map(rowToRecycle); return {items,page:safePage,pageSize,total,totalPages}; });
+}
+
 function getUserMarks(dbFile, markType, limitValue = 50) {
   const type = String(markType || "").trim();
   const limit = Math.min(Math.max(Number(limitValue) || 50, 1), 200);
@@ -1172,6 +1280,15 @@ module.exports = {
   importAccessLogs,
   getAccessLogsPage,
   deleteAccessLogsBefore,
+  getMaintenanceState,
+  upsertMaintenanceState,
+  createCollectionRecycle,
+  getActiveCollectionRecycle,
+  getLatestCollectionRecycle,
+  cancelCollectionRecycle,
+  getDueCollectionRecycles,
+  updateCollectionRecycle,
+  getCollectionRecyclePage,
   getDuplicateHashStats,
   getImagesNeedingHash,
   upsertMediaHash,
