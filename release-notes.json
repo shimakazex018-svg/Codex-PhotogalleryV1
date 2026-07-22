@@ -1,8 +1,8 @@
 [
   {
-    "version": "vNext-dev",
-    "releasedAt": "2026-07-22",
-    "timePrecision": "date",
+    "version": "v103-20260722-1209",
+    "releasedAt": "2026-07-22T12:09:00+08:00",
+    "timePrecision": "minute",
     "items": [
       "整合搜索、排序与图片查找。",
       "整合视频检查与相似图片索引。",

@@ -4,12 +4,12 @@
 
 ## Last Completed Task
 
-正在`codex/consolidate-all-features-vNext`中收敛此前分叉的v102功能线和main v96功能线。开发版本为`vNext-dev`；正式48102在发布前继续运行main的`v96`，未修改或移动正式媒体。
+已完成此前分叉的v102功能线和main v96功能线收敛，正式版本为`v103-20260722-1209`。集成期间和正式验收均未启动正式媒体写任务，本次正式媒体移动、删除均为0。
 
 ## Current State
 
 - 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
-- 正式48102仍为`v96`，Node PID 28744、Host PID 29872；loopback、LAN和ZeroTier入口均HTTP 200，正式图集回收队列为0。
+- v103候选由旧Node PID 28744精确重启到PID 23852后完成loopback、LAN和ZeroTier只读验收；最终时间戳版本重启后的PID与最终引用状态见本文件收尾记录。
 - 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
 - 设置路由`#/__settings/release-notes`只在进入页面时读取静态JSON，默认20条、支持加载更多和失败重试；页脚完整版本号是同一路由的可访问链接。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。

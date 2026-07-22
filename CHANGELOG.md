@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-22 - Converge v102 and main v96 feature lines for v103
+## 2026-07-22 - Converge v102 and main v96 feature lines for v103-20260722-1209
 
 - Audited all local/remote branches, tags, Worktrees, reflogs and unreachable commits; created annotated pre-integration archive tags for both diverged heads before any cleanup.
 - Merged main into the v102 feature baseline in an isolated Worktree without rebase or history rewrite, preserving FTS5 search, eight sort modes, SHA/pHash lookup, video compatibility, release notes, trusted remote administration, daily 04:00 maintenance and delayed collection recycle.
