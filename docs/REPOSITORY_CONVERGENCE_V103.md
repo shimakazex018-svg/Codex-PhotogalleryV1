@@ -24,3 +24,14 @@ The combined result preserves both feature families and adds only integration fi
 ## Data and runtime boundary
 
 All destructive validation used a disposable short-path Runtime. Formal `E:\A_秀人`, `E:\回收站` and `D:\GalleryRuntime\data\gallery.db` were not used for scans, moves, restores, pHash generation or video processing. Formal deployment performs only idempotent schema initialization and read-only acceptance.
+
+## Final repository and runtime state
+
+- Formal release: `v103-20260722-1209`; release commit `5a3ffef74a7ff9ef83174f85c8e4e83135aaa2ad`.
+- Formal Node changed from PID 28744 to candidate PID 23852 and final PID 29836. All three formal URLs returned HTTP 200 and the recycle queue stayed at zero.
+- Removed Worktrees: `7c4a`, detached `940a`, and integration `a103`.
+- Removed local branches: `codex/fts5-integration-v96`, `codex/fts5-prototype-v96`, `codex/trusted-admin-scheduled-gallery-recycle`, and `codex/consolidate-all-features-vNext`.
+- Removed remote branches: `codex/fts5-integration-v96`, `codex/media-library-cleanup`, and `codex/consolidate-all-features-vNext`.
+- The sole extra Worktree `8dbe` remains because an active Codex browser-control kernel has that directory as its working directory. Its clean HEAD is an ancestor of main; its remote branch is gone. It must be removed with `git worktree remove` only after that external process exits.
+- The disposable Runtime `D:\A8 Codex\v103-temp-runtime` was removed and test port 49481 has no listener.
+- Formal media moved by this task: 0. Formal media deleted by this task: 0.

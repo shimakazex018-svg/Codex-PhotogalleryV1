@@ -6,6 +6,7 @@
 - Merged main into the v102 feature baseline in an isolated Worktree without rebase or history rewrite, preserving FTS5 search, eight sort modes, SHA/pHash lookup, video compatibility, release notes, trusted remote administration, daily 04:00 maintenance and delayed collection recycle.
 - Unified all current management endpoints under socket/CIDR/Origin authorization and shared maintenance mutual exclusion; fixed the merged video-compatibility settings renderer to use the current metric component.
 - Passed the isolated syntax, PowerShell, database migration, search, authorization, scheduling, recycle, cleanup, pHash, video and responsive-browser gates without reading or changing formal media.
+- Published main and the annotated v103 tag, removed all safely deletable temporary refs/Worktrees, and retained one active-process Worktree rather than forcing its deletion.
 
 ## 2026-07-18 - Add timestamped release identity and web release notes v102-20260718-2139
 

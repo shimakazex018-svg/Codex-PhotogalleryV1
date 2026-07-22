@@ -7,6 +7,9 @@
 - [x] 收敛v102功能线与main v96功能线并发布统一正式版本
   - 状态：已完成全分支/Worktree/不可达对象审计，建立两侧pre-integration archive标签，以v102为基线合入main，保留FTS5、8种排序、SHA/pHash、视频兼容、统一远程权限、04:00维护和图集延迟回收；正式发布、推送与临时引用清理按同一验收门禁完成。
 
+- [ ] 活动Codex控制内核退出后移除最后一个旧Worktree
+  - 状态：`8dbe`干净且HEAD已进入main，远程分支已删除；PID 8648当前以该目录为working-dir，按安全规则暂不强停、不强删。进程自然退出后执行`git worktree remove`，再删除本地`codex/media-library-cleanup`。
+
 - [x] 建立带正式发布时间的版本标识和网页更新记录
   - 状态：自v102起使用`v<版本>-YYYYMMDD-HHmm`，设置页按需读取单一`release-notes.json`，页脚可进入；历史v99/v100/v101只补录已确认日期，不伪造时分。
 

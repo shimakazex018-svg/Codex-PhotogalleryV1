@@ -9,7 +9,12 @@
 ## Current State
 
 - 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
-- v103候选由旧Node PID 28744精确重启到PID 23852后完成loopback、LAN和ZeroTier只读验收；最终时间戳版本重启后的PID与最终引用状态见本文件收尾记录。
+- v103候选由旧Node PID 28744精确重启到PID 23852完成只读验收；最终时间戳版本精确重启为Node PID 29836、Host PID 29764。loopback、LAN和ZeroTier均HTTP 200，唯一监听为`0.0.0.0:48102`。
+- 本地main、`origin/main`和远程main的发布SHA曾一致为`5a3ffef74a7ff9ef83174f85c8e4e83135aaa2ad`；随后仅追加本次清理/交接文档提交。正式代码标签`v103-20260722-1209`保持指向发布提交。
+- 已删除Worktree `7c4a`、`940a`和`a103`；已删除四个已合并本地临时分支及三个远程`codex/*`分支。`8dbe`因活动Codex控制内核PID 8648占用而按安全规则暂留，本地分支HEAD已进入main且远程已删除。
+- 保留`archive/pre-integration-main-20260722`和`archive/pre-integration-v102-20260722`。隔离TEMP Runtime已删除，49481无监听；正式图集回收队列为0，本次正式移动/删除文件均为0。
+- 部署前备份位于`D:\GalleryRuntime\backups\v103-predeploy-20260722-115638`；SQLite在线一致性副本为2,030,444,544字节，SHA-256 `A0E910BB8C8724E92174B116864A8FFF1C40993E1DA48BCBD14E72E4F843F959`，`PRAGMA quick_check=ok`。
+- pHash任务未运行，但保留了此前`database is locked`的失败状态（3,201/486,028）；这是既有运行状态，不在本次发布中自动重启或改写。
 - 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
 - 设置路由`#/__settings/release-notes`只在进入页面时读取静态JSON，默认20条、支持加载更多和失败重试；页脚完整版本号是同一路由的可访问链接。
 - 公共排序枚举为`name_asc/name_desc/image_count_asc/image_count_desc/video_count_asc/video_count_desc/updated_asc/updated_desc`；根目录先对完整集合排序再分页，子目录先排序再返回，收藏复用同一比较器，观看历史仍按`visitedAt`倒序。
