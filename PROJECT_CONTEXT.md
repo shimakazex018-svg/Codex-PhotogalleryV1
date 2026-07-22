@@ -13,7 +13,9 @@
 ## Current implementation state
 
 - 2026-07-22确认此前存在v102功能线（FTS5、排序、哈希/pHash、视频兼容和时间戳版本体系）与main v96功能线（统一远程管理权限、04:00维护和延迟回收）的真实分叉；统一集成保留两侧功能，并把新增管理接口全部接入同一授权和互斥维护门禁。
-- 正式Runtime已运行`v103-20260722-1209`，Node PID 29836、Host PID 29764；loopback、LAN和ZeroTier均HTTP 200，图集回收队列为0，本次发布未移动或删除正式媒体。
+- 末级纯媒体图集的“回收”按钮直接创建延迟回收标记，不再显示浏览器确认框；该操作仍由服务端重新校验资格和管理权限，并保留至少60分钟取消期及整点执行边界。
+- 媒体文件HTTP响应统一登记Node持有的图片/视频流，并在响应完成、中断或错误时立即销毁；图集回收遇到Windows `EPERM/EBUSY`后每5分钟重试、最多12次，失败状态继续显示普通重试与仅释放本服务目标流的强制重试入口。
+- 正式Runtime已运行`v103-20260722-1209`，Node PID 29836、Host PID 29764；loopback、LAN和ZeroTier均HTTP 200。v103发布验收时图集回收队列为0，发布过程未移动或删除正式媒体；当前队列属于可变化的运行状态，以API为准。
 - 当前业务代码已经完成旧项目功能镜像、工程标准化和轻度死代码清理。
 - GitHub 仓库已经发布 `main` 和既有版本标签。
 - 正式`main`已包含媒体清理worker、API、设置页和v85灯箱调度，并已部署、验证和普通推送；功能Worktree与远程功能分支暂时保留。
@@ -58,6 +60,7 @@
 - SQLite访问日志、服务端分页和365天自动保留；
 - `REMOTE_ADMIN_ENABLED`启用后，管理写请求仅接受socket来源命中的标记CIDR并校验Origin；LAN/ZeroTier与localhost共享管理能力，Explorer仍仅本机。
 - Node本地时间每日04:00先处理到期图集回收，再通过扫描子进程幂等刷新SQLite；末级纯媒体目录有至少1小时撤销期并在后续整点同盘移入相对回收路径。
+- `collection_recycle_queue`持久化`retry_count/next_retry_time/last_error`；`retry-waiting`在服务重启后继续按时执行，最终失败进入`failed-awaiting-review`且保留追加日志。
 - 可选手工 HLS 生成与静态访问。
 
 ## Current data and generated paths

@@ -1,5 +1,13 @@
 # TESTING.md
 
+## Windows media-stream collection recycle recovery
+
+`node scripts/test-collection-recycle.js`必须使用唯一TEMP `PHOTOS_DIR/TRASH_DIR/DATA_DIR`和随机loopback端口，验证：普通标记到期移动；正常图片响应结束后活动流归零；暂停图片响应触发`EPERM/EBUSY`并进入`retry-waiting`；客户端中断后下一次重试成功；暂停视频Range响应连续12次后进入`failed-awaiting-review`；强制操作只销毁目标Node流并成功移动；中文路径、结构迁移、结构化日志、服务重启恢复、冲突改名和TEMP清理均通过。禁止把此测试指向正式目录或正式数据库。
+
+## Silent delayed collection recycle marking
+
+`scripts/test-collection-recycle.js`除验证资格、统一授权、标记/取消、60分钟撤销期、重启恢复、整点执行和冲突改名外，还必须确认前端不再包含图集回收确认提示，并继续按状态分派mark/cancel接口。浏览器只在隔离数据中点击验证；正式图库验收不得点击回收按钮。
+
 ## Full-branch convergence and v103 release gate
 
 多分支正式收敛必须先在唯一隔离Runtime运行，不得引用正式`PHOTOS_DIR`、`TRASH_DIR`或`gallery.db`。门禁包括：全部JS语法、全部PowerShell解析、`git diff --check`、冲突标记扫描、release notes、统一管理授权、04:00调度、图集回收、访问日志、8种排序、SHA/pHash、FTS5能力/迁移/查询/60条上限/性能日志、视频兼容，以及媒体清理recycle/restore安全测试。

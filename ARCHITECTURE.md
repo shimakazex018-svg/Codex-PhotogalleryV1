@@ -19,7 +19,7 @@ Browser SPA
             ├─ video-compatibility-manager.js -> scan lifecycle + report/API augmentation
             ├─ video-compatibility-worker.js -> read-only SQLite + bounded FFprobe/FFmpeg
             ├─ perceptual-manager.js -> bounded pHash worker/query lifecycle
-            ├─ collection_recycle_queue -> delayed same-volume collection recycle
+            ├─ collection_recycle_queue -> delayed same-volume collection recycle + persistent bounded retry
             ├─ scripts/media-library-cleanup-worker.ps1 -> PHOTOS_DIR metadata + DATA_DIR/logs reports + TRASH_DIR manifest
             └─ FFmpeg / FFprobe
 ```
@@ -40,6 +40,7 @@ Browser SPA
 | `search-fts.js` | FTS5能力、schema/state、规范化、两字符/三字符查询、mapping/FTS CRUD、一致性与维护核心 |
 | `admin-auth.js` | 基于socket地址、标记CIDR与Origin的统一管理写权限 |
 | `media-types.js` | 扫描和图集回收资格共用的图片/视频扩展名集合 |
+| `server.js` activeMediaStreams | 仅在内存登记当前Node通过HTTP提供的媒体文件流；响应结束/中断即清理，管理员强制重试仅按目标图集释放登记流 |
 | `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
 | `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
@@ -141,7 +142,7 @@ Browser SPA
 | GET | `/api/media-cleanup/results` | 流式分页扫描结果 |
 | POST | `/api/media-cleanup/recycle`、`/api/media-cleanup/restore` | 统一管理写权限加原确认文字；旧`/delete`返回410 |
 | GET | `/api/admin/capabilities` | 当前socket来源的管理能力，不返回环境配置 |
-| GET/POST | `/api/collection-recycle/status`、`/mark`、`/cancel`、`/queue` | 末级图集资格、持久队列与有界分页 |
+| GET/POST | `/api/collection-recycle/status`、`/mark`、`/cancel`、`/retry`、`/force-retry`、`/queue` | 末级图集资格、Node流诊断、持久有界重试与有界分页；全部写操作复用统一管理授权 |
 | POST | `/api/open-photo-path` | 打开媒体路径 |
 | GET | `/api/refresh-index` | 后端索引刷新入口 |
 | GET | `/api/index/changes` | 目录变化摘要 |
@@ -169,7 +170,7 @@ FTS5 Integration V96候选使用`media_search_documents(fts_rowid, media_id UNIQ
 | `covers` | collection 封面缓存 |
 | `scan_state` | 全局和目录扫描签名 |
 | `maintenance_state` | 每日计划扫描日期、状态、结果和错误 |
-| `collection_recycle_queue` | 图集标记、撤销、整点执行、实际相对目标和错误 |
+| `collection_recycle_queue` | 图集标记、撤销、整点执行、实际相对目标、`retry_count/next_retry_time/last_error`和最终错误 |
 | `user_marks` | 收藏、最近和查重标记 |
 | `media_hashes` | 图片哈希及查重元数据 |
 | `access_logs` | 页面访问记录；按`time DESC, id DESC`稳定分页 |

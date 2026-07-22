@@ -69,6 +69,17 @@ v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索
 
 ### Status
 阶段A定型有效；仅完整副本和隔离脚本验证，正式数据库、API、扫描器、前端版本和部署均未修改。
+## DEC-029：Windows图集回收采用Node流登记与有界持久重试
+
+### Decision
+所有由`sendFile()`提供的图片、原图、poster、HLS和视频Range响应统一登记进程内媒体流，并在HTTP响应`finish/close/error`时幂等销毁和移除。图集rename遇到`EPERM/EBUSY`进入`retry-waiting`，每5分钟重试，最多12次；计数、下次时间和最近错误写入SQLite，完整尝试详情追加到运行日志。管理员强制重试只销毁目标图集下由当前Node登记的流，并在rename完成前短暂阻止该目录新流，不调用外部句柄工具、不终止进程。
+
+### Reason
+Windows不允许移动仍含开放文件句柄的目录；浏览器断网或取消请求时只依赖pipe默认行为可能延迟释放句柄。内存登记足以诊断和释放本服务自身流，持久有界重试可跨重启恢复且不会无限占用CPU或磁盘。
+
+### Status
+有效；隔离测试通过，正式Runtime尚未重启，正式数据库尚未执行三列幂等迁移。
+
 ## DEC-028：末级图集使用持久延迟回收队列
 
 ### Decision

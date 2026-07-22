@@ -147,14 +147,15 @@ function openDatabase(dbFile) {
       source_path_snapshot TEXT NOT NULL,
       recycle_path TEXT,
       error TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      next_retry_time TEXT,
+      last_error TEXT,
       requested_ip TEXT,
       requested_scope TEXT,
       index_refresh_error TEXT,
       updated_at TEXT NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_recycle_active
-      ON collection_recycle_queue(collection_id) WHERE status IN ('pending', 'recycling');
     CREATE INDEX IF NOT EXISTS idx_collection_recycle_due ON collection_recycle_queue(status, scheduled_at);
 
     CREATE TABLE IF NOT EXISTS media_hashes (
@@ -202,6 +203,19 @@ function openDatabase(dbFile) {
       recent_error TEXT
     );
   `);
+  const recycleColumns = new Set(db.prepare("PRAGMA table_info(collection_recycle_queue)").all().map((column) => column.name));
+  if (!recycleColumns.has("retry_count")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
+  if (!recycleColumns.has("next_retry_time")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN next_retry_time TEXT");
+  if (!recycleColumns.has("last_error")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN last_error TEXT");
+  const activeRecycleIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_collection_recycle_active'").get();
+  if (!activeRecycleIndex?.sql?.includes("retry-waiting")) {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_collection_recycle_active;
+      CREATE UNIQUE INDEX idx_collection_recycle_active
+        ON collection_recycle_queue(collection_id) WHERE status IN ('pending', 'recycling', 'retry-waiting');
+    `);
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_collection_recycle_retry_due ON collection_recycle_queue(status, next_retry_time)");
   if (!perceptualSchemaExisted) {
     db.prepare(`INSERT OR IGNORE INTO perceptual_hash_state
       (id,algorithm,algorithm_version,status,baseline_bytes,updated_at,recent_error)
@@ -1031,6 +1045,7 @@ function rowToRecycle(row) {
   return { id: row.id, collectionId: row.collection_id, relativePath: row.relative_path, title: row.title, status: row.status,
     markedAt: row.marked_at, eligibleAt: row.eligible_at, scheduledAt: row.scheduled_at, startedAt: row.started_at || "",
     finishedAt: row.finished_at || "", recyclePath: row.recycle_path || "", error: row.error || "",
+    retryCount: Number(row.retry_count || 0), nextRetryTime: row.next_retry_time || "", lastError: row.last_error || row.error || "",
     requestedIp: row.requested_ip || "", requestedScope: row.requested_scope || "", indexRefreshError: row.index_refresh_error || "" };
 }
 
@@ -1045,7 +1060,7 @@ function createCollectionRecycle(dbFile, item) {
 }
 
 function getActiveCollectionRecycle(dbFile, collectionId) {
-  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? AND status IN ('pending','recycling') ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
+  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? AND status IN ('pending','recycling','retry-waiting') ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
 }
 
 function getLatestCollectionRecycle(dbFile, collectionId) {
@@ -1054,20 +1069,29 @@ function getLatestCollectionRecycle(dbFile, collectionId) {
 
 function cancelCollectionRecycle(dbFile, collectionId, now = new Date().toISOString()) {
   return withDatabase(dbFile, (db) => {
-    const result = db.prepare("UPDATE collection_recycle_queue SET status='cancelled', finished_at=?, updated_at=? WHERE collection_id=? AND status='pending'").run(now, now, collectionId);
+    const result = db.prepare("UPDATE collection_recycle_queue SET status='cancelled', finished_at=?, next_retry_time=NULL, updated_at=? WHERE collection_id=? AND status IN ('pending','retry-waiting')").run(now, now, collectionId);
     return { cancelled: result.changes || 0 };
   });
 }
 
 function getDueCollectionRecycles(dbFile, now, limit = 100) {
-  return withDatabase(dbFile, (db) => db.prepare("SELECT * FROM collection_recycle_queue WHERE status='pending' AND scheduled_at <= ? ORDER BY scheduled_at, id LIMIT ?").all(now, Math.min(Math.max(Number(limit)||100,1),200)).map(rowToRecycle));
+  return withDatabase(dbFile, (db) => db.prepare(`SELECT * FROM collection_recycle_queue
+    WHERE (status='pending' AND scheduled_at <= ?) OR (status='retry-waiting' AND next_retry_time <= ?)
+    ORDER BY CASE WHEN status='retry-waiting' THEN next_retry_time ELSE scheduled_at END, id LIMIT ?`)
+    .all(now, now, Math.min(Math.max(Number(limit)||100,1),200)).map(rowToRecycle));
+}
+
+function getNextCollectionRecycleTime(dbFile) {
+  return withDatabase(dbFile, (db) => db.prepare(`SELECT MIN(CASE WHEN status='retry-waiting' THEN next_retry_time ELSE scheduled_at END) due_at
+    FROM collection_recycle_queue WHERE status IN ('pending','retry-waiting')`).get()?.due_at || "");
 }
 
 function updateCollectionRecycle(dbFile, id, changes) {
-  const allowed = { status:"status", startedAt:"started_at", finishedAt:"finished_at", recyclePath:"recycle_path", error:"error", indexRefreshError:"index_refresh_error" };
+  const allowed = { status:"status", startedAt:"started_at", finishedAt:"finished_at", recyclePath:"recycle_path", error:"error",
+    retryCount:"retry_count", nextRetryTime:"next_retry_time", lastError:"last_error", indexRefreshError:"index_refresh_error" };
   const entries = Object.entries(changes).filter(([key]) => allowed[key]);
   return withDatabase(dbFile, (db) => {
-    if (entries.length) db.prepare(`UPDATE collection_recycle_queue SET ${entries.map(([key]) => `${allowed[key]}=?`).join(", ")}, updated_at=? WHERE id=?`).run(...entries.map(([,value]) => value || null), new Date().toISOString(), id);
+    if (entries.length) db.prepare(`UPDATE collection_recycle_queue SET ${entries.map(([key]) => `${allowed[key]}=?`).join(", ")}, updated_at=? WHERE id=?`).run(...entries.map(([,value]) => value ?? null), new Date().toISOString(), id);
     return rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE id=?").get(id));
   });
 }
@@ -1524,6 +1548,7 @@ module.exports = {
   getLatestCollectionRecycle,
   cancelCollectionRecycle,
   getDueCollectionRecycles,
+  getNextCollectionRecycleTime,
   updateCollectionRecycle,
   getCollectionRecyclePage,
   getDuplicateHashStats,

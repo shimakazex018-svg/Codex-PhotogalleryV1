@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-22 - Make delayed collection recycle resilient to Windows media handles
+
+- Wrapped image, original-media, poster, HLS and video Range file responses in a shared tracked stream lifecycle that destroys the source stream on response finish, close or error.
+- Added in-memory active media stream diagnostics and an authorized force-release-and-retry action scoped to one collection; it never enumerates or closes external Windows handles and never terminates Node.
+- Added persistent `retry-waiting` handling for `EPERM`/`EBUSY`: five-minute spacing, at most twelve retries, restart-safe counters/timestamps and append-only structured failure logs.
+- Kept failed and ineligible recycle states visible with their reason, retry count, next retry time, active Node-owned files and manual retry controls.
+- Expanded the isolated collection recycle test for normal response cleanup, interrupted image streams, video Range locks, automatic retry, terminal failure, forced release, Chinese paths and schema migration.
+
+## 2026-07-22 - Make delayed collection recycle marking silent
+
+- Removed the browser confirmation dialog from the eligible leaf-collection recycle button. A click now directly creates the existing delayed pending mark; server-side authorization, eligibility checks, the one-hour undo window, hourly execution and failure feedback remain unchanged.
+- Added a regression assertion that the confirmation prompt stays absent while mark/cancel API dispatch remains intact.
+
 ## 2026-07-22 - Converge v102 and main v96 feature lines for v103-20260722-1209
 
 - Audited all local/remote branches, tags, Worktrees, reflogs and unreachable commits; created annotated pre-integration archive tags for both diverged heads before any cleanup.

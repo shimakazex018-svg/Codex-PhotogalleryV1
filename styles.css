@@ -1076,11 +1076,49 @@ a {
   color: #fff;
 }
 
+.collection-recycle-button.danger {
+  border-color: #a92f2f;
+  background: #a92f2f;
+  color: #fff;
+}
+
+.collection-recycle-controls {
+  display: flex;
+  max-width: min(360px, 80vw);
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.collection-recycle-cancel {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-decoration: underline;
+}
+
 .collection-recycle-time {
   max-width: 230px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.collection-recycle-time.failed {
+  color: #f2a6a6;
+}
+
+.collection-recycle-streams {
+  display: grid;
+  max-width: min(360px, 80vw);
+  gap: 3px;
+  color: #f2a6a6;
+  font-size: 12px;
+}
+
+.collection-recycle-streams code {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .view-title {

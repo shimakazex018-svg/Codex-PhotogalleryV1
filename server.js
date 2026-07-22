@@ -46,6 +46,10 @@ const dailyIndexScanEnabled = /^(1|true)$/i.test(process.env.DAILY_INDEX_SCAN_EN
 const dailyIndexScanHour = Math.min(Math.max(Number(process.env.DAILY_INDEX_SCAN_HOUR) || 4, 0), 23);
 const dailyIndexScanMinute = Math.min(Math.max(Number(process.env.DAILY_INDEX_SCAN_MINUTE) || 0, 0), 59);
 const collectionRecycleTestIntervalMs = process.env.NODE_ENV === "test" ? Math.max(Number(process.env.COLLECTION_RECYCLE_TEST_INTERVAL_MS) || 0, 0) : 0;
+const collectionRecycleRetryDelayMs = process.env.NODE_ENV === "test"
+  ? Math.max(Number(process.env.COLLECTION_RECYCLE_RETRY_DELAY_MS) || 5 * 60 * 1000, 50)
+  : 5 * 60 * 1000;
+const collectionRecycleMaxRetries = 12;
 const enableImageThumbnailGeneration = process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "1" || process.env.ENABLE_IMAGE_THUMBNAIL_GENERATION === "true";
 const enableImagePreviewGeneration = process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "0" && process.env.ENABLE_IMAGE_PREVIEW_GENERATION !== "false";
 const searchPerfLoggingEnabled = process.env.SEARCH_PERF_LOG === "1" || process.env.SEARCH_PERF_LOG === "true";
@@ -58,6 +62,9 @@ const duplicateRecycleLimit = 50000;
 const videoPosterSources = new Map();
 const imageThumbnailSources = new Map();
 const imagePreviewJobs = new Map();
+const activeMediaStreams = new Map();
+const blockedMediaStreamRoots = new Set();
+let activeMediaStreamSequence = 0;
 let imagePreviewQueue = Promise.resolve();
 let activeCompatibleVideoStream = null;
 let imageHashLookupActive = false;
@@ -370,6 +377,92 @@ function readImageDimensions(filePath) {
 function isInsideDir(parentDir, childPath) {
   const relative = path.relative(parentDir, childPath);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function mediaStreamType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (imageExtensions.has(extension)) return "image";
+  if (videoExtensions.has(extension) || [".ts", ".m4s"].includes(extension)) return "video";
+  return "";
+}
+
+function mediaStreamPath(filePath) {
+  const resolved = path.resolve(filePath);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function mediaStreamsForDirectory(directoryPath) {
+  return [...activeMediaStreams.values()].filter((record) => isInsideDir(directoryPath, record.path));
+}
+
+function mediaStreamDiagnostics(directoryPath) {
+  return mediaStreamsForDirectory(directoryPath).map((record) => ({
+    path: isInsideDir(photosDir, record.path) ? path.relative(photosDir, record.path) : record.path,
+    type: record.type,
+    createdAt: record.createdAt,
+    pid: process.pid,
+  }));
+}
+
+function blockMediaStreams(directoryPath) {
+  blockedMediaStreamRoots.add(mediaStreamPath(directoryPath));
+}
+
+function unblockMediaStreams(directoryPath) {
+  blockedMediaStreamRoots.delete(mediaStreamPath(directoryPath));
+}
+
+function mediaStreamBlocked(filePath) {
+  const resolved = mediaStreamPath(filePath);
+  return [...blockedMediaStreamRoots].some((root) => isInsideDir(root, resolved));
+}
+
+function releaseMediaStreams(directoryPath) {
+  const records = mediaStreamsForDirectory(directoryPath);
+  for (const record of records) {
+    if (!record.stream.destroyed) record.stream.destroy();
+  }
+  return records.map((record) => ({ path: record.path, type: record.type, createdAt: record.createdAt, pid: process.pid }));
+}
+
+async function waitForMediaStreamsReleased(directoryPath, timeoutMs = 1500) {
+  const deadline = Date.now() + timeoutMs;
+  while (mediaStreamsForDirectory(directoryPath).length && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return mediaStreamsForDirectory(directoryPath).length === 0;
+}
+
+function pipeFileResponse(response, filePath, options = {}) {
+  const stream = fs.createReadStream(filePath, options);
+  const type = mediaStreamType(filePath);
+  let recordId = "";
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (recordId) activeMediaStreams.delete(recordId);
+    response.off("finish", onResponseDone);
+    response.off("close", onResponseDone);
+    response.off("error", onResponseDone);
+  };
+  const onResponseDone = () => {
+    if (!stream.destroyed) stream.destroy();
+  };
+  if (type) {
+    recordId = `${process.pid}-${++activeMediaStreamSequence}`;
+    activeMediaStreams.set(recordId, { id: recordId, path: path.resolve(filePath), stream, type, createdAt: new Date().toISOString() });
+  }
+  response.once("finish", onResponseDone);
+  response.once("close", onResponseDone);
+  response.once("error", onResponseDone);
+  stream.once("close", cleanup);
+  stream.once("error", (error) => {
+    cleanup();
+    if (!response.destroyed) response.destroy(error);
+  });
+  stream.pipe(response);
+  return stream;
 }
 
 function titleFromName(name) {
@@ -2614,7 +2707,7 @@ function hasReparsePointBetween(root, target) {
   return false;
 }
 
-function collectionRecycleEligibility(collectionId) {
+function collectionRecycleEligibility(collectionId, options = {}) {
   const collection = galleryDb.getCollection(galleryDbFile, String(collectionId || ""));
   if (!collection) return { eligible: false, reason: "collection-not-found" };
   const parts = Array.isArray(collection.pathParts) ? collection.pathParts : [];
@@ -2630,9 +2723,10 @@ function collectionRecycleEligibility(collectionId) {
   if (files.some((entry) => !isMediaExtension(path.extname(entry.name)))) return { eligible: false, reason: "contains-non-media" };
   const queue = galleryDb.getActiveCollectionRecycle(galleryDbFile, collection.id);
   const latest = queue || galleryDb.getLatestCollectionRecycle(galleryDbFile, collection.id);
-  const blocked = queue || (latest && ["failed", "skipped-ineligible"].includes(latest.status));
+  const failedBlocked = latest && ["failed", "failed-awaiting-review", "skipped-ineligible"].includes(latest.status);
+  const blocked = queue || (!options.allowFailed && failedBlocked);
   return { eligible: !blocked, reason: queue ? "already-queued" : blocked ? "failed-awaiting-review" : "", collectionId: collection.id, title: collection.title,
-    relativePath: parts.join(path.sep), pathParts: parts, sourcePath, queue };
+    relativePath: parts.join(path.sep), pathParts: parts, sourcePath, queue, latest };
 }
 
 function recycleSchedule(markedAt) {
@@ -2657,7 +2751,7 @@ function markCollectionRecycle(request, collectionId, auth) {
 
 function cancelCollectionRecycle(request, collectionId, auth) {
   const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
-  if (!active || active.status !== "pending") { const error = new Error("Pending recycle mark was not found."); error.statusCode = 409; throw error; }
+  if (!active || !["pending", "retry-waiting"].includes(active.status)) { const error = new Error("Pending recycle mark was not found."); error.statusCode = 409; throw error; }
   const result = galleryDb.cancelCollectionRecycle(galleryDbFile, collectionId);
   appendOperationLog({ ip: auth.sourceAddress, type: "collection-recycle-cancel", title: "取消图集回收", work: active.title, pathParts: active.relativePath.split(path.sep) });
   return { ok: true, ...result };
@@ -2674,36 +2768,113 @@ function collectionRecycleTarget(relativePath, id) {
   return { path: candidate, conflict: true };
 }
 
-function processCollectionRecycleBatch(now = new Date()) {
+function collectionRecycleLogDetails(item, sourcePath, targetPath, error, retryCount) {
+  const occupied = sourcePath ? mediaStreamDiagnostics(sourcePath) : [];
+  return {
+    id: item.id,
+    collectionId: item.collectionId,
+    sourcePath: sourcePath || item.sourcePathSnapshot || "",
+    targetPath: targetPath || "",
+    errorType: error ? (error.code || (error.ineligible ? "INELIGIBLE" : "UNKNOWN")) : "",
+    error: error?.message || "",
+    retryCount,
+    occupyingFiles: occupied.map((record) => record.path),
+    pid: occupied.length ? process.pid : null,
+    time: new Date().toISOString(),
+  };
+}
+
+function processCollectionRecycleItem(item, now = new Date()) {
+  const retryCount = item.status === "retry-waiting" ? Number(item.retryCount || 0) + 1 : Number(item.retryCount || 0);
+  galleryDb.updateCollectionRecycle(galleryDbFile, item.id, {
+    status: "recycling", startedAt: now.toISOString(), finishedAt: null, nextRetryTime: null, retryCount,
+  });
+  appendOperationLog({ type: "collection-recycle-start", title: retryCount ? `开始图集回收重试 ${retryCount}/${collectionRecycleMaxRetries}` : "开始图集回收",
+    work: item.title, pathParts: item.relativePath.split(path.sep) });
+  let sourcePath = item.sourcePathSnapshot || "";
+  let targetPath = "";
+  try {
+    const check = collectionRecycleEligibility(item.collectionId);
+    if (!check.eligible && check.reason !== "already-queued") throw Object.assign(new Error(check.reason), { ineligible: true });
+    sourcePath = check.sourcePath;
+    const target = collectionRecycleTarget(item.relativePath, item.id);
+    targetPath = target.path;
+    if (path.parse(sourcePath).root.toLowerCase() !== path.parse(target.path).root.toLowerCase()) throw new Error("Collection recycle requires PHOTOS_DIR and TRASH_DIR on the same volume.");
+    if (isInsideDir(sourcePath, target.path) || isInsideDir(target.path, sourcePath)) throw new Error("Source and recycle target must not be nested.");
+    fs.mkdirSync(path.dirname(target.path), { recursive: true });
+    fs.renameSync(sourcePath, target.path);
+    galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status: target.conflict ? "conflict-renamed" : "recycled", finishedAt: new Date().toISOString(),
+      recyclePath: path.relative(trashDir, target.path), error: null, lastError: null, nextRetryTime: null });
+    appendOperationLog({ type: "collection-recycle-success", title: "图集回收成功", work: item.title, pathParts: item.relativePath.split(path.sep) });
+    logEvent("collection_recycle_success", { ...collectionRecycleLogDetails(item, sourcePath, targetPath, null, retryCount), conflictRenamed: target.conflict });
+    return { moved: true, id: item.id };
+  } catch (error) {
+    const retryable = !error.ineligible && ["EPERM", "EBUSY"].includes(error.code);
+    const shouldRetry = retryable && retryCount < collectionRecycleMaxRetries;
+    const status = error.ineligible ? "skipped-ineligible" : shouldRetry ? "retry-waiting" : "failed-awaiting-review";
+    const nextRetryTime = shouldRetry ? new Date(Date.now() + collectionRecycleRetryDelayMs).toISOString() : null;
+    galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status, finishedAt: shouldRetry ? null : new Date().toISOString(), error: error.message,
+      lastError: error.message, retryCount, nextRetryTime });
+    const details = { ...collectionRecycleLogDetails(item, sourcePath, targetPath, error, retryCount), nextRetryTime, maxRetries: collectionRecycleMaxRetries };
+    logEvent(shouldRetry ? "collection_recycle_retry_scheduled" : "collection_recycle_failed", details);
+    appendOperationLog({ type: `collection-recycle-${status}`, title: shouldRetry ? `图集回收占用，等待重试 ${retryCount + 1}/${collectionRecycleMaxRetries}`
+      : error.ineligible ? "图集资格变化，已跳过" : "图集回收失败，等待处理", work: item.title, pathParts: item.relativePath.split(path.sep) });
+    return { moved: false, id: item.id, status, error: error.message, nextRetryTime };
+  }
+}
+
+function processCollectionRecycleBatch(now = new Date(), options = {}) {
   if (collectionRecycleRunning || maintenanceBusy("collection-recycle")) return { status: "skipped-busy", processed: 0, moved: 0 };
   collectionRecycleRunning = true;
   let moved = 0; const movedIds = [];
-  const due = galleryDb.getDueCollectionRecycles(galleryDbFile, now.toISOString(), 100);
+  const due = Array.isArray(options.items) ? options.items : galleryDb.getDueCollectionRecycles(galleryDbFile, now.toISOString(), 100);
   try {
     for (const item of due) {
-      galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status: "recycling", startedAt: new Date().toISOString() });
-      appendOperationLog({ type: "collection-recycle-start", title: "开始图集回收", work: item.title, pathParts: item.relativePath.split(path.sep) });
-      try {
-        const check = collectionRecycleEligibility(item.collectionId);
-        if (!check.eligible && check.reason !== "already-queued") throw Object.assign(new Error(check.reason), { ineligible: true });
-        const sourcePath = check.sourcePath;
-        const target = collectionRecycleTarget(item.relativePath, item.id);
-        if (path.parse(sourcePath).root.toLowerCase() !== path.parse(target.path).root.toLowerCase()) throw new Error("Collection recycle requires PHOTOS_DIR and TRASH_DIR on the same volume.");
-        if (isInsideDir(sourcePath, target.path) || isInsideDir(target.path, sourcePath)) throw new Error("Source and recycle target must not be nested.");
-        fs.mkdirSync(path.dirname(target.path), { recursive: true });
-        fs.renameSync(sourcePath, target.path);
-        moved += 1;
-        movedIds.push(item.id);
-        galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status: target.conflict ? "conflict-renamed" : "recycled", finishedAt: new Date().toISOString(), recyclePath: path.relative(trashDir, target.path) });
-        appendOperationLog({ type: "collection-recycle-success", title: "图集回收成功", work: item.title, pathParts: item.relativePath.split(path.sep) });
-      } catch (error) {
-        const status = error.ineligible ? "skipped-ineligible" : "failed";
-        galleryDb.updateCollectionRecycle(galleryDbFile, item.id, { status, finishedAt: new Date().toISOString(), error: error.message });
-        appendOperationLog({ type: `collection-recycle-${status}`, title: status === "failed" ? "图集回收失败" : "图集资格变化，已跳过", work: item.title, pathParts: item.relativePath.split(path.sep) });
-      }
+      const result = processCollectionRecycleItem(item, now);
+      if (result.moved) { moved += 1; movedIds.push(item.id); }
     }
   } finally { collectionRecycleRunning = false; }
   return { status: "completed", processed: due.length, moved, movedIds };
+}
+
+async function retryCollectionRecycle(request, collectionId, auth, forceRelease = false) {
+  if (collectionRecycleRunning || maintenanceBusy("collection-recycle")) { const error = new Error("Another maintenance task is moving or processing media."); error.statusCode = 409; throw error; }
+  const latest = galleryDb.getLatestCollectionRecycle(galleryDbFile, collectionId);
+  if (!latest || !["failed", "failed-awaiting-review", "retry-waiting", "skipped-ineligible"].includes(latest.status)) {
+    const error = new Error("A failed collection recycle was not found."); error.statusCode = 409; throw error;
+  }
+  const check = collectionRecycleEligibility(collectionId, { allowFailed: true });
+  if (!check.eligible && check.reason !== "already-queued") { const error = new Error(`Collection is not eligible: ${check.reason}`); error.statusCode = 409; throw error; }
+  let item = latest;
+  const releasedStreams = [];
+  if (forceRelease) blockMediaStreams(check.sourcePath);
+  try {
+    if (forceRelease) {
+      releasedStreams.push(...releaseMediaStreams(check.sourcePath));
+      const released = await waitForMediaStreamsReleased(check.sourcePath);
+      logEvent("collection_recycle_force_release", { collectionId, sourcePath: check.sourcePath, releasedStreams: releasedStreams.map((record) => record.path),
+        releasedCount: releasedStreams.length, released, pid: process.pid, time: new Date().toISOString() });
+      if (!released) { const error = new Error("Node media streams did not release before retry."); error.statusCode = 409; throw error; }
+    }
+    if (latest.status !== "retry-waiting") {
+      const now = new Date().toISOString();
+      item = galleryDb.createCollectionRecycle(galleryDbFile, { id: crypto.randomUUID(), collectionId: check.collectionId, relativePath: check.relativePath,
+        title: check.title, markedAt: now, eligibleAt: now, scheduledAt: now, sourcePathSnapshot: check.sourcePath,
+        requestedIp: auth.sourceAddress, requestedScope: auth.scope });
+      appendOperationLog({ ip: auth.sourceAddress, type: "collection-recycle-retry", title: "手工重试图集回收", work: check.title, pathParts: check.pathParts });
+    }
+    const batch = processCollectionRecycleBatch(new Date(), { items: [item] });
+    if (batch.moved && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => {
+      if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status });
+    }});
+    scheduleCollectionRecycle();
+    const updatedItem = galleryDb.getLatestCollectionRecycle(galleryDbFile, collectionId);
+    return { ok: ["recycled", "conflict-renamed"].includes(updatedItem?.status), forceRelease, releasedStreams: releasedStreams.map((record) => ({
+      path: isInsideDir(photosDir, record.path) ? path.relative(photosDir, record.path) : record.path, type: record.type, createdAt: record.createdAt, pid: record.pid,
+    })), item: updatedItem };
+  } finally {
+    if (forceRelease) unblockMediaStreams(check.sourcePath);
+  }
 }
 
 function startIndexAfterRecycle(reason, scheduledDate = "") {
@@ -2719,12 +2890,16 @@ function startIndexAfterRecycle(reason, scheduledDate = "") {
   return { status: "running", batch };
 }
 
-function scheduleHourlyCollectionRecycle() {
+function scheduleCollectionRecycle() {
   clearTimeout(hourlyCollectionRecycleTimer);
   const now = new Date(); const next = new Date(now); next.setHours(now.getHours() + 1, 0, 0, 0);
-  const delay = collectionRecycleTestIntervalMs || Math.max(next.getTime() - now.getTime(), 1000);
+  let dueAt = NaN;
+  try { dueAt = Date.parse(galleryDb.getNextCollectionRecycleTime(galleryDbFile) || ""); }
+  catch (error) { logEvent("collection_recycle_schedule_read_failed", { error: error.message }); }
+  const wakeAt = Number.isFinite(dueAt) ? Math.min(next.getTime(), dueAt) : next.getTime();
+  const delay = collectionRecycleTestIntervalMs || Math.max(wakeAt - now.getTime(), 30000);
   hourlyCollectionRecycleTimer = setTimeout(() => { const batch = processCollectionRecycleBatch(); const current = new Date(); const dailyWindow = dailyIndexScanEnabled && current.getHours() === dailyIndexScanHour && current.getMinutes() === dailyIndexScanMinute;
-    if (batch.moved && !dailyWindow && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } }); scheduleHourlyCollectionRecycle(); }, delay);
+    if (batch.moved && !dailyWindow && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } }); scheduleCollectionRecycle(); }, delay);
 }
 
 function runDailyIndexScanIfDue() {
@@ -2849,6 +3024,11 @@ function generateImageThumbnail(sourcePath, thumbPath, width) {
 
 function sendFile(request, response, filePath) {
   const extension = path.extname(filePath).toLowerCase();
+  if (mediaStreamType(filePath) && mediaStreamBlocked(filePath)) {
+    response.writeHead(423, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    response.end("Media is temporarily unavailable while its collection is being recycled.");
+    return;
+  }
   const assetVersion = new URL(request.url, `http://${request.headers.host || "localhost"}`).searchParams.get("v") || "";
   const contentTypes = {
     ".html": "text/html; charset=utf-8",
@@ -2930,7 +3110,7 @@ function sendFile(request, response, filePath) {
         return;
       }
 
-      fs.createReadStream(filePath, { start, end }).pipe(response);
+      pipeFileResponse(response, filePath, { start, end });
       return;
     }
 
@@ -2945,7 +3125,7 @@ function sendFile(request, response, filePath) {
       return;
     }
 
-    fs.createReadStream(filePath).pipe(response);
+    pipeFileResponse(response, filePath);
   });
 }
 
@@ -3284,8 +3464,13 @@ function handleRequest(request, response) {
     try {
       const check = collectionRecycleEligibility(collectionId);
       const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
-      sendJson(response, { collectionId, eligible: check.eligible, reason: check.reason, item: active,
-        canMark: adminAuthorizer.capability(request).authorized && check.eligible });
+      const latest = active || galleryDb.getLatestCollectionRecycle(galleryDbFile, collectionId);
+      const failed = latest && ["failed", "failed-awaiting-review", "retry-waiting", "skipped-ineligible"].includes(latest.status);
+      const sourcePath = check.sourcePath || (latest?.relativePath ? path.resolve(photosDir, latest.relativePath) : "");
+      const authorized = adminAuthorizer.capability(request).authorized;
+      sendJson(response, { collectionId, eligible: check.eligible, reason: check.reason, item: active || (failed ? latest : null),
+        activeStreams: sourcePath && isInsideDir(photosDir, sourcePath) ? mediaStreamDiagnostics(sourcePath) : [],
+        canMark: authorized && check.eligible, canRetry: authorized && Boolean(failed), maxRetries: collectionRecycleMaxRetries });
     } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
@@ -3295,12 +3480,15 @@ function handleRequest(request, response) {
     return;
   }
 
-  if (requestUrl.pathname === "/api/collection-recycle/mark" || requestUrl.pathname === "/api/collection-recycle/cancel") {
+  if (["/api/collection-recycle/mark", "/api/collection-recycle/cancel", "/api/collection-recycle/retry", "/api/collection-recycle/force-retry"].includes(requestUrl.pathname)) {
     if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
-    const auth = requireAdminWrite(request, response, requestUrl.pathname.endsWith("/mark") ? "collection-recycle-mark" : "collection-recycle-cancel");
+    const action = requestUrl.pathname.split("/").pop();
+    const auth = requireAdminWrite(request, response, `collection-recycle-${action}`);
     if (!auth) return;
-    readRequestBody(request, (body) => { try { const payload=JSON.parse(body||"{}"); const collectionId=String(payload.collectionId||"");
-      sendJson(response, requestUrl.pathname.endsWith("/mark") ? markCollectionRecycle(request, collectionId, auth) : cancelCollectionRecycle(request, collectionId, auth));
+    readRequestBody(request, async (body) => { try { const payload=JSON.parse(body||"{}"); const collectionId=String(payload.collectionId||"");
+      if (action === "mark") sendJson(response, markCollectionRecycle(request, collectionId, auth));
+      else if (action === "cancel") sendJson(response, cancelCollectionRecycle(request, collectionId, auth));
+      else sendJson(response, await retryCollectionRecycle(request, collectionId, auth, action === "force-retry"));
     } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); } });
     return;
   }
@@ -3482,7 +3670,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   scheduleHourlyGalleryRefresh();
   const startupRecycleBatch = processCollectionRecycleBatch();
   if (startupRecycleBatch.moved && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of startupRecycleBatch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } });
-  scheduleHourlyCollectionRecycle();
+  scheduleCollectionRecycle();
   scheduleDailyIndexScan();
 
   const httpServer = http.createServer(handleRequest).listen(port, host, () => {

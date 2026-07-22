@@ -1986,28 +1986,53 @@ function collectionRecycleButtonHtml(collection) {
   const status = collection?.recycleStatus;
   if (!status || !state.adminCapabilities?.canMarkCollectionRecycle || (!status.eligible && !status.item)) return "";
   const item = status.item;
-  const recycling = item?.status === "recycling";
+  const itemStatus = item?.status || "";
+  const pending = itemStatus === "pending";
+  const recycling = itemStatus === "recycling";
+  const retryWaiting = itemStatus === "retry-waiting";
+  const failed = ["failed", "failed-awaiting-review", "skipped-ineligible"].includes(itemStatus);
+  const error = item?.lastError || item?.error || "";
+  const maxRetries = Number(status.maxRetries || 12);
+  const errorLabel = /\b(EPERM|EBUSY)\b/.test(error) ? `${error.match(/\b(EPERM|EBUSY)\b/)[1]} 文件正在被占用` : error;
+  const streams = Array.isArray(status.activeStreams) ? status.activeStreams : [];
+  const streamHtml = streams.length ? `<div class="collection-recycle-streams"><strong>Node 正在占用：</strong>${streams.map((stream) =>
+    `<code>${escapeHtml(stream.path)}</code><span>PID ${escapeHtml(stream.pid)}</span>`).join("")}</div>` : "";
+  const timing = pending ? `标记：${escapeHtml(new Date(item.markedAt).toLocaleString())}<br>最早：${escapeHtml(new Date(item.eligibleAt).toLocaleString())}<br>计划：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}`
+    : retryWaiting ? `⚠ 回收暂未成功<br>原因：${escapeHtml(errorLabel || "文件被占用")}<br>已重试：${Number(item.retryCount || 0)}/${maxRetries}<br>下次：${escapeHtml(new Date(item.nextRetryTime).toLocaleString())}`
+    : failed ? `⚠ 回收失败<br>原因：${escapeHtml(errorLabel || "未知错误")}<br>已重试：${Number(item.retryCount || 0)}/${maxRetries}` : "";
+  const controls = pending
+    ? `<button class="collection-recycle-button active" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="cancel" aria-pressed="true">取消回收</button>`
+    : recycling
+      ? `<button class="collection-recycle-button active" type="button" disabled aria-pressed="true">回收中</button>`
+      : (retryWaiting || failed)
+        ? `<div class="collection-recycle-controls">
+            <button class="collection-recycle-button active" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="retry">重试回收</button>
+            <button class="collection-recycle-button danger" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="force-retry">强制释放并回收</button>
+            ${retryWaiting ? `<button class="collection-recycle-cancel" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="cancel">取消重试</button>` : ""}
+          </div>`
+        : `<button class="collection-recycle-button" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="mark" aria-pressed="false">回收</button>`;
   return `<div class="collection-recycle-action">
-    <button class="collection-recycle-button${item ? " active" : ""}" type="button" data-collection-recycle="${escapeHtml(collection.id)}"
-      ${recycling ? "disabled" : ""} aria-pressed="${item ? "true" : "false"}">${recycling ? "回收中" : "回收"}</button>
-    ${item ? `<div class="collection-recycle-time">标记：${escapeHtml(new Date(item.markedAt).toLocaleString())}<br>最早：${escapeHtml(new Date(item.eligibleAt).toLocaleString())}<br>计划：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}</div>` : ""}
+    ${controls}
+    ${timing ? `<div class="collection-recycle-time${failed || retryWaiting ? " failed" : ""}">${timing}</div>` : ""}
+    ${streamHtml}
   </div>`;
 }
 
 function bindCollectionRecycleButtons() {
-  view.querySelectorAll("[data-collection-recycle]").forEach((button) => button.addEventListener("click", async () => {
+  view.querySelectorAll("[data-collection-recycle-action]").forEach((button) => button.addEventListener("click", async () => {
     const collectionId = button.dataset.collectionRecycle;
     const collection = state.sqliteCollections.get(collectionId);
-    const active = collection?.recycleStatus?.item;
-    if (!active && !confirm("该图集将在至少1小时后，于整点移入回收站。在执行前可以再次点击取消。")) return;
+    const action = button.dataset.collectionRecycleAction;
+    const endpoints = { mark: "/api/collection-recycle/mark", cancel: "/api/collection-recycle/cancel",
+      retry: "/api/collection-recycle/retry", "force-retry": "/api/collection-recycle/force-retry" };
     button.disabled = true;
     try {
-      await postJson(active ? "/api/collection-recycle/cancel" : "/api/collection-recycle/mark", { collectionId });
+      await postJson(endpoints[action], { collectionId });
       collection.recycleStatus = await fetchJson(`/api/collection-recycle/status?collectionId=${encodeURIComponent(collectionId)}`);
       render();
     } catch (error) {
       button.disabled = false;
-      alert(active ? "取消回收标记失败。" : "标记回收失败，图集可能已不再符合条件。");
+      alert(action === "cancel" ? "取消回收失败。" : action === "mark" ? "标记回收失败，图集可能已不再符合条件。" : "重试回收失败，请查看最新错误状态。");
     }
   }));
 }

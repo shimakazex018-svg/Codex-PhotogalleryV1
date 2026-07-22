@@ -4,15 +4,17 @@
 
 ## Last Completed Task
 
-已完成此前分叉的v102功能线和main v96功能线收敛，正式版本为`v103-20260722-1209`。集成期间和正式验收均未启动正式媒体写任务，本次正式媒体移动、删除均为0。
+已在源码完成Windows媒体句柄回收修复：HTTP媒体流在响应完成/中断/错误时主动销毁并从轻量内存表移除；`EPERM/EBUSY`每5分钟最多12次持久重试；失败详情页保留状态、占用文件、普通重试和只释放当前Node目标流的强制重试。唯一TEMP图片/视频Range/中文路径隔离测试通过；尚未提交、发布、重启正式站点或迁移正式数据库。
 
 ## Current State
 
 - 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
 - v103候选由旧Node PID 28744精确重启到PID 23852完成只读验收；最终时间戳版本精确重启为Node PID 29836、Host PID 29764。loopback、LAN和ZeroTier均HTTP 200，唯一监听为`0.0.0.0:48102`。
+- 正式失败图集`梦心玥/爱蜜社/[IMISS爱蜜社][NO.001]...`的源目录与40张图片仍完整、回收目标不存在；现运行中的v103仍保留旧`failed`记录。本轮没有重试该任务、没有移动正式媒体、没有打开正式数据库执行迁移。
+- 待发布代码会幂等新增`collection_recycle_queue.retry_count/next_retry_time/last_error`并重建活动唯一索引以包含`retry-waiting`；必须先备份正式数据库，再按版本发布流程重启，旧失败记录会通过`error`兼容显示但不会自动重试。
 - 本地main、`origin/main`和远程main的发布SHA曾一致为`5a3ffef74a7ff9ef83174f85c8e4e83135aaa2ad`；随后仅追加本次清理/交接文档提交。正式代码标签`v103-20260722-1209`保持指向发布提交。
 - 已删除Worktree `7c4a`、`940a`和`a103`；已删除四个已合并本地临时分支及三个远程`codex/*`分支。`8dbe`因活动Codex控制内核PID 8648占用而按安全规则暂留，本地分支HEAD已进入main且远程已删除。
-- 保留`archive/pre-integration-main-20260722`和`archive/pre-integration-v102-20260722`。隔离TEMP Runtime已删除，49481无监听；正式图集回收队列为0，本次正式移动/删除文件均为0。
+- 保留`archive/pre-integration-main-20260722`和`archive/pre-integration-v102-20260722`。隔离TEMP Runtime已删除，49481无监听；v103发布时正式图集回收队列为0且发布过程移动/删除均为0。2026-07-22本次无弹窗交互验收结束时，正式API另有4条用户pending、0条recycling，均计划于本地14:00执行；Codex未创建或取消这些正式记录。
 - 部署前备份位于`D:\GalleryRuntime\backups\v103-predeploy-20260722-115638`；SQLite在线一致性副本为2,030,444,544字节，SHA-256 `A0E910BB8C8724E92174B116864A8FFF1C40993E1DA48BCBD14E72E4F843F959`，`PRAGMA quick_check=ok`。
 - pHash任务未运行，但保留了此前`database is locked`的失败状态（3,201/486,028）；这是既有运行状态，不在本次发布中自动重启或改写。
 - 正式版本自v102起使用`v<版本>-YYYYMMDD-HHmm`，时区为`Asia/Shanghai`；`APP_VERSION`、全部静态资源缓存参数和`release-notes.json`第一项保持一致。
