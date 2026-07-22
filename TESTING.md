@@ -39,6 +39,20 @@ node --check duplicates-worker.js
 git diff --check
 ```
 
+## v96 trusted admin and scheduled collection recycle
+
+使用bundled/正式Node执行：
+
+```powershell
+node scripts/test-admin-auth.js
+node scripts/test-daily-index-scheduler.js
+node scripts/test-collection-recycle.js
+```
+
+通过标准：三项均`PASS`，TEMP根均为`false`。权限覆盖local/LAN/ZeroTier/拒绝/XFF/Origin；调度覆盖03:59、04:00、04:30、busy重试资格和同日completed幂等；回收覆盖父目录、TXT、HEIC、标记/取消、重启恢复、到期批次、目标冲突不覆盖和单次索引。
+
+隔离浏览器覆盖1440×900、1024×768、768×1024、390×844：末级显示收藏/回收，按钮至少44px且无横向溢出；父目录不显示回收；`.badge`名称覆盖为0，下方标题保留。正式验收禁止标记或移动真实图集。
+
 PowerShell worker 还必须通过解析器检查：
 
 ```powershell

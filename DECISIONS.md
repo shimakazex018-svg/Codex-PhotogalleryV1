@@ -1,5 +1,29 @@
 # DECISIONS.md
 
+## DEC-024：末级图集使用持久延迟回收队列
+
+### Decision
+仅服务端复核为非根、无ReparsePoint、无子目录、至少一个文件且全部为标准媒体的图集可标记；`eligibleAt=markedAt+60分钟`，`scheduledAt`为其后的第一个整点。执行时再次复核，同盘目录rename到`TRASH_DIR`相同相对路径，冲突追加短ID且绝不覆盖。
+
+### Status
+有效，v96实施；没有自动标记或移动正式图集。
+
+## DEC-023：每日04:00由Node协调回收后异步扫描
+
+### Decision
+复用`startScanTask()`子进程，每日按本地时间重新计算触发；`maintenance_state`保证已完成日期不重复，繁忙时记录并10分钟后重试。04:00与整点重合时先完成到期回收批次，再启动一次索引扫描。
+
+### Status
+有效，v96实施。
+
+## DEC-022：管理写权限统一为socket CIDR加Origin
+
+### Decision
+localhost始终是`local`；启用远程管理后，只有`request.socket.remoteAddress`命中显式标记的LAN/ZeroTier CIDR且Origin允许时才获得管理写能力。`X-Forwarded-For`仅可用于旧日志显示，绝不参与授权；Explorer保持local-only。
+
+### Status
+有效，v96实施。
+
 ## DEC-021：搜索先做有界分段查询并保留FTS5为独立阶段
 
 ### Decision
@@ -23,7 +47,7 @@
 v86的`File.Delete`无法恢复，且正式`PHOTOS_DIR`与`TRASH_DIR`跨盘，简单rename会失败。扫描后文件变化、复制中断、目标冲突和重复提交都需要可审计、可续跑的状态模型。
 
 ### Impact
-回收前实时检查目标盘容量并逐项复核路径、ReparsePoint、大小、mtime和媒体扩展名。目标冲突使用`.__recycle_<shortID>`，不覆盖；恢复冲突记录`RestoreConflict`。浏览器只读取聚合状态和分页扫描结果，不加载完整manifest。`ALLOW_REMOTE_DELETE=0`保持不变，recycle/restore无论该变量为何值都只允许localhost。
+回收前实时检查目标盘容量并逐项复核路径、ReparsePoint、大小、mtime和媒体扩展名。目标冲突使用`.__recycle_<shortID>`，不覆盖；恢复冲突记录`RestoreConflict`。浏览器只读取聚合状态和分页扫描结果，不加载完整manifest。`ALLOW_REMOTE_DELETE=0`保持不变；v96起recycle/restore由DEC-022统一管理写权限替代localhost特判。
 
 ### Status
 有效，前端`v91`实施；隔离同盘、强制跨盘、故障注入、幂等、API边界和恢复测试通过，正式媒体尚未移动。

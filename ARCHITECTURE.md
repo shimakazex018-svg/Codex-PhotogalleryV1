@@ -27,6 +27,9 @@ Browser SPA
 | `app.js` | hash 路由、页面渲染、客户端状态、API 请求、灯箱、视频按需加载和设置页 |
 | `styles.css` | 全部当前页面、响应式和状态样式 |
 | `server.js` | HTTP 服务、静态资源、API 路由、扫描任务、媒体/缩略图/HLS、日志和文件操作 |
+| `admin-auth.js` | 基于socket地址、标记CIDR与Origin的统一管理写权限 |
+| `media-types.js` | 扫描和图集回收资格共用的图片/视频扩展名集合 |
+| `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
 | `gallery-db.js` | SQLite schema、索引、查询、用户标记和查重数据访问 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
 | `scripts/media-library-cleanup-worker.ps1` | 单线程媒体库元数据扫描、分类报告、可恢复回收/恢复和空目录清理 |
@@ -102,14 +105,16 @@ Browser SPA
 | GET/POST | `/api/access-log` | SQLite访问日志分页与写入；GET使用`page/pageSize` |
 | POST/GET | `/api/media-cleanup/scan/start`、`/api/media-cleanup/scan/stop`、`/api/media-cleanup/status` | 清理扫描生命周期 |
 | GET | `/api/media-cleanup/results` | 流式分页扫描结果 |
-| POST | `/api/media-cleanup/recycle`、`/api/media-cleanup/restore` | localhost确认回收/恢复；旧`/delete`返回410 |
+| POST | `/api/media-cleanup/recycle`、`/api/media-cleanup/restore` | 统一管理写权限加原确认文字；旧`/delete`返回410 |
+| GET | `/api/admin/capabilities` | 当前socket来源的管理能力，不返回环境配置 |
+| GET/POST | `/api/collection-recycle/status`、`/mark`、`/cancel`、`/queue` | 末级图集资格、持久队列与有界分页 |
 | POST | `/api/open-photo-path` | 打开媒体路径 |
 | GET | `/api/refresh-index` | 后端索引刷新入口 |
 | GET | `/api/index/changes` | 目录变化摘要 |
 | GET | `/api/index/changed-directories` | 变化目录列表 |
 | GET | `/api/gallery`、`/api/refresh` | 已禁用旧 API，返回 410 |
 
-所有 API 当前没有账号/Session/Token 鉴权。删除重复媒体接口有本机/`ALLOW_REMOTE_DELETE` 控制，但这不等价于完整认证系统。
+所有 API 当前没有账号/Session/Token鉴权。管理写接口统一使用`authorizeAdminWrite`等价策略：只读`request.socket.remoteAddress`，不信任`X-Forwarded-For`，远程还必须命中受信任CIDR，存在Origin时必须位于允许列表；Explorer接口仍只允许loopback。这仍不等价于完整身份认证。
 
 媒体清理任务独立于 SQLite 索引扫描。Node 同时只持有一个 worker 句柄，PowerShell 顺序枚举并约每 5000 个对象原子更新进度；扫描报告直接流式写入 `DATA_DIR/logs`。Node 查询 NDJSON 时仅保留当前排序页所需的有界候选（offset 最大 50000、pageSize 最大 200），响应不暴露绝对路径。回收只解析批准报告中的`kind=non-media`并逐项复核；同盘rename，跨盘copy到`.partial`、校验、原子改名后才删除源。manifest、summary和recycle.log写入`TRASH_DIR/media-cleanup/<jobId>`；恢复同样不接受客户端路径且不覆盖原位置。
 
@@ -125,6 +130,8 @@ Browser SPA
 | `media` | 图片/视频、URL、缩略图、元数据和排序 |
 | `covers` | collection 封面缓存 |
 | `scan_state` | 全局和目录扫描签名 |
+| `maintenance_state` | 每日计划扫描日期、状态、结果和错误 |
+| `collection_recycle_queue` | 图集标记、撤销、整点执行、实际相对目标和错误 |
 | `user_marks` | 收藏、最近和查重标记 |
 | `media_hashes` | 图片哈希及查重元数据 |
 | `access_logs` | 页面访问记录；按`time DESC, id DESC`稳定分页 |

@@ -342,3 +342,9 @@ All notable repository-baseline changes are documented here. Functional behavior
 - Audited mobile bandwidth, shallow directory loading, image/video rendering, pagination, caching, and request cancellation without changing business code.
 - Confirmed that 20 Runtime carousel files occupied 150.15 MiB and that disabled thumbnail generation can make thumbnail URLs return original images.
 - Added `docs/V2.0.1_MOBILE_BANDWIDTH_AUDIT.md`; browser transfer metrics remain pending manual DevTools verification.
+# 2026-07-22 v96
+
+- 统一受信任LAN/ZeroTier管理权限，加入socket CIDR、Origin保护和能力接口，Explorer仍仅本机。
+- 加入每日04:00幂等异步索引扫描、维护任务协调与整点图集回收队列。
+- 图集回收只接受collectionId，服务端双重复核末级纯媒体资格，同盘保留相对路径且冲突不覆盖；操作写入SQLite网页日志。
+- 移除所有卡片封面名称覆盖标签，保留下方标题、媒体徽标、懒加载和原有网格。
