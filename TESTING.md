@@ -53,6 +53,8 @@ node scripts/test-collection-recycle.js
 
 隔离浏览器覆盖1440×900、1024×768、768×1024、390×844：末级显示收藏/回收，按钮至少44px且无横向溢出；父目录不显示回收；`.badge`名称覆盖为0，下方标题保留。正式验收禁止标记或移动真实图集。
 
+2026-07-22正式v96验收：Node从PID 20976切换为28744，监听PID与Host PID 29872匹配。loopback/LAN/ZeroTier均HTTP 200并加载v96，能力scope分别为local/trusted-lan/trusted-zerotier；伪造XFF不改变sourceAddress。三个入口用错误确认得到400、用不存在collectionId得到409而不是403；恶意Origin为403，LAN Explorer为403。04:00后启动补扫描用97.120秒完成，目录签名未变并跳过完整重建；正式队列总数0，正式媒体移动0。
+
 PowerShell worker 还必须通过解析器检查：
 
 ```powershell

@@ -348,3 +348,4 @@ All notable repository-baseline changes are documented here. Functional behavior
 - 加入每日04:00幂等异步索引扫描、维护任务协调与整点图集回收队列。
 - 图集回收只接受collectionId，服务端双重复核末级纯媒体资格，同盘保留相对路径且冲突不覆盖；操作写入SQLite网页日志。
 - 移除所有卡片封面名称覆盖标签，保留下方标题、媒体徽标、懒加载和原有网格。
+- 正式部署前离线备份`gallery.db`与`gallery.env`；三个正式入口加载v96并获得预期scope。启动补扫描跳过未变化全库，正式回收队列为空且没有移动真实图集。

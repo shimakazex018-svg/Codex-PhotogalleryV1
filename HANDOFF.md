@@ -8,7 +8,9 @@
 
 ## Current State
 
-- 源码前端版本为`v96`；正式部署状态见本次最终报告。
+- 源码与正式48102前端均为`v96`；正式Node PID 28744、Host PID 29872，监听匹配且loopback/LAN/ZeroTier均HTTP 200。
+- 正式配置启用`REMOTE_ADMIN_ENABLED=1`、LAN `192.168.31.0/24`、ZeroTier `192.168.192.0/24`和每日本地时间04:00扫描。
+- v96部署前离线备份为`D:\GalleryRuntime\backups\v96-20260722-093842`，数据库SHA-256为`8318A3BD30A7F6C22EC2F786519F74911D812F7C6A3571843B8F141721BF0011`。
 - `/api/search`默认50/最大60总结果，图集精确/前缀优先且使用`idx_collections_title_nocase`；媒体任意包含fallback仍可能`SCAN media`。
 - 前端搜索为250ms防抖、旧请求Abort、请求序号防乱序、30秒同词缓存和2字符下限；搜索卡片继续只用懒加载WebP预览。
 - 正式配置为`PHOTOS_DIR=E:\A_秀人`、`TRASH_DIR=E:\回收站`，来自`D:\GalleryRuntime\config\gallery.env`，两者同盘；正式回收将使用`File.Move`，跨盘copy-verify-delete仍仅作为不同卷配置的安全后备。
@@ -22,6 +24,10 @@
 - 正式Runtime只读统计基线：4个旧访问日志文件、374条、151354字节，最早`2026-07-12T05:39:19.159Z`；近4日日均93.5条/37838.5字节，估算180天约6.8MB、365天约13.8MB。
 
 ## Validation
+
+- v96启动补扫描从`2026-07-22T01:40:44.043Z`到`01:42:21.163Z`完成，`changed=false`、`skippedFullScan=true`，子进程退出且网站持续响应。
+- 三个正式入口能力scope分别为local/trusted-lan/trusted-zerotier；错误确认400、不存在collectionId 409、恶意Origin 403、LAN Explorer 403。伪造`X-Forwarded-For`没有改变socket来源判定。
+- 正式`collection_recycle_queue` API总数为0；没有标记、回收或移动任何真实图集。
 
 - 正式库只读确认7287个collections、474470条media；原计划为`SCAN c`/`SCAN media`和两个ORDER BY临时B-tree，正式v91十二词API为6.0-16.7秒。
 - 一致性副本运行`PRAGMA optimize`后，精确/前缀图集约37-39ms，高频/路径/数字等约12-85ms，稀疏文件名和无结果约2.3秒；修改后无ORDER BY/DISTINCT临时B-tree。
