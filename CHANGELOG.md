@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-23 - Move collection recycle into the offline daily maintenance window
+
+- Replaced the in-server hourly recycle executor and five-minute retry loop with a daily 04:00 offline workflow: stop the exact 48102 gallery process, move only maintenance-ready collections, restart the gallery, verify loopback health, then start the existing index scan.
+- Added a lock-protected PowerShell orchestrator and an `IgnoreNew` Task Scheduler installer for 03:59:50; timeout/failure paths append maintenance logs, preserve the queue and prioritize website recovery.
+- Kept HTTP media stream cleanup for normal resource hygiene, but removed force-release and daytime retry UI/API. Failed offline moves remain `recycle_failed` for the next maintenance window.
+- Added TEMP-only coverage for next-window scheduling, normal move, simulated EPERM with a held image descriptor, next-window recovery, legacy schema migration and cleanup.
+
 ## 2026-07-22 - Make delayed collection recycle resilient to Windows media handles
 
 - Wrapped image, original-media, poster, HLS and video Range file responses in a shared tracked stream lifecycle that destroys the source stream on response finish, close or error.

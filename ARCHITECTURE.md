@@ -12,14 +12,14 @@ Browser SPA
             ├─ gallery-db.js -> SQLite gallery.db
             ├─ search-fts.js -> FTS schema/state/query/sync core
             ├─ admin-auth.js -> socket/CIDR/Origin统一管理授权
-            ├─ maintenance-schedule.js -> 每日04:00检查与启动补执行
+            ├─ collection-recycle-maintenance.js -> 停站后的离线图集回收
             ├─ filesystem -> PHOTOS_DIR
             ├─ generated files -> DATA_DIR
             ├─ duplicates-worker.js -> SQLite + PHOTOS_DIR
             ├─ video-compatibility-manager.js -> scan lifecycle + report/API augmentation
             ├─ video-compatibility-worker.js -> read-only SQLite + bounded FFprobe/FFmpeg
             ├─ perceptual-manager.js -> bounded pHash worker/query lifecycle
-            ├─ collection_recycle_queue -> delayed same-volume collection recycle + persistent bounded retry
+            ├─ collection_recycle_queue -> 白天标记、04:00离线维护窗口回收
             ├─ scripts/media-library-cleanup-worker.ps1 -> PHOTOS_DIR metadata + DATA_DIR/logs reports + TRASH_DIR manifest
             └─ FFmpeg / FFprobe
 ```
@@ -40,7 +40,10 @@ Browser SPA
 | `search-fts.js` | FTS5能力、schema/state、规范化、两字符/三字符查询、mapping/FTS CRUD、一致性与维护核心 |
 | `admin-auth.js` | 基于socket地址、标记CIDR与Origin的统一管理写权限 |
 | `media-types.js` | 扫描和图集回收资格共用的图片/视频扩展名集合 |
-| `server.js` activeMediaStreams | 仅在内存登记当前Node通过HTTP提供的媒体文件流；响应结束/中断即清理，管理员强制重试仅按目标图集释放登记流 |
+| `server.js` activeMediaStreams | 仅在内存登记当前Node通过HTTP提供的媒体文件流；响应结束/中断即清理，服务停止时由进程退出释放 |
+| `collection-recycle-maintenance.js` | 停站后复核纯媒体目录、路径边界/重解析点、同卷和目标冲突，执行一次性目录rename |
+| `scripts/run-daily-gallery-maintenance.ps1` | 03:59:50任务入口；锁防重入、停止48102、离线回收、启动网站、HTTP健康后启动索引扫描并追加维护日志 |
+| `scripts/install-daily-gallery-maintenance.ps1` | 安装每日03:59:50、`IgnoreNew`的当前用户维护任务 |
 | `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
 | `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
@@ -142,7 +145,7 @@ Browser SPA
 | GET | `/api/media-cleanup/results` | 流式分页扫描结果 |
 | POST | `/api/media-cleanup/recycle`、`/api/media-cleanup/restore` | 统一管理写权限加原确认文字；旧`/delete`返回410 |
 | GET | `/api/admin/capabilities` | 当前socket来源的管理能力，不返回环境配置 |
-| GET/POST | `/api/collection-recycle/status`、`/mark`、`/cancel`、`/retry`、`/force-retry`、`/queue` | 末级图集资格、Node流诊断、持久有界重试与有界分页；全部写操作复用统一管理授权 |
+| GET/POST | `/api/collection-recycle/status`、`/mark`、`/cancel`、`/queue` | 末级图集资格、白天标记/取消和有界分页；移动仅由停站后的维护 worker 执行 |
 | POST | `/api/open-photo-path` | 打开媒体路径 |
 | GET | `/api/refresh-index` | 后端索引刷新入口 |
 | GET | `/api/index/changes` | 目录变化摘要 |

@@ -69,29 +69,29 @@ v96通过`SEARCH_BACKEND_MODE=auto|fts5|legacy-like`选择后端。auto只有索
 
 ### Status
 阶段A定型有效；仅完整副本和隔离脚本验证，正式数据库、API、扫描器、前端版本和部署均未修改。
-## DEC-029：Windows图集回收采用Node流登记与有界持久重试
+## DEC-029：Windows图集回收采用离线维护窗口
 
 ### Decision
-所有由`sendFile()`提供的图片、原图、poster、HLS和视频Range响应统一登记进程内媒体流，并在HTTP响应`finish/close/error`时幂等销毁和移除。图集rename遇到`EPERM/EBUSY`进入`retry-waiting`，每5分钟重试，最多12次；计数、下次时间和最近错误写入SQLite，完整尝试详情追加到运行日志。管理员强制重试只销毁目标图集下由当前Node登记的流，并在rename完成前短暂阻止该目录新流，不调用外部句柄工具、不终止进程。
+所有由`sendFile()`提供的图片、原图、poster、HLS和视频Range响应统一登记进程内媒体流，并在HTTP响应`finish/close/error`时幂等销毁和移除。白天只允许标记和取消；满足60分钟后，任务在每日04:00独立维护编排中先停止唯一48102 Node，再离线复核并rename。失败记录为`recycle_failed`，下一维护窗口再转换为待处理；不使用Handle.exe、不关闭外部句柄、不提供强制释放或白天自动重试。
 
 ### Reason
-Windows不允许移动仍含开放文件句柄的目录；浏览器断网或取消请求时只依赖pipe默认行为可能延迟释放句柄。内存登记足以诊断和释放本服务自身流，持久有界重试可跨重启恢复且不会无限占用CPU或磁盘。
+Windows不允许移动仍含开放文件句柄的目录。停止唯一图库进程并确认48102监听退出后再移动，避免浏览器连接和Node流成为正常回收路径的锁源；离线 worker 保持路径、重解析点、纯媒体和同卷复核。
 
 ### Status
-有效；隔离测试通过，正式Runtime尚未重启，正式数据库尚未执行三列幂等迁移。
+有效；隔离测试通过，正式任务尚未安装、正式Runtime未重启，正式媒体未移动。
 
 ## DEC-028：末级图集使用持久延迟回收队列
 
 ### Decision
-仅服务端复核为非根、无ReparsePoint、无子目录、至少一个文件且全部为标准媒体的图集可标记；`eligibleAt=markedAt+60分钟`，`scheduledAt`为其后的第一个整点。执行时再次复核，同盘目录rename到`TRASH_DIR`相同相对路径，冲突追加短ID且绝不覆盖。
+仅服务端复核为非根、无ReparsePoint、无子目录、至少一个文件且全部为标准媒体的图集可标记；`eligibleAt=markedAt+60分钟`，`scheduledAt`为其后的下一个04:00维护窗口。执行时再次复核，同盘目录rename到`TRASH_DIR`相同相对路径，冲突追加短ID且绝不覆盖。
 
 ### Status
 有效，v96实施；没有自动标记或移动正式图集。
 
-## DEC-027：每日04:00由Node协调回收后异步扫描
+## DEC-027：每日04:00由外部编排停站回收后启动扫描
 
 ### Decision
-复用`startScanTask()`子进程，每日按本地时间重新计算触发；`maintenance_state`保证已完成日期不重复，繁忙时记录并10分钟后重试。04:00与整点重合时先完成到期回收批次，再启动一次索引扫描。
+Windows Task Scheduler在03:59:50触发一次性PowerShell编排器，并以Runtime锁和`IgnoreNew`防重复。编排器精确停止正式server.js/48102，最多等30秒且不强杀；离线回收完成后启动网站、确认loopback HTTP 200，最后通过本地API启动现有索引扫描。任一步失败优先恢复网站，队列保留给下一窗口。
 
 ### Status
 有效，v96实施。

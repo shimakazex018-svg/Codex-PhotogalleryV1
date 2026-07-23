@@ -208,14 +208,15 @@ function openDatabase(dbFile) {
   if (!recycleColumns.has("next_retry_time")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN next_retry_time TEXT");
   if (!recycleColumns.has("last_error")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN last_error TEXT");
   const activeRecycleIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_collection_recycle_active'").get();
-  if (!activeRecycleIndex?.sql?.includes("retry-waiting")) {
+  if (!activeRecycleIndex?.sql?.includes("ready-for-maintenance")) {
     db.exec(`
       DROP INDEX IF EXISTS idx_collection_recycle_active;
       CREATE UNIQUE INDEX idx_collection_recycle_active
-        ON collection_recycle_queue(collection_id) WHERE status IN ('pending', 'recycling', 'retry-waiting');
+        ON collection_recycle_queue(collection_id) WHERE status IN ('pending', 'waiting', 'ready-for-maintenance', 'recycling');
     `);
   }
-  db.exec("CREATE INDEX IF NOT EXISTS idx_collection_recycle_retry_due ON collection_recycle_queue(status, next_retry_time)");
+  db.exec("DROP INDEX IF EXISTS idx_collection_recycle_retry_due");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_collection_recycle_maintenance_due ON collection_recycle_queue(status, eligible_at, scheduled_at)");
   if (!perceptualSchemaExisted) {
     db.prepare(`INSERT OR IGNORE INTO perceptual_hash_state
       (id,algorithm,algorithm_version,status,baseline_bytes,updated_at,recent_error)
@@ -1052,7 +1053,7 @@ function rowToRecycle(row) {
 function createCollectionRecycle(dbFile, item) {
   return withDatabase(dbFile, (db) => {
     db.prepare(`INSERT INTO collection_recycle_queue (id, collection_id, relative_path, title, status, marked_at, eligible_at, scheduled_at,
-      source_path_snapshot, requested_ip, requested_scope, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`)
+      source_path_snapshot, requested_ip, requested_scope, updated_at) VALUES (?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?)`)
       .run(item.id, item.collectionId, item.relativePath, item.title, item.markedAt, item.eligibleAt, item.scheduledAt, item.sourcePathSnapshot,
         item.requestedIp || "", item.requestedScope || "", item.markedAt);
     return rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE id = ?").get(item.id));
@@ -1060,7 +1061,7 @@ function createCollectionRecycle(dbFile, item) {
 }
 
 function getActiveCollectionRecycle(dbFile, collectionId) {
-  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? AND status IN ('pending','recycling','retry-waiting') ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
+  return withDatabase(dbFile, (db) => rowToRecycle(db.prepare("SELECT * FROM collection_recycle_queue WHERE collection_id = ? AND status IN ('pending','waiting','ready-for-maintenance','recycling') ORDER BY marked_at DESC LIMIT 1").get(collectionId)));
 }
 
 function getLatestCollectionRecycle(dbFile, collectionId) {
@@ -1069,21 +1070,26 @@ function getLatestCollectionRecycle(dbFile, collectionId) {
 
 function cancelCollectionRecycle(dbFile, collectionId, now = new Date().toISOString()) {
   return withDatabase(dbFile, (db) => {
-    const result = db.prepare("UPDATE collection_recycle_queue SET status='cancelled', finished_at=?, next_retry_time=NULL, updated_at=? WHERE collection_id=? AND status IN ('pending','retry-waiting')").run(now, now, collectionId);
+    const result = db.prepare("UPDATE collection_recycle_queue SET status='cancelled', finished_at=?, next_retry_time=NULL, updated_at=? WHERE collection_id=? AND status IN ('pending','waiting','ready-for-maintenance')").run(now, now, collectionId);
     return { cancelled: result.changes || 0 };
   });
 }
 
-function getDueCollectionRecycles(dbFile, now, limit = 100) {
-  return withDatabase(dbFile, (db) => db.prepare(`SELECT * FROM collection_recycle_queue
-    WHERE (status='pending' AND scheduled_at <= ?) OR (status='retry-waiting' AND next_retry_time <= ?)
-    ORDER BY CASE WHEN status='retry-waiting' THEN next_retry_time ELSE scheduled_at END, id LIMIT ?`)
-    .all(now, now, Math.min(Math.max(Number(limit)||100,1),200)).map(rowToRecycle));
+function prepareCollectionRecycleMaintenance(dbFile, now) {
+  return withDatabase(dbFile, (db) => {
+    const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+    const ready = db.prepare(`UPDATE collection_recycle_queue SET status='ready-for-maintenance', updated_at=?
+      WHERE status IN ('pending','waiting') AND eligible_at <= ?`).run(now, now).changes || 0;
+    const retry = db.prepare(`UPDATE collection_recycle_queue SET status='ready-for-maintenance', updated_at=?
+      WHERE status='recycle_failed' AND finished_at < ?`).run(now, dayStart.toISOString()).changes || 0;
+    return { ready, retry };
+  });
 }
 
-function getNextCollectionRecycleTime(dbFile) {
-  return withDatabase(dbFile, (db) => db.prepare(`SELECT MIN(CASE WHEN status='retry-waiting' THEN next_retry_time ELSE scheduled_at END) due_at
-    FROM collection_recycle_queue WHERE status IN ('pending','retry-waiting')`).get()?.due_at || "");
+function getReadyCollectionRecycles(dbFile, limit = 100) {
+  return withDatabase(dbFile, (db) => db.prepare(`SELECT * FROM collection_recycle_queue
+    WHERE status='ready-for-maintenance' ORDER BY eligible_at, id LIMIT ?`)
+    .all(Math.min(Math.max(Number(limit)||100,1),200)).map(rowToRecycle));
 }
 
 function updateCollectionRecycle(dbFile, id, changes) {
@@ -1547,8 +1553,8 @@ module.exports = {
   getActiveCollectionRecycle,
   getLatestCollectionRecycle,
   cancelCollectionRecycle,
-  getDueCollectionRecycles,
-  getNextCollectionRecycleTime,
+  prepareCollectionRecycleMaintenance,
+  getReadyCollectionRecycles,
   updateCollectionRecycle,
   getCollectionRecyclePage,
   getDuplicateHashStats,

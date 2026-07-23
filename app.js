@@ -1987,34 +1987,23 @@ function collectionRecycleButtonHtml(collection) {
   if (!status || !state.adminCapabilities?.canMarkCollectionRecycle || (!status.eligible && !status.item)) return "";
   const item = status.item;
   const itemStatus = item?.status || "";
-  const pending = itemStatus === "pending";
+  const pending = ["pending", "waiting", "ready-for-maintenance"].includes(itemStatus);
   const recycling = itemStatus === "recycling";
-  const retryWaiting = itemStatus === "retry-waiting";
-  const failed = ["failed", "failed-awaiting-review", "skipped-ineligible"].includes(itemStatus);
+  const failed = ["failed", "failed-awaiting-review", "recycle_failed", "skipped-ineligible"].includes(itemStatus);
   const error = item?.lastError || item?.error || "";
-  const maxRetries = Number(status.maxRetries || 12);
   const errorLabel = /\b(EPERM|EBUSY)\b/.test(error) ? `${error.match(/\b(EPERM|EBUSY)\b/)[1]} 文件正在被占用` : error;
-  const streams = Array.isArray(status.activeStreams) ? status.activeStreams : [];
-  const streamHtml = streams.length ? `<div class="collection-recycle-streams"><strong>Node 正在占用：</strong>${streams.map((stream) =>
-    `<code>${escapeHtml(stream.path)}</code><span>PID ${escapeHtml(stream.pid)}</span>`).join("")}</div>` : "";
-  const timing = pending ? `标记：${escapeHtml(new Date(item.markedAt).toLocaleString())}<br>最早：${escapeHtml(new Date(item.eligibleAt).toLocaleString())}<br>计划：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}`
-    : retryWaiting ? `⚠ 回收暂未成功<br>原因：${escapeHtml(errorLabel || "文件被占用")}<br>已重试：${Number(item.retryCount || 0)}/${maxRetries}<br>下次：${escapeHtml(new Date(item.nextRetryTime).toLocaleString())}`
-    : failed ? `⚠ 回收失败<br>原因：${escapeHtml(errorLabel || "未知错误")}<br>已重试：${Number(item.retryCount || 0)}/${maxRetries}` : "";
+  const timing = pending ? `已标记回收<br>将在下一次凌晨维护窗口执行<br>预计：${escapeHtml(new Date(item.scheduledAt).toLocaleString())}`
+    : failed ? `⚠ 上次维护回收失败<br>原因：${escapeHtml(errorLabel || "未知错误")}<br>将在下一次凌晨维护窗口重试` : "";
   const controls = pending
     ? `<button class="collection-recycle-button active" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="cancel" aria-pressed="true">取消回收</button>`
     : recycling
       ? `<button class="collection-recycle-button active" type="button" disabled aria-pressed="true">回收中</button>`
-      : (retryWaiting || failed)
-        ? `<div class="collection-recycle-controls">
-            <button class="collection-recycle-button active" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="retry">重试回收</button>
-            <button class="collection-recycle-button danger" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="force-retry">强制释放并回收</button>
-            ${retryWaiting ? `<button class="collection-recycle-cancel" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="cancel">取消重试</button>` : ""}
-          </div>`
+      : failed
+        ? ``
         : `<button class="collection-recycle-button" type="button" data-collection-recycle="${escapeHtml(collection.id)}" data-collection-recycle-action="mark" aria-pressed="false">回收</button>`;
   return `<div class="collection-recycle-action">
     ${controls}
-    ${timing ? `<div class="collection-recycle-time${failed || retryWaiting ? " failed" : ""}">${timing}</div>` : ""}
-    ${streamHtml}
+    ${timing ? `<div class="collection-recycle-time${failed ? " failed" : ""}">${timing}</div>` : ""}
   </div>`;
 }
 
@@ -2023,8 +2012,7 @@ function bindCollectionRecycleButtons() {
     const collectionId = button.dataset.collectionRecycle;
     const collection = state.sqliteCollections.get(collectionId);
     const action = button.dataset.collectionRecycleAction;
-    const endpoints = { mark: "/api/collection-recycle/mark", cancel: "/api/collection-recycle/cancel",
-      retry: "/api/collection-recycle/retry", "force-retry": "/api/collection-recycle/force-retry" };
+    const endpoints = { mark: "/api/collection-recycle/mark", cancel: "/api/collection-recycle/cancel" };
     button.disabled = true;
     try {
       await postJson(endpoints[action], { collectionId });
@@ -2032,7 +2020,7 @@ function bindCollectionRecycleButtons() {
       render();
     } catch (error) {
       button.disabled = false;
-      alert(action === "cancel" ? "取消回收失败。" : action === "mark" ? "标记回收失败，图集可能已不再符合条件。" : "重试回收失败，请查看最新错误状态。");
+      alert(action === "cancel" ? "取消回收失败。" : "标记回收失败，图集可能已不再符合条件。");
     }
   }));
 }

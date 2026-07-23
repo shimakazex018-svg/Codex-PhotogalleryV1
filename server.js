@@ -2732,8 +2732,8 @@ function collectionRecycleEligibility(collectionId, options = {}) {
 function recycleSchedule(markedAt) {
   const eligible = new Date(markedAt.getTime() + 60 * 60 * 1000);
   const scheduled = new Date(eligible);
-  if (scheduled.getMinutes() || scheduled.getSeconds() || scheduled.getMilliseconds()) scheduled.setHours(scheduled.getHours() + 1, 0, 0, 0);
-  else scheduled.setMinutes(0, 0, 0);
+  scheduled.setHours(4, 0, 0, 0);
+  if (scheduled < eligible) scheduled.setDate(scheduled.getDate() + 1);
   return { eligibleAt: eligible.toISOString(), scheduledAt: scheduled.toISOString() };
 }
 
@@ -2751,7 +2751,7 @@ function markCollectionRecycle(request, collectionId, auth) {
 
 function cancelCollectionRecycle(request, collectionId, auth) {
   const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
-  if (!active || !["pending", "retry-waiting"].includes(active.status)) { const error = new Error("Pending recycle mark was not found."); error.statusCode = 409; throw error; }
+  if (!active || !["pending", "waiting", "ready-for-maintenance"].includes(active.status)) { const error = new Error("Pending recycle mark was not found."); error.statusCode = 409; throw error; }
   const result = galleryDb.cancelCollectionRecycle(galleryDbFile, collectionId);
   appendOperationLog({ ip: auth.sourceAddress, type: "collection-recycle-cancel", title: "取消图集回收", work: active.title, pathParts: active.relativePath.split(path.sep) });
   return { ok: true, ...result };
@@ -2892,14 +2892,7 @@ function startIndexAfterRecycle(reason, scheduledDate = "") {
 
 function scheduleCollectionRecycle() {
   clearTimeout(hourlyCollectionRecycleTimer);
-  const now = new Date(); const next = new Date(now); next.setHours(now.getHours() + 1, 0, 0, 0);
-  let dueAt = NaN;
-  try { dueAt = Date.parse(galleryDb.getNextCollectionRecycleTime(galleryDbFile) || ""); }
-  catch (error) { logEvent("collection_recycle_schedule_read_failed", { error: error.message }); }
-  const wakeAt = Number.isFinite(dueAt) ? Math.min(next.getTime(), dueAt) : next.getTime();
-  const delay = collectionRecycleTestIntervalMs || Math.max(wakeAt - now.getTime(), 30000);
-  hourlyCollectionRecycleTimer = setTimeout(() => { const batch = processCollectionRecycleBatch(); const current = new Date(); const dailyWindow = dailyIndexScanEnabled && current.getHours() === dailyIndexScanHour && current.getMinutes() === dailyIndexScanMinute;
-    if (batch.moved && !dailyWindow && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of batch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } }); scheduleCollectionRecycle(); }, delay);
+  // Kept as a compatibility no-op for old in-process callers. Movement is offline-only.
 }
 
 function runDailyIndexScanIfDue() {
@@ -3465,12 +3458,12 @@ function handleRequest(request, response) {
       const check = collectionRecycleEligibility(collectionId);
       const active = galleryDb.getActiveCollectionRecycle(galleryDbFile, collectionId);
       const latest = active || galleryDb.getLatestCollectionRecycle(galleryDbFile, collectionId);
-      const failed = latest && ["failed", "failed-awaiting-review", "retry-waiting", "skipped-ineligible"].includes(latest.status);
+      const failed = latest && ["failed", "failed-awaiting-review", "recycle_failed", "skipped-ineligible"].includes(latest.status);
       const sourcePath = check.sourcePath || (latest?.relativePath ? path.resolve(photosDir, latest.relativePath) : "");
       const authorized = adminAuthorizer.capability(request).authorized;
       sendJson(response, { collectionId, eligible: check.eligible, reason: check.reason, item: active || (failed ? latest : null),
         activeStreams: sourcePath && isInsideDir(photosDir, sourcePath) ? mediaStreamDiagnostics(sourcePath) : [],
-        canMark: authorized && check.eligible, canRetry: authorized && Boolean(failed), maxRetries: collectionRecycleMaxRetries });
+        canMark: authorized && check.eligible, canRetry: false, maxRetries: collectionRecycleMaxRetries });
     } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
@@ -3480,15 +3473,14 @@ function handleRequest(request, response) {
     return;
   }
 
-  if (["/api/collection-recycle/mark", "/api/collection-recycle/cancel", "/api/collection-recycle/retry", "/api/collection-recycle/force-retry"].includes(requestUrl.pathname)) {
+  if (["/api/collection-recycle/mark", "/api/collection-recycle/cancel"].includes(requestUrl.pathname)) {
     if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
     const action = requestUrl.pathname.split("/").pop();
     const auth = requireAdminWrite(request, response, `collection-recycle-${action}`);
     if (!auth) return;
     readRequestBody(request, async (body) => { try { const payload=JSON.parse(body||"{}"); const collectionId=String(payload.collectionId||"");
       if (action === "mark") sendJson(response, markCollectionRecycle(request, collectionId, auth));
-      else if (action === "cancel") sendJson(response, cancelCollectionRecycle(request, collectionId, auth));
-      else sendJson(response, await retryCollectionRecycle(request, collectionId, auth, action === "force-retry"));
+      else sendJson(response, cancelCollectionRecycle(request, collectionId, auth));
     } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); } });
     return;
   }
@@ -3668,10 +3660,9 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   restoreLatestMediaCleanupTask();
   scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
-  const startupRecycleBatch = processCollectionRecycleBatch();
-  if (startupRecycleBatch.moved && !maintenanceBusy("scan")) startScanTask({ onComplete: (result) => { if (result.status !== "completed") for (const id of startupRecycleBatch.movedIds || []) galleryDb.updateCollectionRecycle(galleryDbFile, id, { indexRefreshError: result.errorMessage || result.status }); } });
-  scheduleCollectionRecycle();
-  scheduleDailyIndexScan();
+  // Collection movement is intentionally offline-only. The 04:00 PowerShell orchestrator
+  // stops this process before invoking the standalone maintenance worker, then starts us
+  // again and requests the normal scan through the local API.
 
   const httpServer = http.createServer(handleRequest).listen(port, host, () => {
     console.log(`Photo gallery site started: http://localhost:${port}`);
