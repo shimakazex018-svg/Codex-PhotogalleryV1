@@ -7,6 +7,7 @@
 - Reused the existing server task mutual-exclusion gate, added a unified task status view/poll, and made browser polling single-timer, route-aware and abort-safe.
 - Standardized SQLite `busy_timeout=5000` on writable and read-only connections, converted routine status reads to read-only connections, and added bounded pHash write-batch retry (five attempts) without extending transaction scope.
 - Added disposable SQLite and isolated HTTP tests for the summary API and restart-safe pHash `interrupted` state. No formal database, media scan, index run, move or deletion occurred.
+- Published `v106-20260726-0909` through the existing Runtime scripts after an SQLite online backup. The exact 48102 Node changed from PID 35760 to 1324; loopback, LAN and ZeroTier all returned HTTP 200, `quick_check=ok`, stderr remained empty and the recycle queue was unchanged.
 
 ## 2026-07-23 - Move collection recycle into the offline daily maintenance window
 
