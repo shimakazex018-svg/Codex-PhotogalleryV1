@@ -1,7 +1,8 @@
 param(
   [string]$EnvFile = "D:\GalleryRuntime\config\gallery.env",
   [int]$StopTimeoutSeconds = 30,
-  [int]$StartTimeoutSeconds = 30
+  [int]$StartTimeoutSeconds = 30,
+  [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,7 @@ $workerScript = Join-Path $PSScriptRoot "run-collection-recycle-maintenance.js"
 $nodePath = (Test-GalleryEnvironment -Config $config -ProjectRoot (Split-Path -Parent $PSScriptRoot)).NodePath
 $stopped = $false
 $healthy = $false
+$dryRunCompleted = $false
 
 function Write-MaintenanceLog {
   param([string]$Type, [hashtable]$Details = @{})
@@ -50,6 +52,16 @@ try {
 }
 
 try {
+  if ($DryRun) {
+    $status = Get-GalleryStatus
+    $serverPath = Join-Path (Split-Path -Parent $PSScriptRoot) "server.js"
+    Write-MaintenanceLog "maintenance_dry_run" @{ nodePid = $status.NodePID; listenerPid = $status.ListenerPID; serverPath = $serverPath; workingDirectory = (Split-Path -Parent $PSScriptRoot); healthUrl = "http://127.0.0.1:$($config.PORT)/"; startCommand = "$startScript -EnvFile $EnvFile" }
+    & $nodePath $workerScript --db (Join-Path $config.DATA_DIR "gallery.db") --photos $config.PHOTOS_DIR --trash $config.TRASH_DIR --log $maintenanceLog --dry-run
+    if ($LASTEXITCODE -ne 0) { throw "collection maintenance dry-run worker failed with exit code $LASTEXITCODE" }
+    Write-MaintenanceLog "maintenance_dry_run_complete"
+    $dryRunCompleted = $true
+    return
+  }
   @{ maintenance_mode = $true; startedAt = (Get-Date).ToUniversalTime().ToString("o"); phase = "stopping" } | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
   Write-MaintenanceLog "maintenance_start"
   & $stopScript -RuntimeRoot $runtimeRoot
@@ -92,4 +104,5 @@ try {
   Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
 }
 
+if ($dryRunCompleted) { exit 0 }
 if (-not $healthy) { exit 1 }

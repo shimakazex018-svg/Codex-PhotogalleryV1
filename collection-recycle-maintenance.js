@@ -62,12 +62,12 @@ function processReadyItem(item, options) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     (options.renameSync || fs.renameSync)(sourcePath, targetPath);
     const status = target.conflict ? "conflict-renamed" : "recycled";
-    galleryDb.updateCollectionRecycle(options.dbFile, item.id, { status, finishedAt: new Date().toISOString(), recyclePath: path.relative(options.trashDir, targetPath), error: null, lastError: null, nextRetryTime: null });
+    galleryDb.updateCollectionRecycle(options.dbFile, item.id, { status, finishedAt: now.toISOString(), recyclePath: path.relative(options.trashDir, targetPath), error: null, lastError: null, nextRetryTime: null });
     options.log?.("recycle_success", { id: item.id, collectionId: item.collectionId, sourcePath, targetPath, fileCount: source.fileCount, retryCount, conflictRenamed: target.conflict });
     return { moved: true, id: item.id, status, fileCount: source.fileCount };
   } catch (error) {
     const status = error.ineligible ? "skipped-ineligible" : "recycle_failed";
-    galleryDb.updateCollectionRecycle(options.dbFile, item.id, { status, finishedAt: new Date().toISOString(), error: error.message, lastError: error.message, retryCount, nextRetryTime: null });
+    galleryDb.updateCollectionRecycle(options.dbFile, item.id, { status, finishedAt: now.toISOString(), error: error.message, lastError: error.message, retryCount, nextRetryTime: null });
     options.log?.("recycle_failed", { id: item.id, collectionId: item.collectionId, sourcePath, targetPath, errorType: error.code || (error.ineligible ? "INELIGIBLE" : "UNKNOWN"), error: error.message, retryCount });
     return { moved: false, id: item.id, status, error: error.message };
   }
