@@ -4,12 +4,13 @@
 
 ## Last Completed Task
 
-已完成`v107-20260726-0922`发布准备：修复显示设置异步重复渲染时工具栏仍留在即将被替换的`#view`内而被删除的问题。修复只在设置页渲染前调用既有还原逻辑；TEMP回归测试通过，尚未重启正式网站或触碰正式媒体。
+已发布`v107-20260726-0922`：修复显示设置异步重复渲染时工具栏仍留在即将被替换的`#view`内而被删除的问题。修复只在设置页渲染前调用既有还原逻辑；TEMP回归测试与正式浏览器确认通过，未触碰正式媒体。
 
 ## Current State
 
 - 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
 - v106由Node PID 35760精确重启为PID 1324、Host PID 1092；loopback、LAN与ZeroTier均为HTTP 200并加载`v106-20260726-0909`。每日任务`Codex-PhotogalleryV1-DailyMaintenance`已安装，下一次执行为2026-07-27 03:59:50。
+- v107由Node PID 1324精确重启为PID 20412、Host PID 30368；正式`#/__settings`已确认显示设置包含每行数量、Cover、懒加载、明暗模式和排序控件，且加载`v107-20260726-0922`。
 - `-DryRun`已验证：可取得/释放维护锁、识别正式PID与健康URL、列出0条`ready-for-maintenance`，未停止网站、未写队列、未移动媒体。编排锁位于既有Runtime logs目录；停止超时记录`maintenance_stop_timeout`且不强杀，失败优先恢复网站。
 - 正式失败图集`梦心玥/爱蜜社/[IMISS爱蜜社][NO.001]...`的源目录与40张图片仍完整、回收目标不存在；旧记录仍为`failed`、重试数0、下次重试为空。页面已只读确认失败原因、普通重试和强制释放入口均显示，本轮没有点击或自动重试，没有移动或删除正式媒体。
 - 正式库已幂等新增`collection_recycle_queue.retry_count/next_retry_time/last_error`及`retry-waiting`活动/到期索引，`PRAGMA quick_check=ok`。v104部署前一致性备份为`D:\GalleryRuntime\backups\pre-v104-20260722T132318Z\gallery.db`，SHA-256为`004588ee8af900d497e9c373d7fed60adaf2fa73f17b41c2a934567b58f171a6`。

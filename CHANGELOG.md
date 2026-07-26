@@ -3,6 +3,7 @@
 ## 2026-07-26 - Restore display-settings controls on rerender
 
 - Restored the existing toolbar settings mount before each settings-page replacement, preventing the asynchronous settings refresh from deleting its own controls. Added a minimal regression assertion; no media, task, database or API behavior changed.
+- Published `v107-20260726-0922` by exact Runtime restart (PID 1324 to 20412); the formal display-settings page and version asset were browser-verified.
 
 ## 2026-07-26 - Consolidate media-library optimization controls
 
