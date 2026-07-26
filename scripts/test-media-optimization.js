@@ -6,11 +6,13 @@ const os = require("os");
 const path = require("path");
 const galleryDb = require("../gallery-db");
 const { createManager } = require("../perceptual-manager");
+const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "photogallery-media-optimization-"));
 const dbFile = path.join(root, "gallery.db");
 
 try {
+  assert.match(appSource, /function renderSettingsPage\(\) \{\s+restoreToolbarSettings\(\);/, "settings rerender must restore the toolbar before replacing the view");
   // Schema creation and all assertions use a disposable database only.
   galleryDb.indexGallery(dbFile, { models: [], collections: [] });
   const summary = galleryDb.getMediaOptimizationSummary(dbFile);

@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v106-20260726-0909";
+const APP_VERSION = "v107-20260726-0922";
 const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
@@ -3062,6 +3062,7 @@ function bindVideoCompatibilityPage() {
 }
 
 function renderSettingsPage() {
+  restoreToolbarSettings();
   renderCrumbs();
   const section = settingsSection();
   const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", "media-optimization": "媒体库优化", "access-log": "访问日志", "release-notes": "版本更新记录" };

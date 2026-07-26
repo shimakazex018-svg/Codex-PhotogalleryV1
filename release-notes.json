@@ -1,5 +1,13 @@
 [
   {
+    "version": "v107-20260726-0922",
+    "releasedAt": "2026-07-26T09:22:00+08:00",
+    "timePrecision": "minute",
+    "items": [
+      "修复显示设置内容在重复渲染后消失。"
+    ]
+  },
+  {
     "version": "v106-20260726-0909",
     "releasedAt": "2026-07-26T09:09:00+08:00",
     "timePrecision": "minute",

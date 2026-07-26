@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前正式前端版本为`v106-20260726-0909`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）。
+- 当前正式前端版本为`v107-20260726-0922`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前唯一正式源码分支为`main`；v103集成分支已经完整快进、推送并在验收后删除。仅因活动Codex控制内核占用而暂留本地`codex/media-library-cleanup` Worktree，其HEAD已是main祖先且远程分支已删除。
 

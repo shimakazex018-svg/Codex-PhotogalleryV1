@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-26 - Restore display-settings controls on rerender
+
+- Restored the existing toolbar settings mount before each settings-page replacement, preventing the asynchronous settings refresh from deleting its own controls. Added a minimal regression assertion; no media, task, database or API behavior changed.
+
 ## 2026-07-26 - Consolidate media-library optimization controls
 
 - Replaced four first-level settings entries with one `媒体库优化` workspace. The existing duplicate, pHash, cleanup and video-compatibility hashes remain compatible and open their matching subsection.
