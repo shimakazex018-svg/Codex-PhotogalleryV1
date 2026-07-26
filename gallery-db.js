@@ -23,6 +23,7 @@ function openDatabase(dbFile) {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
 
     CREATE TABLE IF NOT EXISTS collections (
       id TEXT PRIMARY KEY,
@@ -489,15 +490,15 @@ function withReadOnlyDatabase(dbFile, callback) {
 }
 
 function getStats(dbFile) {
-  return withDatabase(dbFile, (db) => getStatsFromDb(db));
+  return withReadOnlyDatabase(dbFile, (db) => getStatsFromDb(db));
 }
 
 function getScanState(dbFile, scanPath) {
-  return withDatabase(dbFile, (db) => db.prepare("SELECT * FROM scan_state WHERE path = ?").get(scanPath) || null);
+  return withReadOnlyDatabase(dbFile, (db) => db.prepare("SELECT * FROM scan_state WHERE path = ?").get(scanPath) || null);
 }
 
 function getScanStatesByKind(dbFile, kind) {
-  return withDatabase(dbFile, (db) => db.prepare("SELECT * FROM scan_state WHERE kind = ?").all(kind));
+  return withReadOnlyDatabase(dbFile, (db) => db.prepare("SELECT * FROM scan_state WHERE kind = ?").all(kind));
 }
 
 function upsertScanState(dbFile, state) {
@@ -616,7 +617,7 @@ function getVideoById(dbFile, mediaId) {
 }
 
 function getVideoCount(dbFile) {
-  return withDatabase(dbFile, (db) => Number(db.prepare("SELECT COUNT(*) AS count FROM media WHERE type = 'video'").get().count || 0));
+  return withReadOnlyDatabase(dbFile, (db) => Number(db.prepare("SELECT COUNT(*) AS count FROM media WHERE type = 'video'").get().count || 0));
 }
 
 const searchCollectionColumns = `
@@ -1161,7 +1162,7 @@ function deleteUserMark(dbFile, id, markType = "") {
 }
 
 function getDuplicateHashStats(dbFile) {
-  return withDatabase(dbFile, (db) => {
+  return withReadOnlyDatabase(dbFile, (db) => {
     const imageCount = db.prepare("SELECT COUNT(*) AS count FROM media WHERE type = 'image'").get().count;
     const hashedCount = db.prepare("SELECT COUNT(*) AS count FROM media_hashes").get().count;
     const duplicateGroupCount = db
@@ -1185,6 +1186,26 @@ function getDuplicateHashStats(dbFile) {
       )
       .get().count;
     return { imageCount, hashedCount, pendingCount: Math.max(0, imageCount - hashedCount), duplicateGroupCount, duplicateItemCount };
+  });
+}
+
+function getMediaOptimizationSummary(dbFile) {
+  return withReadOnlyDatabase(dbFile, (db) => {
+    const row = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM media WHERE type='image') AS image_count,
+      (SELECT COUNT(*) FROM media WHERE type='video') AS video_count,
+      (SELECT COUNT(*) FROM media_hashes WHERE sha256 != '') AS hashed_images,
+      (SELECT COUNT(*) FROM media_perceptual_hashes WHERE status=1 AND length(hash64)=8) AS perceptual_images,
+      (SELECT COUNT(*) FROM media_perceptual_hashes WHERE status=2) AS perceptual_failed,
+      (SELECT last_scanned_at FROM scan_state WHERE path=? LIMIT 1) AS last_scanned_at`).get("__photos_global__") || {};
+    return {
+      imageCount: Number(row.image_count || 0),
+      videoCount: Number(row.video_count || 0),
+      hashedImages: Number(row.hashed_images || 0),
+      perceptualImages: Number(row.perceptual_images || 0),
+      perceptualFailed: Number(row.perceptual_failed || 0),
+      lastScannedAt: row.last_scanned_at || "",
+    };
   });
 }
 
@@ -1558,6 +1579,7 @@ module.exports = {
   updateCollectionRecycle,
   getCollectionRecyclePage,
   getDuplicateHashStats,
+  getMediaOptimizationSummary,
   findImagesBySha256,
   getPerceptualHashStats,
   getMediaItemsByPerceptualIds,

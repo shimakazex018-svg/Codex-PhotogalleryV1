@@ -41,6 +41,7 @@ function filePathFromSrc(src) {
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function safeError(error) { return String(error?.message || error || "pHash calculation failed").replace(/[\r\n]+/g, " ").slice(0, 200); }
+function isBusyError(error) { return /database is locked|sqlite_busy|database is busy/i.test(String(error?.message || error || "")); }
 
 async function main() {
   const db = new DatabaseSync(databaseFile);
@@ -63,19 +64,24 @@ async function main() {
     VALUES(?,NULL,?,?,?,2,?) ON CONFLICT(media_id) DO UPDATE SET hash64=NULL,source_size=excluded.source_size,
     source_mtime=excluded.source_mtime,computed_at=excluded.computed_at,status=2,error_code=excluded.error_code`);
   const pendingWrites = [];
-  const flushWrites = () => {
+  const flushWrites = async () => {
     if (!pendingWrites.length) return;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const item of pendingWrites) {
-        if (item.hash64) upsertReady.run(item.mediaId, item.hash64, item.size, item.mtime, item.computedAt);
-        else upsertError.run(item.mediaId, item.size, item.mtime, item.computedAt, item.errorCode);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        for (const item of pendingWrites) {
+          if (item.hash64) upsertReady.run(item.mediaId, item.hash64, item.size, item.mtime, item.computedAt);
+          else upsertError.run(item.mediaId, item.size, item.mtime, item.computedAt, item.errorCode);
+        }
+        db.exec("COMMIT");
+        pendingWrites.length = 0;
+        return;
+      } catch (error) {
+        try { db.exec("ROLLBACK"); } catch (rollbackError) {}
+        if (!isBusyError(error) || attempt === 4) throw error;
+        recentError = `SQLite busy，正在重试写入批次（${attempt + 1}/5）`;
+        await wait(100 * (attempt + 1));
       }
-      db.exec("COMMIT");
-      pendingWrites.length = 0;
-    } catch (error) {
-      try { db.exec("ROLLBACK"); } catch (rollbackError) {}
-      throw error;
     }
   };
   const rows = db.prepare(`SELECT m.id,m.src,COALESCE(m.size,0) AS size,COALESCE(m.mtime,0) AS mtime
@@ -99,7 +105,7 @@ async function main() {
   publish("running");
   for (const row of rows) {
     if (stopping || (maxItems && counters.processed >= maxItems)) break;
-    if (command === "pause") flushWrites();
+    if (command === "pause") await flushWrites();
     while (command === "pause" && !stopping) { publish("paused"); await wait(250); }
     const beforeBytes = Math.max(0, diskBytes() - baselineBytes);
     const limitStatus = diskLimitStatus(beforeBytes);
@@ -121,11 +127,11 @@ async function main() {
       counters.failed += 1;
     }
     counters.processed += 1;
-    if (pendingWrites.length >= 10) flushWrites();
+    if (pendingWrites.length >= 10) await flushWrites();
     if (counters.processed % 10 === 0) publish("running", relative);
     if (counters.processed % 25 === 0) await wait(50);
   }
-  flushWrites();
+  await flushWrites();
   const finalStatus = stopping ? "stopped" : command === "pause" ? "paused" : "completed";
   publish(finalStatus);
   db.close();

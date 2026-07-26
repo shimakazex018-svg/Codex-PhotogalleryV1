@@ -79,10 +79,10 @@ Browser SPA
 - `#/__settings`：显示设置。
 - `#/__settings/favorites`：收藏图册。
 - `#/__settings/history`：观看历史。
-- `#/__settings/duplicates`：图片查重。
+- `#/__settings/media-optimization`：媒体库优化统一工作区；首屏只读轻量统计与任务状态，四个功能区按需加载。
+- `#/__settings/duplicates`、`#/__settings/perceptual`、`#/__settings/media-cleanup`、`#/__settings/video-compatibility`：兼容旧地址，均映射至媒体库优化对应区块。
 - `#/__settings/access-log`：访问日志。
-- `#/__settings/media-cleanup`：媒体库清理扫描、报告、项目回收站与恢复确认。
-- `#/__settings/video-compatibility`：视频兼容性状态、控制、统计、筛选和50条分页结果。
+- `/api/media-optimization/status`：合并的只读媒体计数、上次扫描、SQLite运行参数和五类任务快照；不触发文件系统扫描。
 - Node启动时恢复`DATA_DIR/logs`中最新有效媒体清理摘要用于历史查看；写操作只接受服务端批准的完整、零错误job，客户端不能提交路径。
 - `#/__duplicates`：旧查重兼容入口。
 - 灯箱不是独立路由，由 overlay 和内存状态控制。

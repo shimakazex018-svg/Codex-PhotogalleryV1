@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前正式前端版本为`v105-20260726-0854`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）。
+- 当前正式前端版本为`v106-20260726-0909`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前唯一正式源码分支为`main`；v103集成分支已经完整快进、推送并在验收后删除。仅因活动Codex控制内核占用而暂留本地`codex/media-library-cleanup` Worktree，其HEAD已是main祖先且远程分支已删除。
 
@@ -27,6 +27,7 @@
 - pHash索引使用`media_perceptual_hashes`的8字节BLOB，通过media_id关联；后台任务手动启动、单worker、可暂停/继续/停止、按size/mtime增量重算。480 MiB自动暂停，512 MiB硬停止，不在服务启动时自动全量生成。
 - v101从`codex/fts5-integration-v96`发布到正式48102；正式Node由既有任务Host托管，媒体路径和运行配置未变化。数据库只新增紧凑pHash表与状态表，未重建现有表。
 - 设置页`#/__settings/release-notes`按需读取根目录`release-notes.json`，默认显示最近20个版本；页脚版本可直接进入。该功能不使用数据库、不写访问日志，首页不会预取版本记录。
+- 设置页一级菜单将图片查重、相似图片索引、媒体库清理和视频兼容性检查整合为`媒体库优化`；旧hash继续兼容并直接打开对应区块。进入该页只请求SQLite轻量统计和任务状态，不自动扫描目录、启动索引或加载大结果集。
 
 ## Current runtime behavior
 
@@ -91,7 +92,7 @@
 - schema 由 `gallery-db.js` 运行时使用 `CREATE TABLE/INDEX IF NOT EXISTS` 保证。
 - 基础表：`collections`、`media`、`covers`、`scan_state`、`user_marks`、`media_hashes`、`access_logs`。显式迁移后另有`media_search_documents`、`media_search_fts`和`search_fts_state`；服务启动不会自动创建或构建它们。
 - 旧`access-YYYY-MM-DD.log`会按内容哈希幂等导入`access_logs`且原文件保留；新访问记录只写SQLite。
-- 当前打开逻辑会启用 WAL 和 `synchronous=NORMAL`。
+- 当前打开逻辑会启用 WAL、`synchronous=NORMAL` 和 `busy_timeout=5000`；摘要/状态读取使用只读连接。
 - 没有独立数据库 migration 文件。
 - 仓库包含显式参数启动的FTS5离线原型脚本；脚本目标被限制在Git忽略的`tmp/fts5-prototype`，网站启动不会创建或重建FTS。
 

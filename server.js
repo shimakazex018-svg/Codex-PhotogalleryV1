@@ -2099,6 +2099,19 @@ function duplicateTaskSnapshot() {
   };
 }
 
+function mediaOptimizationStatusSnapshot() {
+  const summary = galleryDb.getMediaOptimizationSummary(galleryDbFile);
+  return {
+    ...summary,
+    database: { engine: "sqlite", journalMode: "WAL", busyTimeoutMs: 5000 },
+    scan: scanTaskSnapshot(),
+    duplicates: duplicateTaskSnapshot(),
+    perceptual: perceptualIndex.status(),
+    mediaCleanup: mediaCleanupSnapshot(),
+    videoCompatibility: videoCompatibility.status(),
+  };
+}
+
 function startDuplicateTask(requestInfo = {}) {
   if (duplicateTask.status === "running") return duplicateTaskSnapshot();
   if (maintenanceBusy("duplicates")) {
@@ -3388,6 +3401,11 @@ function handleRequest(request, response) {
 
   if (requestUrl.pathname === "/api/scan/status") {
     sendJson(response, scanTaskSnapshot());
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/media-optimization/status") {
+    sendDbResponse(response, mediaOptimizationStatusSnapshot);
     return;
   }
 

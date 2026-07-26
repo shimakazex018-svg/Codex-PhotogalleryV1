@@ -1,5 +1,11 @@
 # TESTING.md
 
+## Media optimization workspace
+
+- `node scripts/test-media-optimization.js`：仅TEMP SQLite，验证轻量汇总和服务重启后的pHash遗留任务显示为`interrupted`。
+- `node scripts/test-media-optimization-api.js`：仅TEMP目录及隔离端口48913，验证`/api/media-optimization/status`、WAL和5秒busy timeout；结束后TEMP根必须不存在。
+- 浏览器验收应确认`#/__settings/media-optimization`先显示框架、旧四个hash进入对应区块、切换设置菜单不等待扫描，且四个结果区仅在用户操作后请求分页结果。
+
 ## Windows media-stream collection recycle recovery
 
 `node scripts/test-collection-recycle.js`必须使用唯一TEMP `PHOTOS_DIR/TRASH_DIR/DATA_DIR`，验证：60分钟未到期任务不移动、04:00维护窗口移动、Windows `EPERM`模拟后记录`recycle_failed`并在下一窗口成功、中文路径、旧schema迁移和TEMP清理。禁止把此测试指向正式目录或正式数据库。

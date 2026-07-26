@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v105-20260726-0854";
+const APP_VERSION = "v106-20260726-0909";
 const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
@@ -62,6 +62,10 @@ const state = {
   duplicateStatus: null,
   duplicateSelectedIndex: 0,
   perceptualIndexStatus: null,
+  mediaOptimizationStatus: null,
+  mediaOptimizationLoading: false,
+  mediaOptimizationError: "",
+  mediaOptimizationPollTimer: null,
   releaseNotes: [],
   releaseNotesLoading: false,
   releaseNotesLoaded: false,
@@ -813,10 +817,18 @@ function settingsSection() {
   if (route.includes("favorites")) return "favorites";
   if (route.includes("history")) return "history";
   if (route.includes("access-log")) return "access-log";
+  if (route.includes("media-optimization") || route.includes("media-cleanup") || route.includes("video-compatibility") || route.includes("perceptual") || route.includes("duplicates")) return "media-optimization";
+  return "display";
+}
+
+function mediaOptimizationPanel() {
+  const route = location.hash.replace(/^#\/?/, "");
+  if (route.includes("duplicates")) return "duplicates";
+  if (route.includes("perceptual")) return "perceptual";
   if (route.includes("media-cleanup")) return "media-cleanup";
   if (route.includes("video-compatibility")) return "video-compatibility";
-  if (route.includes("perceptual")) return "perceptual";
-  return route.includes("duplicates") ? "duplicates" : "display";
+  const match = route.match(/media-optimization\/(duplicates|perceptual|media-cleanup|video-compatibility)/);
+  return match ? match[1] : "overview";
 }
 
 function formatReleaseDate(item) {
@@ -1200,17 +1212,10 @@ async function startBackgroundScan() {
   try {
     const task = await postJson("/api/scan");
     setStatus(scanStatusText(task));
-    for (let attempt = 0; attempt < 720; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const status = await fetchJson("/api/scan/status");
-      setStatus(scanStatusText(status));
-      if (status.status === "completed") {
-        await loadGallery(false);
-        return;
-      }
-      if (status.status === "failed") return;
+    if (settingsSection() === "media-optimization") {
+      await loadMediaOptimizationStatus();
+      renderSettingsPage();
     }
-    setStatus("\u626b\u63cf\u4ecd\u5728\u540e\u53f0\u8fd0\u884c\uff0c\u7a0d\u540e\u518d\u5237\u65b0\u9875\u9762\u3002");
   } catch (error) {
     setStatus("\u65e0\u6cd5\u542f\u52a8\u540e\u53f0\u626b\u63cf\u3002");
   } finally {
@@ -2555,6 +2560,101 @@ function bindPerceptualIndexPage() {
   document.querySelector("#perceptualStop")?.addEventListener("click", () => run("stop"));
 }
 
+async function loadMediaOptimizationStatus(signal = state.pageAbortController?.signal) {
+  state.mediaOptimizationLoading = true;
+  state.mediaOptimizationError = "";
+  try {
+    state.mediaOptimizationStatus = await fetchJson("/api/media-optimization/status", { signal });
+    state.duplicateStatus = state.mediaOptimizationStatus.duplicates || state.duplicateStatus;
+    state.perceptualIndexStatus = state.mediaOptimizationStatus.perceptual || state.perceptualIndexStatus;
+    state.mediaCleanupStatus = state.mediaOptimizationStatus.mediaCleanup || state.mediaCleanupStatus;
+    state.videoCompatibilityStatus = state.mediaOptimizationStatus.videoCompatibility || state.videoCompatibilityStatus;
+    return state.mediaOptimizationStatus;
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    state.mediaOptimizationError = "无法读取媒体库优化状态。";
+    return null;
+  } finally {
+    state.mediaOptimizationLoading = false;
+  }
+}
+
+function stopMediaOptimizationPolling() {
+  if (state.mediaOptimizationPollTimer) clearTimeout(state.mediaOptimizationPollTimer);
+  state.mediaOptimizationPollTimer = null;
+}
+
+function mediaOptimizationTaskActive(status = state.mediaOptimizationStatus) {
+  return [status?.scan?.status, status?.duplicates?.status, status?.perceptual?.status, status?.mediaCleanup?.status, status?.videoCompatibility?.status]
+    .some((value) => ["queued", "starting", "running", "scanning", "pausing", "paused", "stopping", "recycling", "restoring"].includes(value));
+}
+
+function scheduleMediaOptimizationPolling() {
+  stopMediaOptimizationPolling();
+  if (!mediaOptimizationTaskActive() || document.hidden || settingsSection() !== "media-optimization") return;
+  state.mediaOptimizationPollTimer = setTimeout(async () => {
+    try { await loadMediaOptimizationStatus(); } catch (error) {}
+    if (settingsSection() === "media-optimization") renderSettingsPage();
+  }, 1500);
+}
+
+function mediaOptimizationSummaryCard(id, title, summary, actionLabel) {
+  return `<article class="media-optimization-card" id="media-optimization-${id}">
+    <h2>${title}</h2>
+    <p>${summary}</p>
+    <button type="button" data-media-optimization-panel="${id}">${actionLabel}</button>
+  </article>`;
+}
+
+function mediaOptimizationPageHtml() {
+  const status = state.mediaOptimizationStatus || {};
+  const duplicate = status.duplicates?.stats || {};
+  const perceptual = status.perceptual || {};
+  const cleanup = status.mediaCleanup || {};
+  const video = status.videoCompatibility || {};
+  const panel = mediaOptimizationPanel();
+  const totalImages = Number(status.imageCount || 0);
+  const totalVideos = Number(status.videoCount || 0);
+  const detail = panel === "duplicates" ? duplicatePageHtml()
+    : panel === "perceptual" ? perceptualIndexPageHtml()
+      : panel === "media-cleanup" ? mediaCleanupPageHtml()
+        : panel === "video-compatibility" ? videoCompatibilityPageHtml() : "";
+  return `<section class="media-optimization-page">
+    <div class="media-optimization-header"><h1>媒体库优化</h1><p>集中管理媒体目录扫描、重复文件检查、相似图片索引、媒体库清理和视频兼容性检查。</p></div>
+    <div class="media-optimization-status settings-card">
+      <span>媒体目录：${escapeHtml(status.scan?.status || "idle")}</span>
+      <span>上次刷新：${escapeHtml(status.lastScannedAt || "未记录")}</span>
+      <span>已收录图片 ${totalImages.toLocaleString("zh-CN")} / 视频 ${totalVideos.toLocaleString("zh-CN")}</span>
+      <span>数据库：${escapeHtml(status.database?.engine || "sqlite")} · ${escapeHtml(status.database?.journalMode || "WAL")} · busy_timeout ${Number(status.database?.busyTimeoutMs || 5000)}ms</span>
+      <span>当前后台任务：${escapeHtml([status.scan?.status, status.duplicates?.status, status.perceptual?.status, cleanup.status, video.status].find((value) => ["running", "scanning", "paused", "stopping", "recycling"].includes(value)) || "无")}</span>
+      <button id="mediaOptimizationRefresh" type="button" ${state.mediaOptimizationLoading || status.scan?.status === "running" ? "disabled" : ""}>刷新媒体目录</button>
+      ${state.mediaOptimizationError ? `<small class="error-text">${escapeHtml(state.mediaOptimizationError)}</small>` : ""}
+    </div>
+    <div class="media-optimization-cards">
+      ${mediaOptimizationSummaryCard("duplicates", "图片查重", `已建立哈希 ${Number(duplicate.hashedCount || status.hashedImages || 0).toLocaleString("zh-CN")} / ${totalImages.toLocaleString("zh-CN")}，待处理 ${Number(duplicate.pendingCount || 0).toLocaleString("zh-CN")}，重复组 ${Number(duplicate.duplicateGroupCount || 0).toLocaleString("zh-CN")}`, panel === "duplicates" ? "当前区域" : "查看图片查重")}
+      ${mediaOptimizationSummaryCard("perceptual", "相似图片索引", `已索引 ${Number(perceptual.indexedImages || status.perceptualImages || 0).toLocaleString("zh-CN")} / ${totalImages.toLocaleString("zh-CN")}，失败 ${Number(perceptual.failedImages || status.perceptualFailed || 0).toLocaleString("zh-CN")}，状态 ${escapeHtml(perceptual.status || perceptual.taskStatus || "not_started")}`, panel === "perceptual" ? "当前区域" : "查看相似图片索引")}
+      ${mediaOptimizationSummaryCard("media-cleanup", "媒体库清理", `最近任务：${escapeHtml(cleanup.status || "idle")}。检查与执行清理保持分离，清理期间会排他运行。`, panel === "media-cleanup" ? "当前区域" : "查看媒体库清理")}
+      ${mediaOptimizationSummaryCard("video-compatibility", "视频兼容性检查", `已检查 ${Number(video.summary?.total || 0).toLocaleString("zh-CN")} / ${totalVideos.toLocaleString("zh-CN")}，状态 ${escapeHtml(video.status || "idle")}。`, panel === "video-compatibility" ? "当前区域" : "查看视频兼容性检查")}
+    </div>
+    ${detail ? `<section class="media-optimization-detail" aria-label="${escapeHtml(panel)} 详细区域">${detail}</section>` : ""}
+  </section>`;
+}
+
+function bindMediaOptimizationPage() {
+  scheduleMediaOptimizationPolling();
+  document.querySelector("#mediaOptimizationRefresh")?.addEventListener("click", startBackgroundScan);
+  document.querySelectorAll("[data-media-optimization-panel]").forEach((button) => button.addEventListener("click", () => {
+    const panel = button.dataset.mediaOptimizationPanel;
+    if (!panel || panel === mediaOptimizationPanel()) return;
+    location.hash = `#/__settings/media-optimization/${panel}`;
+  }));
+  const panel = mediaOptimizationPanel();
+  if (panel === "duplicates") bindDuplicatePage();
+  if (panel === "perceptual") bindPerceptualIndexPage();
+  if (panel === "media-cleanup") bindMediaCleanupPage();
+  if (panel === "video-compatibility") bindVideoCompatibilityPage();
+}
+
 function renderDuplicatePage() {
   renderCrumbs();
   crumbs.innerHTML = `<a href="#/">${text.home}</a> / <a href="#/__settings">\u8bbe\u7f6e</a> / <strong>\u56fe\u7247\u67e5\u91cd</strong>`;
@@ -2964,8 +3064,9 @@ function bindVideoCompatibilityPage() {
 function renderSettingsPage() {
   renderCrumbs();
   const section = settingsSection();
-  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", duplicates: "图片查重", perceptual: "相似图片索引", "media-cleanup": "媒体库清理", "video-compatibility": "视频兼容性检查", "access-log": "访问日志", "release-notes": "版本更新记录" };
+  const sectionTitles = { favorites: "收藏图册", history: "观看历史", display: "显示设置", "media-optimization": "媒体库优化", "access-log": "访问日志", "release-notes": "版本更新记录" };
   if (section !== "video-compatibility") stopVideoCompatibilityPolling();
+  if (section !== "media-optimization") stopMediaOptimizationPolling();
   if (section !== "release-notes") {
     recordAccessLog({ type: "settings", title: sectionTitles[section] || "设置", model: "", work: "", pathParts: ["__settings", section] });
   }
@@ -2976,15 +3077,12 @@ function renderSettingsPage() {
         <a class="${section === "favorites" ? "active" : ""}" href="#/__settings/favorites">收藏图册</a>
         <a class="${section === "history" ? "active" : ""}" href="#/__settings/history">观看历史</a>
         <a class="${section === "display" ? "active" : ""}" href="#/__settings">\u663e\u793a\u8bbe\u7f6e</a>
-        <a class="${section === "duplicates" ? "active" : ""}" href="#/__settings/duplicates">\u56fe\u7247\u67e5\u91cd</a>
-        <a class="${section === "perceptual" ? "active" : ""}" href="#/__settings/perceptual">相似图片索引</a>
-        <a class="${section === "media-cleanup" ? "active" : ""}" href="#/__settings/media-cleanup">媒体库清理</a>
-        <a class="${section === "video-compatibility" ? "active" : ""}" href="#/__settings/video-compatibility">视频兼容性检查</a>
+        <a class="${section === "media-optimization" ? "active" : ""}" href="#/__settings/media-optimization">媒体库优化</a>
         <a class="${section === "access-log" ? "active" : ""}" href="#/__settings/access-log">\u8bbf\u95ee\u65e5\u5fd7</a>
         <a class="${section === "release-notes" ? "active" : ""}" href="#/__settings/release-notes">版本更新记录</a>
       </aside>
       <div class="settings-content">
-        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "duplicates" ? duplicatePageHtml() : section === "perceptual" ? perceptualIndexPageHtml() : section === "access-log" ? accessLogPageHtml() : section === "media-cleanup" ? mediaCleanupPageHtml() : section === "video-compatibility" ? videoCompatibilityPageHtml() : section === "release-notes" ? releaseNotesPageHtml() : `
+        ${section === "favorites" ? favoriteSettingsPageHtml() : section === "history" ? historySettingsPageHtml() : section === "media-optimization" ? mediaOptimizationPageHtml() : section === "access-log" ? accessLogPageHtml() : section === "release-notes" ? releaseNotesPageHtml() : `
           <h1>\u663e\u793a\u8bbe\u7f6e</h1>
           <p>\u8fd9\u4e9b\u9009\u9879\u4f1a\u7acb\u5373\u5e94\u7528\u5230\u56fe\u96c6\u6d4f\u89c8\u3002</p>
           <div class="settings-panel" id="settingsToolbarMount"></div>
@@ -2996,11 +3094,8 @@ function renderSettingsPage() {
   const mount = document.querySelector("#settingsToolbarMount");
   const toolbarSettings = document.querySelector("#toolbarSettings");
   if (mount && toolbarSettings) mount.appendChild(toolbarSettings);
-  if (section === "duplicates") bindDuplicatePage();
-  if (section === "perceptual") bindPerceptualIndexPage();
+  if (section === "media-optimization") bindMediaOptimizationPage();
   if (section === "favorites") bindFavoriteButtons();
-  if (section === "media-cleanup") bindMediaCleanupPage();
-  if (section === "video-compatibility") bindVideoCompatibilityPage();
   if (section === "access-log") {
     document.querySelector("#accessLogRefreshButton")?.addEventListener("click", async () => {
       const loading = loadAccessLogs(state.accessLogPage || 1);
@@ -3042,21 +3137,10 @@ async function ensureSettingsPage() {
   if (settingsSection() === "history" && !state.recentViewsLoaded) {
     await loadRecentMarks(state.pageAbortController?.signal);
   }
-  if (settingsSection() === "duplicates" && !state.duplicateGroups.length && !state.duplicateLoading) {
-    await Promise.all([loadDuplicateStatus(), loadDuplicateDeleteMarks(), loadDuplicates(0)]);
-  }
-  if (settingsSection() === "perceptual") await loadPerceptualIndexStatus();
   if (settingsSection() === "access-log" && !state.accessLogsLoaded && !state.accessLogsLoading) {
     await loadAccessLogs(1);
   }
-  if (settingsSection() === "media-cleanup") {
-    await loadMediaCleanupStatus();
-    if (state.mediaCleanupStatus?.id && ["completed", "recycle-completed", "recycle-partial", "restore-completed", "restore-partial", "stopped"].includes(state.mediaCleanupStatus.status) && !state.mediaCleanupResults.items.length) await loadMediaCleanupResults(1);
-  }
-  if (settingsSection() === "video-compatibility") {
-    await loadVideoCompatibilityStatus();
-    if (!state.videoCompatibilityResults.items.length) await loadVideoCompatibilityResults(1);
-  }
+  if (settingsSection() === "media-optimization") await loadMediaOptimizationStatus(state.pageAbortController?.signal);
   if (settingsSection() === "release-notes" && !state.releaseNotesLoaded && !state.releaseNotesLoading) {
     await loadReleaseNotes(state.pageAbortController?.signal);
   }
@@ -3836,11 +3920,11 @@ function render() {
   }
 
   if (settingsHashRoute()) {
-    renderEmpty(text.refreshing);
+    renderSettingsPage();
     ensureSettingsPage().catch((error) => {
       if (error.name !== "AbortError") {
         console.error("Settings page failed:", error);
-        renderEmpty(text.cannotRead);
+        if (settingsHashRoute()) renderSettingsPage();
       }
     });
     return;

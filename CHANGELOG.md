@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-26 - Consolidate media-library optimization controls
+
+- Replaced four first-level settings entries with one `媒体库优化` workspace. The existing duplicate, pHash, cleanup and video-compatibility hashes remain compatible and open their matching subsection.
+- Render the settings shell immediately and request only one lightweight `/api/media-optimization/status` summary on entry; directory refresh is now an explicit button action and large result pages remain demand-loaded and paginated.
+- Reused the existing server task mutual-exclusion gate, added a unified task status view/poll, and made browser polling single-timer, route-aware and abort-safe.
+- Standardized SQLite `busy_timeout=5000` on writable and read-only connections, converted routine status reads to read-only connections, and added bounded pHash write-batch retry (five attempts) without extending transaction scope.
+- Added disposable SQLite and isolated HTTP tests for the summary API and restart-safe pHash `interrupted` state. No formal database, media scan, index run, move or deletion occurred.
+
 ## 2026-07-23 - Move collection recycle into the offline daily maintenance window
 
 - Replaced the in-server hourly recycle executor and five-minute retry loop with a daily 04:00 offline workflow: stop the exact 48102 gallery process, move only maintenance-ready collections, restart the gallery, verify loopback health, then start the existing index scan.

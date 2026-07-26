@@ -14,7 +14,11 @@ function createManager(options) {
 
   function status() {
     const database = options.stats();
-    return { ...database, ...(current || {}), active: Boolean(child && child.exitCode === null) };
+    const active = Boolean(child && child.exitCode === null);
+    const persistedStatus = ["running", "paused", "stopping", "starting"].includes(database.taskStatus)
+      ? "interrupted"
+      : database.taskStatus || "not_started";
+    return { ...database, status: current?.status || persistedStatus, ...(current || {}), active };
   }
 
   function start({ limit = 0 } = {}) {
