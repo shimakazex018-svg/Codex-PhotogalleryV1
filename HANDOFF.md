@@ -4,13 +4,13 @@
 
 ## Last Completed Task
 
-已完成“每日04:00离线维护窗口”源码改造，尚未提交或正式部署：白天只标记/取消，维护编排精确停站后才回收，网站恢复HTTP 200后才启动索引扫描。HTTP媒体流生命周期修复保留；白天自动重试、普通重试和强制释放入口已移除。
+已发布`v105-20260726-0854`：白天只标记/取消，维护编排精确停站后才回收，网站恢复HTTP 200后才启动索引扫描。HTTP媒体流生命周期修复保留；白天自动重试、普通重试和强制释放入口已移除。
 
 ## Current State
 
 - 集成基线为`codex/fts5-integration-v96@2ce51e2`，已用`--no-ff`合入`origin/main@eb3d3d8`；发布前归档标签已推送。
-- v104正式Runtime仍为Node PID 30992、Host PID 31916；本次仅在源码/TEMP目录验证，未安装每日任务、未重启正式网站、未执行正式媒体回收。
-- 新增`collection-recycle-maintenance.js`、一次性Node worker、`run-daily-gallery-maintenance.ps1`和每日03:59:50任务安装脚本。编排锁位于既有Runtime logs目录；停止超时记录`maintenance_stop_timeout`且不强杀，失败优先恢复网站。
+- v105由Node PID 30992精确重启为PID 35760、Host PID 34524；loopback、LAN与ZeroTier健康验收待本轮最终记录。每日任务`Codex-PhotogalleryV1-DailyMaintenance`已安装，下一次执行为2026-07-27 03:59:50。
+- `-DryRun`已验证：可取得/释放维护锁、识别正式PID与健康URL、列出0条`ready-for-maintenance`，未停止网站、未写队列、未移动媒体。编排锁位于既有Runtime logs目录；停止超时记录`maintenance_stop_timeout`且不强杀，失败优先恢复网站。
 - 正式失败图集`梦心玥/爱蜜社/[IMISS爱蜜社][NO.001]...`的源目录与40张图片仍完整、回收目标不存在；旧记录仍为`failed`、重试数0、下次重试为空。页面已只读确认失败原因、普通重试和强制释放入口均显示，本轮没有点击或自动重试，没有移动或删除正式媒体。
 - 正式库已幂等新增`collection_recycle_queue.retry_count/next_retry_time/last_error`及`retry-waiting`活动/到期索引，`PRAGMA quick_check=ok`。v104部署前一致性备份为`D:\GalleryRuntime\backups\pre-v104-20260722T132318Z\gallery.db`，SHA-256为`004588ee8af900d497e9c373d7fed60adaf2fa73f17b41c2a934567b58f171a6`。
 - 本地main、`origin/main`和远程main的发布SHA曾一致为`5a3ffef74a7ff9ef83174f85c8e4e83135aaa2ad`；随后仅追加本次清理/交接文档提交。正式代码标签`v103-20260722-1209`保持指向发布提交。

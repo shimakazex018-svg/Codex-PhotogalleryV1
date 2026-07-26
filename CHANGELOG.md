@@ -7,6 +7,7 @@
 - Kept HTTP media stream cleanup for normal resource hygiene, but removed force-release and daytime retry UI/API. Failed offline moves remain `recycle_failed` for the next maintenance window.
 - Added TEMP-only coverage for next-window scheduling, normal move, simulated EPERM with a held image descriptor, next-window recovery, legacy schema migration and cleanup.
 - Prepared formal v105 deployment with a verified SQLite/config/PID backup; the daily task and final service acceptance are recorded in the release follow-up commit.
+- Fixed the maintenance dry-run to validate a running formal site without requiring its port to be free; the normal stop/start path retains the full preflight.
 
 ## 2026-07-22 - Make delayed collection recycle resilient to Windows media handles
 
