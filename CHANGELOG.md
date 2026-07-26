@@ -6,6 +6,7 @@
 - Added a lock-protected PowerShell orchestrator and an `IgnoreNew` Task Scheduler installer for 03:59:50; timeout/failure paths append maintenance logs, preserve the queue and prioritize website recovery.
 - Kept HTTP media stream cleanup for normal resource hygiene, but removed force-release and daytime retry UI/API. Failed offline moves remain `recycle_failed` for the next maintenance window.
 - Added TEMP-only coverage for next-window scheduling, normal move, simulated EPERM with a held image descriptor, next-window recovery, legacy schema migration and cleanup.
+- Prepared formal v105 deployment with a verified SQLite/config/PID backup; the daily task and final service acceptance are recorded in the release follow-up commit.
 
 ## 2026-07-22 - Make delayed collection recycle resilient to Windows media handles
 
