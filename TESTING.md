@@ -1,5 +1,12 @@
 # TESTING.md
 
+## Detail-page lazy-loading switch
+
+- 必须使用独立TEMP `PHOTOS_DIR`、`DATA_DIR`和隔离端口，至少构造100张和300张图片图集；不得读取、扫描或写入正式媒体与数据库。
+- 开启懒加载且不滚动时，确认只有首批DOM/视口预览被激活且保留加载哨兵；滚动后才继续追加。
+- 关闭懒加载且不滚动时，确认当前图集最终全部插入并激活、最大活动图片请求不超过5、没有`video[src]`，且不出现其他图集URL。
+- 在加载中切换开关及快速切换图集，确认已加载图片保留、未开始队列停止、旧DOM不进入新页面，控制台没有新增错误。iPad/iPhone视口模拟可覆盖布局与交互，不替代实体设备验收。
+
 ## Media optimization workspace
 
 - `node scripts/test-media-optimization.js`：仅TEMP SQLite，验证轻量汇总和服务重启后的pHash遗留任务显示为`interrupted`。

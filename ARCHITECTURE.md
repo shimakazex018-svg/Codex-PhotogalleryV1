@@ -26,6 +26,10 @@ Browser SPA
 
 项目是单进程 Node HTTP 服务加一个按需子进程 worker，没有前后端构建步骤、框架路由器、ORM 或包管理依赖。
 
+## Detail image loading lifecycle
+
+详情图片使用同一预览URL而非`fetch + Blob`：常规模式以分批DOM、`data-preview-src`和`IntersectionObserver`按需把预览地址赋给`img.src`。关闭懒加载时，`app.js`只为当前详情页创建内存会话，以动画帧逐批插入本图集图片节点，并以最多5个活动`<img>`请求激活待加载预览；视口内节点先入队。会话在离开详情页或重新开启懒加载时失效，清空未开始任务、观察器和动画帧，且中止同会话的SQLite媒体分页请求。直接`<img>`传输不能安全强杀，但完成监听器不写入全局状态，过期会话也不能再追加DOM。
+
 ## Source modules
 
 | 文件 | 当前职责 |

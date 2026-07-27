@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-27 - Complete current-detail loading when lazy loading is disabled
+
+- Fixed the detail-page lazy-loading switch: disabled mode now incrementally inserts and requests only the current collection's remaining image previews without requiring scroll, with a maximum of five active image requests.
+- Added a per-detail in-memory session that clears queued work, observers and animation-frame work on route changes; current-collection SQLite paging uses the same session signal and ignores stale completions.
+- Verified in an isolated `127.0.0.1` runtime with disposable 100- and 300-image collections. No database schema, scan, formal media or video-loading behavior changed.
+
 ## 2026-07-26 - Restore display-settings controls on rerender
 
 - Restored the existing toolbar settings mount before each settings-page replacement, preventing the asynchronous settings refresh from deleting its own controls. Added a minimal regression assertion; no media, task, database or API behavior changed.

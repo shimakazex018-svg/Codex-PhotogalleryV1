@@ -6,7 +6,7 @@
 
 - 项目名称：Codex Photogallery V1
 - 用途：把外部图片/视频目录索引到 SQLite，并通过本地或受控网络浏览器提供个人媒体图库。
-- 当前正式前端版本为`v107-20260726-0922`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）。
+- 当前源码前端版本为`v108-20260727-2101`（`app.js`的`APP_VERSION`及全部静态资源缓存参数一致）；正式Runtime仍以实际部署版本为准。
 - 当前稳定发布标签：`v1.3-release`。
 - 当前唯一正式源码分支为`main`；v103集成分支已经完整快进、推送并在验收后删除。仅因活动Codex控制内核占用而暂留本地`codex/media-library-cleanup` Worktree，其HEAD已是main祖先且远程分支已删除。
 
@@ -27,6 +27,7 @@
 - pHash索引使用`media_perceptual_hashes`的8字节BLOB，通过media_id关联；后台任务手动启动、单worker、可暂停/继续/停止、按size/mtime增量重算。480 MiB自动暂停，512 MiB硬停止，不在服务启动时自动全量生成。
 - v101从`codex/fts5-integration-v96`发布到正式48102；正式Node由既有任务Host托管，媒体路径和运行配置未变化。数据库只新增紧凑pHash表与状态表，未重建现有表。
 - 设置页`#/__settings/release-notes`按需读取根目录`release-notes.json`，默认显示最近20个版本；页脚版本可直接进入。该功能不使用数据库、不写访问日志，首页不会预取版本记录。
+- 图集详情页开启懒加载时继续使用分批DOM与`IntersectionObserver`按需激活WebP预览；关闭时仅为当前详情会话按5并发自动激活全部图片预览。路由离开或重新开启懒加载会清除未开始队列、观察器和动画帧，并中止当前详情分页fetch；不预加载相邻图集或完整视频。
 - 设置页一级菜单将图片查重、相似图片索引、媒体库清理和视频兼容性检查整合为`媒体库优化`；旧hash继续兼容并直接打开对应区块。进入该页只请求SQLite轻量统计和任务状态，不自动扫描目录、启动索引或加载大结果集。
 
 ## Current runtime behavior

@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v107-20260726-0922";
+const APP_VERSION = "v108-20260727-2101";
 const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
@@ -123,6 +123,9 @@ const state = {
   imageBatchObserver: null,
   imageBatchScrollHandler: null,
   lazyImageObserver: null,
+  detailImageLoadSession: null,
+  detailImageLoadSessionId: 0,
+  detailImageLoadTimer: null,
   pageAbortController: null,
   searchAbortController: null,
   searchDebounceTimer: null,
@@ -578,7 +581,20 @@ function setLazyLoading(enabled, rerender = true) {
   lazyLoadingToggle.textContent = state.lazyLoading ? "\u5f00" : "\u5173";
   lazyLoadingToggle.classList.toggle("active", state.lazyLoading);
   lazyLoadingToggle.setAttribute("aria-label", state.lazyLoading ? "\u5173\u95ed\u61d2\u52a0\u8f7d" : "\u5f00\u542f\u61d2\u52a0\u8f7d");
-  if (rerender) render();
+  if (!rerender) return;
+
+  const session = state.detailImageLoadSession;
+  if (session && view.querySelector(".photo-stack")) {
+    if (state.lazyLoading) {
+      cancelDetailImageLoading();
+      setupLazyPreviewImages();
+      setupImageBatchLoading();
+    } else {
+      startEagerDetailImageLoading(session);
+    }
+    return;
+  }
+  render();
 }
 
 function setTheme(mode) {
@@ -1881,7 +1897,8 @@ function lazyImageHtml(src, label, attributes = "") {
 function setupLazyPreviewImages() {
   state.lazyImageObserver?.disconnect();
   state.lazyImageObserver = null;
-  const images = [...document.querySelectorAll("img[data-preview-src]")];
+  const images = [...document.querySelectorAll("img[data-preview-src]")]
+    .filter((image) => state.lazyLoading || !image.closest(".photo-stack"));
   if (!images.length) return;
   const load = (image) => {
     if (!image.dataset.previewSrc) return;
@@ -3327,13 +3344,147 @@ function clearHighlightCarouselTimer() {
   state.highlightTimer = null;
 }
 
-function clearImageBatchLoading() {
+const DETAIL_EAGER_IMAGE_CONCURRENCY = 5;
+
+function stopImageBatchAutoLoading() {
   state.imageBatchObserver?.disconnect();
   state.imageBatchObserver = null;
   if (state.imageBatchScrollHandler) {
     window.removeEventListener("scroll", state.imageBatchScrollHandler);
     state.imageBatchScrollHandler = null;
   }
+}
+
+function cancelDetailImageLoading() {
+  const session = state.detailImageLoadSession;
+  if (session) {
+    session.cancelled = true;
+    session.queue.length = 0;
+    session.queuedImages.clear();
+    session.controller.abort();
+  }
+  if (state.detailImageLoadTimer) {
+    cancelAnimationFrame(state.detailImageLoadTimer);
+    state.detailImageLoadTimer = null;
+  }
+  state.detailImageLoadSession = null;
+}
+
+function createDetailImageLoadSession(collectionId) {
+  cancelDetailImageLoading();
+  const session = {
+    id: ++state.detailImageLoadSessionId,
+    collectionId,
+    cancelled: false,
+    controller: new AbortController(),
+    queue: [],
+    queuedImages: new Set(),
+    activeCount: 0,
+  };
+  state.detailImageLoadSession = session;
+  return session;
+}
+
+function isCurrentDetailImageLoadSession(session) {
+  return Boolean(
+    session
+    && state.detailImageLoadSession === session
+    && !session.cancelled
+    && !state.lazyLoading
+    && view.querySelector(".photo-stack"),
+  );
+}
+
+function queueEagerDetailPreviewImages(session, root = view) {
+  if (!isCurrentDetailImageLoadSession(session)) return;
+  const images = [...root.querySelectorAll("img[data-preview-src]")]
+    .sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      const leftVisible = leftRect.bottom >= 0 && leftRect.top <= window.innerHeight;
+      const rightVisible = rightRect.bottom >= 0 && rightRect.top <= window.innerHeight;
+      if (leftVisible !== rightVisible) return leftVisible ? -1 : 1;
+      return leftRect.top - rightRect.top;
+    });
+  images.forEach((image) => {
+    if (session.queuedImages.has(image)) return;
+    session.queuedImages.add(image);
+    session.queue.push(image);
+  });
+  drainEagerDetailPreviewQueue(session);
+}
+
+function drainEagerDetailPreviewQueue(session) {
+  if (!isCurrentDetailImageLoadSession(session)) return;
+  while (session.activeCount < DETAIL_EAGER_IMAGE_CONCURRENCY && session.queue.length) {
+    const image = session.queue.shift();
+    session.queuedImages.delete(image);
+    if (!image.isConnected || !image.dataset.previewSrc) continue;
+
+    session.activeCount += 1;
+    const complete = () => {
+      image.removeEventListener("load", complete);
+      image.removeEventListener("error", complete);
+      session.activeCount = Math.max(0, session.activeCount - 1);
+      if (!isCurrentDetailImageLoadSession(session)) return;
+      drainEagerDetailPreviewQueue(session);
+      scheduleEagerDetailImageLoading(session);
+    };
+    image.addEventListener("load", complete, { once: true });
+    image.addEventListener("error", complete, { once: true });
+    image.loading = "eager";
+    image.fetchPriority = "auto";
+    image.src = image.dataset.previewSrc;
+    delete image.dataset.previewSrc;
+  }
+}
+
+function scheduleEagerDetailImageLoading(session) {
+  if (!isCurrentDetailImageLoadSession(session) || state.detailImageLoadTimer) return;
+  state.detailImageLoadTimer = requestAnimationFrame(() => {
+    state.detailImageLoadTimer = null;
+    continueEagerDetailImageLoading(session);
+  });
+}
+
+function removeImageBatchSentinel() {
+  view.querySelector("#imageBatchSentinel")?.remove();
+  stopImageBatchAutoLoading();
+}
+
+function continueEagerDetailImageLoading(session) {
+  if (!isCurrentDetailImageLoadSession(session)) return;
+  queueEagerDetailPreviewImages(session);
+  if (state.renderedImageCount < state.detailImages.length) {
+    appendImageBatch({ session, eager: true });
+    scheduleEagerDetailImageLoading(session);
+    return;
+  }
+  const paging = state.mediaPaging;
+  if (paging && paging.loaded < paging.total) {
+    if (paging.loading) return;
+    appendRemoteMediaPage(session).then((appended) => {
+      if (!isCurrentDetailImageLoadSession(session)) return;
+      if (appended) scheduleEagerDetailImageLoading(session);
+      else removeImageBatchSentinel();
+    });
+    return;
+  }
+  removeImageBatchSentinel();
+}
+
+function startEagerDetailImageLoading(session = state.detailImageLoadSession) {
+  if (!session || state.lazyLoading || !view.querySelector(".photo-stack")) return;
+  state.lazyImageObserver?.disconnect();
+  state.lazyImageObserver = null;
+  stopImageBatchAutoLoading();
+  queueEagerDetailPreviewImages(session);
+  scheduleEagerDetailImageLoading(session);
+}
+
+function clearImageBatchLoading() {
+  cancelDetailImageLoading();
+  stopImageBatchAutoLoading();
   state.detailImages = [];
   state.renderedImageCount = 0;
   state.mediaPaging = null;
@@ -3521,6 +3672,7 @@ function renderCollection(collection) {
     limit: collection.mediaPageLimit || MEDIA_PAGE_LIMIT,
     loading: false,
   } : null;
+  createDetailImageLoadSession(collection.id);
 
   view.innerHTML = `
     <section class="detail-header">
@@ -3672,7 +3824,8 @@ function bindDetailMediaControls(filter) {
     button.addEventListener("click", () => openLightbox(Number(button.dataset.imageIndex), button.querySelector("img")?.currentSrc || ""));
   });
 
-  setupImageBatchLoading();
+  if (state.lazyLoading) setupImageBatchLoading();
+  else startEagerDetailImageLoading();
 
   view.querySelectorAll("video[data-src]").forEach((video) => {
     const stopCompatibilityStream = () => {
@@ -3735,12 +3888,21 @@ function bindImageButtons(container) {
   });
 }
 
-async function appendRemoteMediaPage() {
+async function appendRemoteMediaPage(session = null) {
   const paging = state.mediaPaging;
   if (!paging || paging.loading || paging.loaded >= paging.total) return false;
   paging.loading = true;
   try {
-    const media = await fetchSqliteMediaPage(paging.collectionId, paging.loaded, paging.limit);
+    const media = await fetchSqliteMediaPage(
+      paging.collectionId,
+      paging.loaded,
+      paging.limit,
+      session?.controller.signal || state.pageAbortController?.signal,
+    );
+    if (state.mediaPaging !== paging || (session && !isCurrentDetailImageLoadSession(session))) {
+      paging.loading = false;
+      return false;
+    }
     const rawItems = media.items || [];
     const newImages = rawItems.filter((item) => item.type === "image").map(sqliteMediaToGalleryMedia).filter(Boolean);
     const newVideos = rawItems.filter((item) => item.type === "video").map(sqliteMediaToGalleryMedia).filter(Boolean);
@@ -3763,7 +3925,8 @@ async function appendRemoteMediaPage() {
   }
 }
 
-function appendImageBatch() {
+function appendImageBatch({ session = null, eager = false } = {}) {
+  if (session && !isCurrentDetailImageLoadSession(session)) return;
   const stack = view.querySelector(".photo-stack");
   const sentinel = view.querySelector("#imageBatchSentinel");
   if (!stack || !sentinel) return;
@@ -3771,18 +3934,12 @@ function appendImageBatch() {
   const nextImages = state.detailImages.slice(state.renderedImageCount, state.renderedImageCount + imageBatchSize);
   if (!nextImages.length) {
     if (state.mediaPaging && state.mediaPaging.loaded < state.mediaPaging.total) {
-      appendRemoteMediaPage().then((appended) => {
-        if (appended) appendImageBatch();
+      appendRemoteMediaPage(session).then((appended) => {
+        if (appended && (!session || isCurrentDetailImageLoadSession(session))) appendImageBatch({ session, eager });
       });
       return;
     }
-    state.imageBatchObserver?.disconnect();
-    state.imageBatchObserver = null;
-    if (state.imageBatchScrollHandler) {
-      window.removeEventListener("scroll", state.imageBatchScrollHandler);
-      state.imageBatchScrollHandler = null;
-    }
-    sentinel.remove();
+    removeImageBatchSentinel();
     return;
   }
 
@@ -3791,30 +3948,22 @@ function appendImageBatch() {
   const nodes = fragment.content;
   bindImageButtons(nodes);
   stack.append(nodes);
-  setupLazyPreviewImages();
   state.renderedImageCount += nextImages.length;
+  if (eager) queueEagerDetailPreviewImages(session, stack);
+  else setupLazyPreviewImages();
 
   if (state.renderedImageCount >= state.detailImages.length && (!state.mediaPaging || state.mediaPaging.loaded >= state.mediaPaging.total)) {
-    state.imageBatchObserver?.disconnect();
-    state.imageBatchObserver = null;
-    if (state.imageBatchScrollHandler) {
-      window.removeEventListener("scroll", state.imageBatchScrollHandler);
-      state.imageBatchScrollHandler = null;
-    }
-    sentinel.remove();
+    removeImageBatchSentinel();
   }
 }
 
 function setupImageBatchLoading() {
-  state.imageBatchObserver?.disconnect();
-  state.imageBatchObserver = null;
-  if (state.imageBatchScrollHandler) {
-    window.removeEventListener("scroll", state.imageBatchScrollHandler);
-    state.imageBatchScrollHandler = null;
-  }
+  stopImageBatchAutoLoading();
+  if (!state.lazyLoading) return;
 
   const sentinel = view.querySelector("#imageBatchSentinel");
-  if (!sentinel || state.renderedImageCount >= state.detailImages.length) return;
+  const hasMoreRemoteMedia = state.mediaPaging && state.mediaPaging.loaded < state.mediaPaging.total;
+  if (!sentinel || (state.renderedImageCount >= state.detailImages.length && !hasMoreRemoteMedia)) return;
 
   if (!("IntersectionObserver" in window)) {
     state.imageBatchScrollHandler = () => {
@@ -3842,6 +3991,7 @@ function renderMediaDetail({ collectionId = "", title, meta, actions = "", image
   state.lightboxImages = visibleImages.map((image) => image.src);
   state.lightboxUseCompatibilityPreview = useCompatibilityLightboxPreview(collectionId);
   state.mediaPaging = paging && showImages ? { ...paging, loading: false } : null;
+  createDetailImageLoadSession(collectionId || location.hash);
 
   const message = filter === "videos" ? text.noVideosInFilter : filter === "images" ? text.noImagesInFilter : emptyMessage;
 
