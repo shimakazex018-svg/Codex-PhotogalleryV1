@@ -65,12 +65,16 @@ function markHashFailure(item, reason) {
 
 async function run() {
   const batchSize = Math.min(Math.max(Number(process.env.DUPLICATE_BATCH_SIZE || 100), 1), 1000);
+  // A user-triggered duplicate scan is a fresh SHA-256 inventory. Re-hashing
+  // all current images prevents an earlier failure record from excluding an
+  // unchanged file from later duplicate grouping.
+  const scanStartedAt = process.env.DUPLICATE_SCAN_STARTED_AT || "";
   let processed = 0;
   let errorCount = 0;
   let lastFile = "";
 
   for (;;) {
-    const batch = galleryDb.getImagesNeedingHash(galleryDbFile, batchSize);
+    const batch = galleryDb.getImagesNeedingHash(galleryDbFile, batchSize, { scanStartedAt });
     if (!batch.length) break;
 
     for (const item of batch) {

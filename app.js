@@ -2501,8 +2501,12 @@ function duplicatePageHtml() {
         </div>
       </div>
       <div class="duplicates-status">
-        <span>\u5df2\u5efa\u7acb\u54c8\u5e0c ${stats.hashedCount || 0} / ${stats.imageCount || 0}</span>
+        <span>\u6210\u529f\u54c8\u5e0c ${stats.hashedCount || 0} / ${stats.imageCount || 0}</span>
+        <span>\u6587\u4ef6\u8bb0\u5f55 ${stats.hashRecordCount || 0}</span>
+        <span>\u552f\u4e00 SHA-256 ${stats.uniqueHashCount || 0}</span>
+        <span>\u91cd\u590d\u7ec4 ${stats.duplicateGroupCount || 0} / \u91cd\u590d\u6587\u4ef6 ${stats.duplicateItemCount || 0}</span>
         <span>\u5f85\u5904\u7406 ${stats.pendingCount || 0}</span>
+        <span>\u54c8\u5e0c\u5931\u8d25 ${stats.failedHashCount || 0}</span>
         <span>\u626b\u63cf\u72b6\u6001 ${escapeHtml(status.status || "idle")}</span>
         <span>\u9519\u8bef ${status.errorCount || 0}</span>
         <span>\u5df2\u6807\u8bb0\u5f85\u5220\u9664 ${state.duplicateDeleteMarks.length}</span>

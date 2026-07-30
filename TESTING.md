@@ -1,5 +1,21 @@
 # TESTING.md
 
+## Exact SHA-256 duplicate rescan
+
+Run only against a disposable TEMP directory:
+
+```powershell
+node scripts/test-exact-duplicate-sha256.js
+```
+
+The test creates two byte-identical images under separate Chinese `ART-002`/`ART-008` paths, begins with one stale empty hash record, verifies a single cross-collection SHA-256 group, moves only the non-retained TEMP copy to a TEMP trash directory, checks database removal, then restores it and verifies the next scan recognizes it again. Do not point this script at formal photos, trash, or `gallery.db`.
+
+For read-only diagnosis of a specific hash:
+
+```powershell
+node scripts/diagnose-duplicate-sha256.js --db <gallery.db> --photos-dir <photos-root> --sha256 <64-hex-sha256>
+```
+
 ## Detail-page lazy-loading switch
 
 - 必须使用独立TEMP `PHOTOS_DIR`、`DATA_DIR`和隔离端口，至少构造100张和300张图片图集；不得读取、扫描或写入正式媒体与数据库。

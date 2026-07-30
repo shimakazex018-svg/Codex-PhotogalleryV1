@@ -1,5 +1,11 @@
 # HANDOFF.md
 
+## Latest task: exact SHA-256 duplicate rescan correction (2026-07-30)
+
+- Source changes are local and validated in a disposable TEMP runtime only. A manual duplicate scan now refreshes SHA-256 for every indexed image; pHash is unchanged.
+- `media_hashes` remains keyed by `media_id`, not SHA-256. Production read-only inspection found no record for SHA-256 `0bff21cf1ed229aa9fba447ca613f14016fbee1311234b319a50c1b19a0a6716`; the cited two directories currently contain no 340,579-byte sample, so the supplied production assertion could not be reproduced without changing formal media.
+- Formal `gallery.db` backup completed before source edits: `D:\GalleryRuntime\backups\pre-duplicate-fix-20260730-200245\gallery.db`; SHA-256 `C94B2898C29C1898B71CAF6D842ADCC920208595259014E68C5DECF577640849`; `PRAGMA quick_check=ok`.
+
 本文件保持最新交接状态，不记录完整历史。历史见 `CHANGELOG.md`。
 
 ## Last Completed Task

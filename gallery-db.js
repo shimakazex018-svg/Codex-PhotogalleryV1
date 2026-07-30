@@ -1164,7 +1164,9 @@ function deleteUserMark(dbFile, id, markType = "") {
 function getDuplicateHashStats(dbFile) {
   return withReadOnlyDatabase(dbFile, (db) => {
     const imageCount = db.prepare("SELECT COUNT(*) AS count FROM media WHERE type = 'image'").get().count;
-    const hashedCount = db.prepare("SELECT COUNT(*) AS count FROM media_hashes").get().count;
+    const hashRecordCount = db.prepare("SELECT COUNT(*) AS count FROM media_hashes").get().count;
+    const hashedCount = db.prepare("SELECT COUNT(*) AS count FROM media_hashes WHERE sha256 != ''").get().count;
+    const uniqueHashCount = db.prepare("SELECT COUNT(DISTINCT sha256) AS count FROM media_hashes WHERE sha256 != ''").get().count;
     const duplicateGroupCount = db
       .prepare(
         `SELECT COUNT(*) AS count FROM (
@@ -1185,7 +1187,17 @@ function getDuplicateHashStats(dbFile) {
         )`
       )
       .get().count;
-    return { imageCount, hashedCount, pendingCount: Math.max(0, imageCount - hashedCount), duplicateGroupCount, duplicateItemCount };
+    return {
+      imageCount,
+      hashRecordCount,
+      hashedCount,
+      uniqueHashCount,
+      pendingCount: Math.max(0, imageCount - hashedCount),
+      failedHashCount: Math.max(0, hashRecordCount - hashedCount),
+      duplicateGroupCount,
+      duplicateItemCount,
+      duplicateSurplusCount: Math.max(0, duplicateItemCount - duplicateGroupCount),
+    };
   });
 }
 
@@ -1308,8 +1320,9 @@ function getMediaItemsByPerceptualIds(dbFile, ids = []) {
   });
 }
 
-function getImagesNeedingHash(dbFile, limitValue = 100) {
+function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
   const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 1000);
+  const scanStartedAt = String(options.scanStartedAt || "");
   return withDatabase(dbFile, (db) =>
     db
       .prepare(
@@ -1318,11 +1331,14 @@ function getImagesNeedingHash(dbFile, limitValue = 100) {
          JOIN collections c ON c.id = m.collection_id
          LEFT JOIN media_hashes h ON h.media_id = m.id
          WHERE m.type = 'image'
-           AND (h.media_id IS NULL OR h.file_size != COALESCE(m.size, 0) OR h.mtime != COALESCE(m.mtime, 0))
+            AND (
+              (? != '' AND (h.media_id IS NULL OR h.updated_at < ?))
+              OR (? = '' AND (h.media_id IS NULL OR h.sha256 = '' OR h.file_size != COALESCE(m.size, 0) OR h.mtime != COALESCE(m.mtime, 0)))
+            )
          ORDER BY m.collection_id, m.sort_order
          LIMIT ?`
       )
-      .all(limit)
+      .all(scanStartedAt, scanStartedAt, scanStartedAt, limit)
       .map((row) => ({ ...rowToMedia(row), collectionTitle: row.collection_title || "" }))
   );
 }

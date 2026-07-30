@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-30 - Correct exact SHA-256 duplicate rescan accounting
+
+- Duplicate scans now re-hash every currently indexed image for that explicit run. Empty/error hash rows therefore cannot permanently hide an unchanged file from later exact-duplicate grouping.
+- Split duplicate metrics into file records, successful hashes, unique SHA-256 values, failed hashes, duplicate groups and duplicate files; a table row with an empty hash is no longer displayed as a completed hash.
+- Added `scripts/diagnose-duplicate-sha256.js`, a read-only database/path diagnostic, plus a TEMP-only cross-collection Chinese-path regression that verifies grouping, safe recycle and reappearance/rescan.
+
 ## 2026-07-27 - Complete current-detail loading when lazy loading is disabled
 
 - Fixed the detail-page lazy-loading switch: disabled mode now incrementally inserts and requests only the current collection's remaining image previews without requiring scroll, with a maximum of five active image requests.

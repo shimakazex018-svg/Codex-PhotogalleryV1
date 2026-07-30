@@ -2138,7 +2138,7 @@ function startDuplicateTask(requestInfo = {}) {
 
   const child = spawn(process.execPath, [path.join(rootDir, "duplicates-worker.js")], {
     cwd: rootDir,
-    env: { ...process.env },
+    env: { ...process.env, DUPLICATE_SCAN_STARTED_AT: duplicateTask.startedAt },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
