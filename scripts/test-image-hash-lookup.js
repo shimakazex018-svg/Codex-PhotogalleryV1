@@ -17,7 +17,7 @@ const dataDir = path.join(tempRoot, "data");
 const photosDir = path.join(tempRoot, "photos");
 const databaseFile = path.join(dataDir, "gallery.db");
 fs.mkdirSync(photosDir, { recursive: true });
-galleryDb.getStats(databaseFile);
+galleryDb.indexGallery(databaseFile, { collections: [] });
 
 const presentImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const absentImage = Buffer.concat([presentImage, Buffer.from("not-in-gallery")]);

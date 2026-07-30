@@ -5,6 +5,8 @@
 - Duplicate scans now re-hash every currently indexed image for that explicit run. Empty/error hash rows therefore cannot permanently hide an unchanged file from later exact-duplicate grouping.
 - Split duplicate metrics into file records, successful hashes, unique SHA-256 values, failed hashes, duplicate groups and duplicate files; a table row with an empty hash is no longer displayed as a completed hash.
 - Added `scripts/diagnose-duplicate-sha256.js`, a read-only database/path diagnostic, plus a TEMP-only cross-collection Chinese-path regression that verifies grouping, safe recycle and reappearance/rescan.
+- Added a real isolated HTTP service regression that exercises the production scan endpoint, duplicate worker endpoint, duplicate-group query, recycle API and restore/rescan path. It also verifies background task status, duplicate-start coalescing and per-file failure tolerance.
+- Fixed the existing image hash lookup test setup so its disposable SQLite database is initialized before its first read-only query.
 
 ## 2026-07-27 - Complete current-detail loading when lazy loading is disabled
 

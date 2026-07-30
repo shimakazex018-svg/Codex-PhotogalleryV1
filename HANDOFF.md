@@ -5,6 +5,8 @@
 - Source changes are local and validated in a disposable TEMP runtime only. A manual duplicate scan now refreshes SHA-256 for every indexed image; pHash is unchanged.
 - `media_hashes` remains keyed by `media_id`, not SHA-256. Production read-only inspection found no record for SHA-256 `0bff21cf1ed229aa9fba447ca613f14016fbee1311234b319a50c1b19a0a6716`; the cited two directories currently contain no 340,579-byte sample, so the supplied production assertion could not be reproduced without changing formal media.
 - Formal `gallery.db` backup completed before source edits: `D:\GalleryRuntime\backups\pre-duplicate-fix-20260730-200245\gallery.db`; SHA-256 `C94B2898C29C1898B71CAF6D842ADCC920208595259014E68C5DECF577640849`; `PRAGMA quick_check=ok`.
+- Root cause: an empty SHA-256 failure row counted as an established hash and the prior incremental selection skipped it whenever size/mtime stayed unchanged. An explicit duplicate scan now means a forced SHA-256 re-read of all currently indexed images; a normal media-directory refresh remains metadata/index-only and does not read every file body.
+- Service-level TEMP acceptance passed with two identical images at `ART-002` and `ART-008` Chinese paths: scan/index, background task progress, duplicate group/statistics, diagnostic script, project recycle API, restore and rescan all passed. Formal gallery has not been SHA-rescanned; the original SHA sample is absent from the original paths and no original-path acceptance was attempted.
 
 本文件保持最新交接状态，不记录完整历史。历史见 `CHANGELOG.md`。
 

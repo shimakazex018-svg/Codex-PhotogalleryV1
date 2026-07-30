@@ -75,6 +75,9 @@
 
 ## Medium Priority
 
+- [ ] Select a maintenance window for the first formal SHA-256 full rescan after `6d96452` is deployed.
+  - The code and isolated service test are complete, but production must remain unscanned until a user-approved maintenance window because this reads all current image content. The original `0bff21cf...0a6716` sample is no longer at the cited paths, so it cannot serve as the production acceptance sample.
+
 - [ ] 实现HLS异步按需任务与生命周期清理
   - 说明：增加播放器兼容评审、后台单视频任务、访问manifest、7天dry-run清理和容量门限。
   - 影响范围：服务端任务、Runtime运维和可能的播放器接入；不得同步阻塞视频请求。

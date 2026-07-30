@@ -6,6 +6,8 @@ Run only against a disposable TEMP directory:
 
 ```powershell
 node scripts/test-exact-duplicate-sha256.js
+node scripts/test-duplicate-service-e2e.js
+node scripts/test-image-hash-lookup.js
 ```
 
 The test creates two byte-identical images under separate Chinese `ART-002`/`ART-008` paths, begins with one stale empty hash record, verifies a single cross-collection SHA-256 group, moves only the non-retained TEMP copy to a TEMP trash directory, checks database removal, then restores it and verifies the next scan recognizes it again. Do not point this script at formal photos, trash, or `gallery.db`.
@@ -15,6 +17,8 @@ For read-only diagnosis of a specific hash:
 ```powershell
 node scripts/diagnose-duplicate-sha256.js --db <gallery.db> --photos-dir <photos-root> --sha256 <64-hex-sha256>
 ```
+
+`test-duplicate-service-e2e.js` starts the real `server.js` on an isolated port with an isolated `PHOTOS_DIR`, `DATA_DIR`, and `TRASH_DIR`. It calls the normal media scan, duplicate scan/status/group/recycle endpoints, verifies the second start reuses the active duplicate task, confirms ordinary HTTP/settings access remains responsive, restores only the TEMP recycle file, and verifies the group reappears. The normal media refresh must never be used as a SHA full-rescan trigger; only the explicit duplicate scan has that semantics.
 
 ## Detail-page lazy-loading switch
 
