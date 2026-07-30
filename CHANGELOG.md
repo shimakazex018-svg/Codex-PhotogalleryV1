@@ -7,6 +7,7 @@
 - Added `scripts/diagnose-duplicate-sha256.js`, a read-only database/path diagnostic, plus a TEMP-only cross-collection Chinese-path regression that verifies grouping, safe recycle and reappearance/rescan.
 - Added a real isolated HTTP service regression that exercises the production scan endpoint, duplicate worker endpoint, duplicate-group query, recycle API and restore/rescan path. It also verifies background task status, duplicate-start coalescing and per-file failure tolerance.
 - Fixed the existing image hash lookup test setup so its disposable SQLite database is initialized before its first read-only query.
+- Fixed the Windows startup capability probe for Node 24: its harmless `node:sqlite` ExperimentalWarning no longer makes PowerShell strict mode reject a valid runtime.
 
 ## 2026-07-27 - Complete current-detail loading when lazy loading is disabled
 

@@ -127,7 +127,9 @@ function Test-GalleryEnvironment {
 
   $node = Resolve-GalleryNode -NodePath $NodePath
   $version = (& $node --version).Trim()
-  & $node -e "require('node:sqlite')" 2>$null
+  # Node 24 emits an ExperimentalWarning for node:sqlite on stderr. This is
+  # a capability probe, so suppress warnings without hiding a non-zero exit.
+  & $node --no-warnings -e "require('node:sqlite')" 2>$null
   if ($LASTEXITCODE -ne 0) { throw "Configured Node.js does not provide node:sqlite." }
 
   return [pscustomobject]@{ NodePath = $node; NodeVersion = $version; Database = $database }

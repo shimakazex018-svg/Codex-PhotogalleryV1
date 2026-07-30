@@ -20,6 +20,8 @@ node scripts/diagnose-duplicate-sha256.js --db <gallery.db> --photos-dir <photos
 
 `test-duplicate-service-e2e.js` starts the real `server.js` on an isolated port with an isolated `PHOTOS_DIR`, `DATA_DIR`, and `TRASH_DIR`. It calls the normal media scan, duplicate scan/status/group/recycle endpoints, verifies the second start reuses the active duplicate task, confirms ordinary HTTP/settings access remains responsive, restores only the TEMP recycle file, and verifies the group reappears. The normal media refresh must never be used as a SHA full-rescan trigger; only the explicit duplicate scan has that semantics.
 
+For a controlled Windows restart, validate the exact `gallery.pid` process, listener and HTTP health with `scripts/status-gallery.ps1`. The `node:sqlite` preflight must use `--no-warnings`; Node 24 writes an ExperimentalWarning to stderr that is not a missing capability.
+
 ## Detail-page lazy-loading switch
 
 - 必须使用独立TEMP `PHOTOS_DIR`、`DATA_DIR`和隔离端口，至少构造100张和300张图片图集；不得读取、扫描或写入正式媒体与数据库。
