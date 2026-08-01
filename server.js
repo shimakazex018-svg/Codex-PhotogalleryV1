@@ -112,8 +112,8 @@ function fingerprintScopePrefixes(scope, roots) {
 }
 const imageFingerprintScan = fingerprintManager.createManager({
   workerFile: path.join(rootDir, "image-fingerprint-worker.js"), statusFile: fingerprintTaskStatusFile, ffmpegPath,
-  candidates: ({ afterMediaId, fingerprints, scope, roots }) => galleryDb.getFingerprintCandidates(galleryDbFile, {
-    afterMediaId, fingerprints, sourcePrefixes: fingerprintScopePrefixes(scope, roots),
+  candidates: ({ afterMediaId, fingerprints, scope, roots, limit }) => galleryDb.getFingerprintCandidates(galleryDbFile, {
+    afterMediaId, fingerprints, limit, sourcePrefixes: fingerprintScopePrefixes(scope, roots),
   }).map((row) => ({ ...row, absolutePath: fingerprintAbsolutePath(row.src) })).filter((row) => row.absolutePath),
   commit: (items) => galleryDb.upsertFingerprintBatch(galleryDbFile, items),
 });
@@ -3599,7 +3599,7 @@ function handleRequest(request, response) {
         const payload = JSON.parse(body || "{}");
         if (action === "start") {
           if (payload.scope === "directories") normalizeDuplicateScopeRoots(payload.roots);
-          sendJson(response, imageFingerprintScan.start({ fingerprints: payload.fingerprints, scope: payload.scope, roots: payload.roots }));
+          sendJson(response, imageFingerprintScan.start({ fingerprints: payload.fingerprints, scope: payload.scope, roots: payload.roots, limit: payload.limit }));
         } else if (action === "pause") sendJson(response, imageFingerprintScan.pause());
         else if (action === "resume") sendJson(response, imageFingerprintScan.resume());
         else if (action === "stop") sendJson(response, imageFingerprintScan.stop());

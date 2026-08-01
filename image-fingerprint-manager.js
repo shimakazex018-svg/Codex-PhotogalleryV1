@@ -35,7 +35,7 @@ function createManager(options) {
     const fingerprints = [...new Set(input.fingerprints || ["sha256", "phash"])].filter((value) => value === "sha256" || value === "phash");
     if (!fingerprints.length) { const e = new Error("At least one fingerprint is required"); e.statusCode = 400; throw e; }
     state = { jobId: `image-fingerprint-scan-${Date.now()}`, state: "starting", phase: "enumerating", scope: input.scope || "all", roots: input.roots || [], fingerprints,
-      totalFiles: 0, processedFiles: 0, currentPath: "", pendingWrites: 0, lockRetryCount: 0, lockWaitMilliseconds: 0, startedAt: new Date().toISOString(), updatedAt: "", finishedAt: "",
+      limit: Math.min(Math.max(Number(input.limit) || 0, 0), 100000), totalFiles: 0, processedFiles: 0, currentPath: "", pendingWrites: 0, lockRetryCount: 0, lockWaitMilliseconds: 0, startedAt: new Date().toISOString(), updatedAt: "", finishedAt: "",
       shaCalculated: 0, shaCommitted: 0, shaFailed: 0, phashCalculated: 0, phashCommitted: 0, phashFailed: 0, phashReused: 0, checkpointMediaId: "", lastSuccessfulCommitAt: "" };
     queue = []; stopped = false; persist();
     child = fork(options.workerFile, [], { windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
@@ -54,7 +54,9 @@ function createManager(options) {
   async function dispatch() {
     if (!child || stopped) return;
     if (queue.length >= 400) { state.phase = "waiting-db-writer"; persist(); setTimeout(dispatch, 100); return; }
-    const rows = options.candidates({ afterMediaId: state.checkpointMediaId, fingerprints: state.fingerprints, scope: state.scope, roots: state.roots });
+    const remaining = state.limit ? Math.max(0, state.limit - state.totalFiles) : 200;
+    if (!remaining) { stopped = true; if (!writing && !queue.length) finish(); else void flush(); return; }
+    const rows = options.candidates({ afterMediaId: state.checkpointMediaId, fingerprints: state.fingerprints, scope: state.scope, roots: state.roots, limit: Math.min(200, remaining) });
     if (!rows.length) { stopped = true; if (!writing && !queue.length) finish(); else void flush(); return; }
     state.totalFiles += rows.length; state.phase = "hashing"; persist(); child.send({ type: "items", items: rows, ffmpegPath: options.ffmpegPath });
   }
