@@ -6,6 +6,7 @@
 - The service owns one bounded duplicate-result writer queue (default 5,000 entries), commits at most 200 rows per short transaction, and retries SQLite lock/busy failures at 100/250/500ms, 1/2/3/5s. Lock contention is shown as `waiting-db-lock`, never as a bad image.
 - Task state now separates final unique file failures from database lock retries, lock wait time, committed rows, queued rows, failed commit batches and last successful commit. A failed queued batch is atomically saved under `DATA_DIR/duplicate-scan-pending-<jobId>.json`; resumable checkpoints retain the original scan start and last committed media ID.
 - Added a TEMP-only 1,500-file service regression with a separate SQLite writer holding a real write lock for 10 seconds. The task entered the lock-wait phase, recovered after seven retries, committed all 1,500 rows and passed `quick_check=ok`.
+- Released as frontend `v110-20260801-1500` so browsers fetch the updated task panel rather than a cached v109 script.
 
 ## 2026-08-01 - Add live exact-duplicate scan progress
 
