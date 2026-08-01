@@ -7,6 +7,7 @@
 - The latest snapshot is atomically persisted to `DATA_DIR/duplicate-scan-status.json` at most once per second. On service startup, a previously active snapshot is explicitly marked `interrupted`; no task is falsely reported as running.
 - The duplicate settings view now has a responsive task panel, 1-second active polling, safe stop confirmation, path truncation/copy, stale-progress notice and separate database-current statistics. No SHA-256 algorithm, pHash, grouping rule, schema or media operation changed.
 - Expanded the disposable HTTP regression to verify the new initial fields, start coalescing and cooperative `stopping` to `cancelled` lifecycle with committed hashes retained.
+- Released as frontend `v109-20260801-1230` after controlled 48102 restart. Formal verification was read-only: no duplicate scan, recycle, restore, media operation or database schema change was run.
 
 ## 2026-07-30 - Correct exact SHA-256 duplicate rescan accounting
 
