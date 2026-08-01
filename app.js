@@ -2659,7 +2659,7 @@ function stopMediaOptimizationPolling() {
 }
 
 function mediaOptimizationTaskActive(status = state.mediaOptimizationStatus) {
-  return [status?.scan?.status, status?.duplicates?.status, status?.perceptual?.status, status?.mediaCleanup?.status, status?.videoCompatibility?.status]
+  return [status?.scan?.status, state.duplicateStatus?.status || status?.duplicates?.status, status?.perceptual?.status, status?.mediaCleanup?.status, status?.videoCompatibility?.status]
     .some((value) => ["queued", "starting", "running", "scanning", "pausing", "paused", "stopping", "recycling", "restoring"].includes(value));
 }
 
