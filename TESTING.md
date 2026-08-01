@@ -75,6 +75,22 @@ node test-release-notes.js
 
 ## Perceptual image lookup v101
 
+## Unified image fingerprint and similarity pairs
+
+All commands below use disposable TEMP media and SQLite only:
+
+```powershell
+node scripts/test-image-fingerprint-architecture.js
+node scripts/test-image-fingerprint-manager.js
+node scripts/test-similarity-pair-worker.js
+```
+
+The fingerprint test verifies that SHA-256 and pHash invalidation are independent,
+that the writer commits both in one short transaction, and that pair IDs are
+normalized. The manager test verifies the worker has no SQLite dependency and a
+completed commit advances its durable checkpoint. The pair-worker test covers
+the distance 10/11 boundary and duplicate-free upper-triangle output.
+
 ```powershell
 node --check perceptual-hash.js
 node --check perceptual-limits.js

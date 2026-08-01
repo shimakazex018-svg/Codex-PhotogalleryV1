@@ -12,6 +12,11 @@
 
 ## Current implementation state
 
+- Unified fingerprint work is available in source only: `image-fingerprint-scan`
+  uses a database-free worker for SHA-256/pHash and a bounded server-side SQLite
+  writer. Similarity pairing is a separate resumable, block-based task. Neither
+  task is automatically started by service startup.
+
 - 2026-07-22确认此前存在v102功能线（FTS5、排序、哈希/pHash、视频兼容和时间戳版本体系）与main v96功能线（统一远程管理权限、04:00维护和延迟回收）的真实分叉；统一集成保留两侧功能，并把新增管理接口全部接入同一授权和互斥维护门禁。
 - 末级纯媒体图集的“回收”按钮直接创建延迟回收标记，不再显示浏览器确认框；该操作仍由服务端重新校验资格和管理权限，并保留至少60分钟取消期，满足条件后只在下一个04:00维护窗口执行。
 - 媒体文件HTTP响应统一登记Node持有的图片/视频流，并在响应完成、中断或错误时立即销毁。图集移动由外部维护编排在停止正式48102后离线执行；失败保留为`recycle_failed`供下一窗口重试，白天没有重试或强制释放入口。

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added the isolated foundation for a unified `image-fingerprint-scan`: a
+  database-free worker calculates SHA-256 and pHash while the server retains
+  bounded, retryable SQLite writes.
+- Added normalized `similarity_pairs` and candidate-only pixel verification
+  primitives. No automatic media deletion is introduced.
+
 ## 2026-08-01 - Add scoped exact-duplicate directory scan
 
 - Added `scope=directories` to the existing duplicate-scan route. Roots are canonicalized, de-duplicated and required to resolve under `PHOTOS_DIR`; symlinks, non-images, invalid paths and nested duplicate enumeration are excluded without a fallback to a full scan.

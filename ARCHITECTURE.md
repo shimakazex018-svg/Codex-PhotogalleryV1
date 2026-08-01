@@ -51,6 +51,8 @@ Browser SPA
 | `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
 | `duplicates-worker.js` | 图片 SHA-256 查重后台进程；只计算文件哈希，经IPC请求候选并回传结果、节流进度/心跳和协作停止；不写SQLite |
 | `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
+| `image-fingerprint-worker.js` | No-SQLite SHA-256/pHash calculator used by the unified fingerprint task |
+| `similarity-pair-worker.js` | Blockwise upper-triangle pHash comparison; returns only distance <= 10 pairs |
 | `perceptual-index-worker.js` | 单并发、可暂停恢复、受磁盘硬限制的pHash增量任务 |
 | `perceptual-query-worker.js` | 独立进程顺序扫描紧凑8字节哈希，筛选距离≤10的最多50条结果 |
 | `perceptual-manager.js` | pHash任务生命周期与查询子进程管理 |

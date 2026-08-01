@@ -203,6 +203,33 @@ function openDatabase(dbFile) {
       updated_at INTEGER NOT NULL,
       recent_error TEXT
     );
+
+    -- Kept separate from the legacy pHash state so a deployed database is
+    -- never mistaken for an active unified job after a process restart.
+    CREATE TABLE IF NOT EXISTS image_fingerprint_scan_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1), job_id TEXT NOT NULL DEFAULT '',
+      state TEXT NOT NULL DEFAULT 'idle', phase TEXT NOT NULL DEFAULT 'idle',
+      scope TEXT NOT NULL DEFAULT 'all', fingerprints TEXT NOT NULL DEFAULT '[]',
+      checkpoint_media_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}',
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS similarity_pairs (
+      left_media_id TEXT NOT NULL, right_media_id TEXT NOT NULL,
+      phash_distance INTEGER NOT NULL CHECK(phash_distance BETWEEN 0 AND 64),
+      algorithm_version INTEGER NOT NULL, pixel_left TEXT, pixel_right TEXT,
+      reviewed_state TEXT NOT NULL DEFAULT 'unreviewed', updated_at INTEGER NOT NULL,
+      PRIMARY KEY(left_media_id, right_media_id),
+      CHECK(left_media_id < right_media_id),
+      FOREIGN KEY(left_media_id) REFERENCES media(id) ON DELETE CASCADE,
+      FOREIGN KEY(right_media_id) REFERENCES media(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS idx_similarity_pairs_distance ON similarity_pairs(phash_distance, left_media_id);
+    CREATE TABLE IF NOT EXISTS pixel_hashes (
+      media_id TEXT PRIMARY KEY, algorithm_version INTEGER NOT NULL,
+      pixel_sha256 TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+      channels INTEGER NOT NULL, computed_at INTEGER NOT NULL,
+      FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
   `);
   const recycleColumns = new Set(db.prepare("PRAGMA table_info(collection_recycle_queue)").all().map((column) => column.name));
   if (!recycleColumns.has("retry_count")) db.exec("ALTER TABLE collection_recycle_queue ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
@@ -1592,6 +1619,71 @@ function removeMediaRecords(dbFile, ids = []) {
   });
 }
 
+function getFingerprintCandidates(dbFile, options = {}) {
+  const after = String(options.afterMediaId || "");
+  const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 200);
+  const fingerprints = new Set(Array.isArray(options.fingerprints) ? options.fingerprints : []);
+  const needSha = fingerprints.has("sha256");
+  const needPhash = fingerprints.has("phash");
+  const roots = Array.isArray(options.sourcePrefixes) ? options.sourcePrefixes.filter(Boolean) : [];
+  const rootSql = roots.length ? ` AND (${roots.map(() => "m.src LIKE ? ESCAPE '\\'").join(" OR ")})` : "";
+  return withReadOnlyDatabase(dbFile, (db) => db.prepare(`
+    SELECT m.id, m.collection_id, m.src, COALESCE(m.size,0) AS size, COALESCE(m.mtime,0) AS mtime,
+      h.sha256, h.file_size AS sha_size, h.mtime AS sha_mtime,
+      p.hash64, p.source_size AS phash_size, p.source_mtime AS phash_mtime, p.status AS phash_status
+    FROM media m LEFT JOIN media_hashes h ON h.media_id=m.id
+      LEFT JOIN media_perceptual_hashes p ON p.media_id=m.id
+    WHERE m.type='image' AND m.id > ? ${rootSql}
+    ORDER BY m.id LIMIT ?`).all(after, ...roots.map((value) => `${String(value).replace(/[\\%_]/g, "\\$&")}%`), limit)
+    .map((row) => {
+      const changedSha = !row.sha256 || Number(row.sha_size) !== Number(row.size) || Number(row.sha_mtime) !== Number(row.mtime);
+      const changedPhash = !row.hash64 || Number(row.phash_status) !== 1 || Number(row.phash_size) !== Number(row.size) || Number(row.phash_mtime) !== Number(row.mtime);
+      return { mediaId: row.id, collectionId: row.collection_id, src: row.src, sourceSize: row.size, sourceMtime: row.mtime,
+        needsSha256: needSha && changedSha, needsPhash: needPhash && changedPhash };
+    }).filter((row) => row.needsSha256 || row.needsPhash));
+}
+
+function upsertFingerprintBatch(dbFile, items = []) {
+  if (!items.length) return { shaCommitted: 0, phashCommitted: 0, lastMediaId: "" };
+  return withDuplicateHashWriter(dbFile, (db) => {
+    const sha = db.prepare(`INSERT INTO media_hashes(media_id,collection_id,file_size,mtime,sha256,updated_at) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(media_id) DO UPDATE SET collection_id=excluded.collection_id,file_size=excluded.file_size,mtime=excluded.mtime,sha256=excluded.sha256,updated_at=excluded.updated_at`);
+    const phash = db.prepare(`INSERT INTO media_perceptual_hashes(media_id,hash64,source_size,source_mtime,computed_at,status,error_code) VALUES(?,?,?,?,?,1,NULL)
+      ON CONFLICT(media_id) DO UPDATE SET hash64=excluded.hash64,source_size=excluded.source_size,source_mtime=excluded.source_mtime,computed_at=excluded.computed_at,status=1,error_code=NULL`);
+    const phashError = db.prepare(`INSERT INTO media_perceptual_hashes(media_id,hash64,source_size,source_mtime,computed_at,status,error_code) VALUES(?,NULL,?,?,?,2,?)
+      ON CONFLICT(media_id) DO UPDATE SET hash64=NULL,source_size=excluded.source_size,source_mtime=excluded.source_mtime,computed_at=excluded.computed_at,status=2,error_code=excluded.error_code`);
+    let shaCommitted = 0; let phashCommitted = 0; const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const item of items) {
+        if (item.sha256) { sha.run(item.mediaId, item.collectionId, item.sourceSize, item.sourceMtime, item.sha256, now); shaCommitted += 1; }
+        if (Buffer.isBuffer(item.hash64)) { phash.run(item.mediaId, item.hash64, item.sourceSize, item.sourceMtime, Date.now()); phashCommitted += 1; }
+        else if (item.phashError) phashError.run(item.mediaId, item.sourceSize, item.sourceMtime, Date.now(), String(item.phashError).slice(0, 120));
+      }
+      db.exec("COMMIT");
+      return { shaCommitted, phashCommitted, lastMediaId: String(items.at(-1)?.mediaId || "") };
+    } catch (error) { try { db.exec("ROLLBACK"); } catch {} throw error; }
+  });
+}
+
+function getSimilarityHashRows(dbFile) {
+  return withReadOnlyDatabase(dbFile, (db) => db.prepare("SELECT media_id,hash64 FROM media_perceptual_hashes WHERE status=1 AND length(hash64)=8 ORDER BY media_id").all());
+}
+
+function replaceSimilarityPairs(dbFile, pairs, algorithmVersion = 1) {
+  return withDuplicateHashWriter(dbFile, (db) => {
+    const insert = db.prepare("INSERT OR IGNORE INTO similarity_pairs(left_media_id,right_media_id,phash_distance,algorithm_version,updated_at) VALUES(?,?,?,?,?)");
+    db.exec("BEGIN IMMEDIATE"); try { for (const pair of pairs) insert.run(pair.left, pair.right, pair.distance, algorithmVersion, Date.now()); db.exec("COMMIT"); return { committed: pairs.length }; }
+    catch (error) { try { db.exec("ROLLBACK"); } catch {} throw error; }
+  });
+}
+
+function getSimilarityPair(dbFile, leftId, rightId) {
+  const [left, right] = [String(leftId || ""), String(rightId || "")].sort();
+  if (!left || !right || left === right) return null;
+  return withReadOnlyDatabase(dbFile, (db) => db.prepare("SELECT * FROM similarity_pairs WHERE left_media_id=? AND right_media_id=?").get(left, right) || null);
+}
+
 function getSearchIndexStatus(dbFile, configuredMode = "auto") {
   return withDatabase(dbFile, (db) => {
     const index = searchFts.getIndexStatus(db);
@@ -1651,8 +1743,13 @@ module.exports = {
   getPerceptualHashStats,
   getMediaItemsByPerceptualIds,
   getImagesNeedingHash,
+  getFingerprintCandidates,
   upsertMediaHash,
   upsertMediaHashBatch,
+  upsertFingerprintBatch,
+  getSimilarityHashRows,
+  replaceSimilarityPairs,
+  getSimilarityPair,
   getExactDuplicateGroups,
   getMediaItemsByIds,
   getDuplicateDeletionCandidates,

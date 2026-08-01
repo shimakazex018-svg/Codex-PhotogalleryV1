@@ -2598,14 +2598,14 @@ function duplicatePageHtml() {
 }
 
 async function loadPerceptualIndexStatus() {
-  try { state.perceptualIndexStatus = await fetchJson("/api/perceptual-index/status"); }
+  try { state.perceptualIndexStatus = await fetchJson("/api/image-fingerprint-scan/status"); }
   catch (error) { state.perceptualIndexStatus = { status: "unavailable", recentError: "无法读取相似图片索引状态。" }; }
 }
 
 function perceptualIndexPageHtml() {
   const item = state.perceptualIndexStatus || {};
-  const total = Number(item.totalImages || 0);
-  const indexed = Number(item.indexedImages || 0);
+  const total = Number(item.totalFiles || item.totalImages || 0);
+  const indexed = Number(item.phashCommitted || item.indexedImages || 0);
   const coverage = total ? indexed / total * 100 : 0;
   const bytes = Number(item.bytesAdded || 0);
   const active = Boolean(item.active);
@@ -2634,7 +2634,8 @@ function perceptualIndexPageHtml() {
 
 function bindPerceptualIndexPage() {
   const run = async (action) => {
-    await postJson(`/api/perceptual-index/${action}`).catch(() => null);
+    await postJson(action === "start" ? "/api/image-fingerprint-scan/start" : `/api/image-fingerprint-scan/${action}`,
+      action === "start" ? { fingerprints: ["sha256", "phash"], scope: "all" } : {}).catch(() => null);
     await loadPerceptualIndexStatus();
     renderSettingsPage();
   };

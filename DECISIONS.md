@@ -1,5 +1,12 @@
 # DECISIONS.md
 
+## Unified image fingerprinting (active)
+
+SHA-256 remains the exact-file authority and is grouped in SQLite. pHash is
+computed independently and compared only by a manual, resumable background
+task. Similarity never triggers automatic deletion; pixel hashing is limited to
+stored pHash candidates.
+
 ## DEC-031：关闭懒加载仅完成当前详情图集并采用有界会话队列
 
 ### Decision

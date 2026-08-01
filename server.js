@@ -7,7 +7,9 @@ const readline = require("readline");
 const galleryDb = require("./gallery-db");
 const videoCompatibilityManager = require("./video-compatibility-manager");
 const perceptualManager = require("./perceptual-manager");
+const fingerprintManager = require("./image-fingerprint-manager");
 const { phash64, similarityPercent } = require("./perceptual-hash");
+const { pixelHash } = require("./pixel-hash");
 const { createAdminAuthorizer } = require("./admin-auth");
 const { imageExtensions, videoExtensions, isMediaExtension } = require("./media-types");
 const { dailyDue, nextDailyTime } = require("./maintenance-schedule");
@@ -35,6 +37,7 @@ const highlightFile = path.join(dataDir, "highlight-carousel.json");
 const videoMetadataFile = path.join(dataDir, "video-metadata.json");
 const videoCompatibilityReportFile = path.join(dataDir, "video-compatibility-report.json");
 const duplicateTaskStatusFile = path.join(dataDir, "duplicate-scan-status.json");
+const fingerprintTaskStatusFile = path.join(dataDir, "image-fingerprint-scan-status.json");
 const duplicateReportsDir = path.join(dataDir, "reports");
 const port = Number(process.env.PORT || 48101);
 const host = process.env.HOST || "0.0.0.0";
@@ -94,6 +97,44 @@ const perceptualIndex = perceptualManager.createManager({
   queryWorkerFile: path.join(rootDir, "perceptual-query-worker.js"),
   stats: () => galleryDb.getPerceptualHashStats(galleryDbFile),
 });
+function fingerprintAbsolutePath(src) {
+  try {
+    const pathname = new URL(src, "http://localhost").pathname;
+    if (!pathname.startsWith("/photos/")) return "";
+    const file = path.resolve(photosDir, decodeURIComponent(pathname.slice("/photos/".length)));
+    return isInsideDir(photosDir, file) ? file : "";
+  } catch { return ""; }
+}
+function fingerprintScopePrefixes(scope, roots) {
+  if (scope !== "directories") return [];
+  const normalized = normalizeDuplicateScopeRoots(roots);
+  return normalized.map((root) => `/photos/${path.relative(photosDir, root).split(path.sep).map(encodeURIComponent).join("/")}/`);
+}
+const imageFingerprintScan = fingerprintManager.createManager({
+  workerFile: path.join(rootDir, "image-fingerprint-worker.js"), statusFile: fingerprintTaskStatusFile, ffmpegPath,
+  candidates: ({ afterMediaId, fingerprints, scope, roots }) => galleryDb.getFingerprintCandidates(galleryDbFile, {
+    afterMediaId, fingerprints, sourcePrefixes: fingerprintScopePrefixes(scope, roots),
+  }).map((row) => ({ ...row, absolutePath: fingerprintAbsolutePath(row.src) })).filter((row) => row.absolutePath),
+  commit: (items) => galleryDb.upsertFingerprintBatch(galleryDbFile, items),
+});
+const similarityPairStatusFile = path.join(dataDir, "similarity-pair-scan-status.json");
+let similarityPairChild = null;
+let similarityPairTask = (() => { try { const stored = JSON.parse(fs.readFileSync(similarityPairStatusFile, "utf8")); return ["starting", "running", "paused", "stopping"].includes(stored.state) ? { ...stored, state: "interrupted", phase: "interrupted" } : stored; } catch { return { state: "idle", phase: "idle", totalImages: 0, totalPairs: 0, comparedPairs: 0, matchedPairs: 0, currentBlock: null, checkpoint: [0, 0], blockSize: 512 }; } })();
+function persistSimilarityPairTask() { const tmp = `${similarityPairStatusFile}.${process.pid}.tmp`; fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(similarityPairTask, null, 2)); fs.renameSync(tmp, similarityPairStatusFile); }
+function similarityPairSnapshot() { const elapsed = Math.max(0.001, (Date.now() - Number(similarityPairTask.startedAtMs || Date.now())) / 1000); const rate = similarityPairTask.comparedPairs / elapsed; return { ...similarityPairTask, active: Boolean(similarityPairChild && similarityPairChild.exitCode === null), comparisonsPerSecond: rate, estimatedRemainingSeconds: rate ? Math.max(0, similarityPairTask.totalPairs - similarityPairTask.comparedPairs) / rate : null, checkpoint: similarityPairTask.currentBlock }; }
+function startSimilarityPairTask(resume = false) {
+  if (similarityPairChild?.exitCode === null) { const error = new Error("Similarity pair scan is already active"); error.statusCode = 409; throw error; }
+  const rows = galleryDb.getSimilarityHashRows(galleryDbFile); const blockSize = 512; const prior = resume && similarityPairTask.state === "interrupted" ? similarityPairTask : null;
+  similarityPairTask = { jobId: prior?.jobId || `similarity-pair-scan-${Date.now()}`, state: "starting", phase: "loading-phash", totalImages: rows.length, totalPairs: rows.length * Math.max(0, rows.length - 1) / 2, comparedPairs: Number(prior?.comparedPairs || 0), matchedPairs: Number(prior?.matchedPairs || 0), currentBlock: prior?.currentBlock || null, checkpoint: prior?.checkpoint || [0, 0], blockSize, startedAt: prior?.startedAt || new Date().toISOString(), startedAtMs: Date.now(), updatedAt: new Date().toISOString(), finishedAt: "" }; persistSimilarityPairTask();
+  similarityPairChild = fork(path.join(rootDir, "similarity-pair-worker.js"), [], { windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
+  similarityPairChild.on("message", (message) => {
+    if (message?.type === "ready") { similarityPairTask.state = "running"; similarityPairTask.phase = "comparing"; persistSimilarityPairTask(); similarityPairChild.send({ type: "start", rows, blockSize, checkpoint: similarityPairTask.checkpoint, compared: similarityPairTask.comparedPairs, matched: similarityPairTask.matchedPairs }); }
+    if (message?.type === "block") { if (message.hits?.length) galleryDb.replaceSimilarityPairs(galleryDbFile, message.hits); similarityPairTask.comparedPairs = message.compared; similarityPairTask.matchedPairs = message.matched; similarityPairTask.currentBlock = message.currentBlock; similarityPairTask.checkpoint = message.nextCheckpoint || message.currentBlock; similarityPairTask.updatedAt = new Date().toISOString(); persistSimilarityPairTask(); }
+    if (["finished", "stopped"].includes(message?.type)) { similarityPairTask.state = message.type === "stopped" ? "cancelled" : "completed"; similarityPairTask.phase = similarityPairTask.state; similarityPairTask.finishedAt = new Date().toISOString(); persistSimilarityPairTask(); }
+  });
+  return similarityPairSnapshot();
+}
+function commandSimilarityPairTask(command) { if (!similarityPairChild || similarityPairChild.exitCode !== null) { const error = new Error("No active similarity pair scan"); error.statusCode = 409; throw error; } similarityPairTask.state = command === "pause" ? "paused" : command === "stop" ? "stopping" : "running"; similarityPairTask.phase = similarityPairTask.state; similarityPairChild.send({ type: command }); persistSimilarityPairTask(); return similarityPairSnapshot(); }
 
 const staticAssetExtensions = new Set([".css", ".js"]);
 const oneWeekSeconds = 7 * 24 * 60 * 60;
@@ -2351,6 +2392,7 @@ function mediaOptimizationStatusSnapshot() {
     database: { engine: "sqlite", journalMode: "WAL", busyTimeoutMs: 5000 },
     scan: scanTaskSnapshot(),
     duplicates: duplicateTaskSnapshot(),
+    fingerprintScan: imageFingerprintScan.status(),
     perceptual: perceptualIndex.status(),
     mediaCleanup: mediaCleanupSnapshot(),
     videoCompatibility: videoCompatibility.status(),
@@ -3515,6 +3557,62 @@ function handleRequest(request, response) {
     if (request.method !== "GET") { sendJsonError(response, 405, "Method not allowed"); return; }
     try { sendJson(response, { ok: true, ...perceptualIndex.status() }); }
     catch (error) { sendJsonError(response, 503, "Perceptual index database unavailable"); }
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/image-fingerprint-scan/status") {
+    if (request.method !== "GET") { sendJsonError(response, 405, "Method not allowed"); return; }
+    sendJson(response, imageFingerprintScan.status());
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/similarity-pairs/pixel-verify") {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    if (!requireAdminWrite(request, response, "similarity-pixel-verify")) return;
+    readRequestBody(request, async (body) => {
+      try {
+        const payload = JSON.parse(body || "{}"); const pair = galleryDb.getSimilarityPair(galleryDbFile, payload.leftMediaId, payload.rightMediaId);
+        if (!pair) { sendJsonError(response, 404, "Only stored pHash candidates can be pixel-verified"); return; }
+        const items = galleryDb.getMediaItemsByIds(galleryDbFile, [pair.left_media_id, pair.right_media_id]);
+        if (items.length !== 2) { sendJsonError(response, 404, "Candidate media is unavailable"); return; }
+        const [left, right] = await Promise.all(items.map((item) => pixelHash({ inputPath: fingerprintAbsolutePath(item.src), ffmpegPath })));
+        sendJson(response, { leftMediaId: pair.left_media_id, rightMediaId: pair.right_media_id, pixelExact: left.hash === right.hash,
+          matchType: left.hash === right.hash ? "pixel_exact" : (pair.phash_distance <= 6 ? "highly_similar" : "possibly_similar"), phashDistance: pair.phash_distance });
+      } catch (error) { sendJsonError(response, error.statusCode || 422, error.message); }
+    });
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith("/api/image-fingerprint-scan/")) {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    const action = requestUrl.pathname.slice("/api/image-fingerprint-scan/".length);
+    if (!requireAdminWrite(request, response, `image-fingerprint-${action}`)) return;
+    readRequestBody(request, (body) => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        if (action === "start") {
+          if (payload.scope === "directories") normalizeDuplicateScopeRoots(payload.roots);
+          sendJson(response, imageFingerprintScan.start({ fingerprints: payload.fingerprints, scope: payload.scope, roots: payload.roots }));
+        } else if (action === "pause") sendJson(response, imageFingerprintScan.pause());
+        else if (action === "resume") sendJson(response, imageFingerprintScan.resume());
+        else if (action === "stop") sendJson(response, imageFingerprintScan.stop());
+        else sendJsonError(response, 404, "Unknown image fingerprint action");
+      } catch (error) { sendJsonError(response, error.statusCode || 400, error.message); }
+    });
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/similarity-pair-scan/status") {
+    if (request.method !== "GET") { sendJsonError(response, 405, "Method not allowed"); return; }
+    sendJson(response, similarityPairSnapshot());
+    return;
+  }
+  if (requestUrl.pathname.startsWith("/api/similarity-pair-scan/")) {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    const action = requestUrl.pathname.slice("/api/similarity-pair-scan/".length);
+    if (!requireAdminWrite(request, response, `similarity-pair-${action}`)) return;
+    try { sendJson(response, action === "start" ? startSimilarityPairTask(false) : action === "resume" && (!similarityPairChild || similarityPairChild.exitCode !== null) ? startSimilarityPairTask(true) : ["pause", "resume", "stop"].includes(action) ? commandSimilarityPairTask(action) : (() => { const error = new Error("Unknown similarity pair action"); error.statusCode = 404; throw error; })()); }
+    catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
 

@@ -5,7 +5,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { fork } = require("child_process");
 const { DatabaseSync } = require("node:sqlite");
 const galleryDb = require("../gallery-db");
 
@@ -25,17 +25,22 @@ function addMedia(db, id, collectionId, fileName, src, sortOrder) {
 
 function runWorker(scanStartedAt) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(rootDir, "duplicates-worker.js")], {
+    const child = fork(path.join(rootDir, "duplicates-worker.js"), [], {
       cwd: rootDir,
       env: { ...process.env, PHOTOS_DIR: photosDir, DATA_DIR: dataDir, DUPLICATE_SCAN_STARTED_AT: scanStartedAt, DUPLICATE_BATCH_SIZE: "1" },
-      stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+      stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true,
     });
-    let output = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { output += String(chunk); });
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("message", (message) => {
+      if (message?.type === "duplicate-scan-request-candidates") {
+        const items = galleryDb.getImagesNeedingHash(dbFile, 100, { scanStartedAt, afterMediaId: message.payload?.afterMediaId });
+        child.send({ type: "duplicate-scan-candidates", payload: { items, totalFiles: items.length } });
+      }
+      if (message?.type === "duplicate-scan-hash-result") galleryDb.upsertMediaHashBatch(dbFile, [message.payload.result]);
+    });
     child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolve(output) : reject(new Error(stderr || `worker exited ${code}`)));
+    child.on("close", (code) => code === 0 ? resolve() : reject(new Error(stderr || `worker exited ${code}`)));
   });
 }
 

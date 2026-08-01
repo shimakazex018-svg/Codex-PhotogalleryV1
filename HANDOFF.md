@@ -1,5 +1,14 @@
 # HANDOFF.md
 
+## Unified image fingerprint source change (2026-08-01)
+
+- Source now contains a non-deployed unified `image-fingerprint-scan` worker,
+  bounded SQLite writer, similarity pair table/worker, and candidate-only pixel
+  verification endpoint. All development validation used TEMP data.
+- Do not start either task against formal media without the separately required
+  backup and explicit deployment approval. No formal database, media, or 48102
+  process was changed by this work.
+
 ## Latest task: scoped exact-duplicate directory trial (2026-08-01)
 
 - `POST /api/duplicates/scan` now supports `scope=all` and `scope=directories`; both reach the same duplicate worker, IPC result queue, 200-row serialized SQLite writer, retry/back-pressure and cooperative-stop code. Only candidate production differs.

@@ -1,5 +1,11 @@
 # TODO.md
 
+## Unified fingerprint architecture
+
+- [x] Add isolated worker/SQLite-writer split for SHA-256 and pHash.
+- [x] Add blockwise similarity-pair persistence and candidate-only pixel API.
+- [ ] Perform the separately authorized formal-runtime backup, deployment, and limited real-directory validation.
+
 本文件只记录任务状态。实现历史见 `CHANGELOG.md`，最近交接见 `HANDOFF.md`。
 
 ## High Priority
