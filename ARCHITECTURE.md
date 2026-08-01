@@ -15,7 +15,7 @@ Browser SPA
             ├─ collection-recycle-maintenance.js -> 停站后的离线图集回收
             ├─ filesystem -> PHOTOS_DIR
             ├─ generated files -> DATA_DIR
-            ├─ duplicates-worker.js -> SQLite + PHOTOS_DIR
+            ├─ duplicates-worker.js -> PHOTOS_DIR file reads only; IPC hash results to server writer queue
             ├─ video-compatibility-manager.js -> scan lifecycle + report/API augmentation
             ├─ video-compatibility-worker.js -> read-only SQLite + bounded FFprobe/FFmpeg
             ├─ perceptual-manager.js -> bounded pHash worker/query lifecycle
@@ -139,7 +139,8 @@ Browser SPA
 | GET/POST/DELETE | `/api/favorites` | 收藏标记 |
 | GET/POST/DELETE | `/api/duplicate-delete-marks` | 查重待删除标记 |
 | POST / GET | `/api/scan`、`/api/scan/status` | 后台扫描任务与状态 |
-| POST / GET | `/api/duplicates/scan`、`/api/duplicates/status` | 查重任务与状态 |
+| POST / GET | `/api/duplicates/scan`、`/api/duplicates/status` | 查重任务与状态；scan accepts `scope=all` or validated `scope=directories` roots |
+| GET | `/api/duplicates/scope-results` | 当前指定目录试扫的限定重复组和报告路径 |
 | POST | `/api/duplicates/stop` | 停止查重 |
 | GET | `/api/duplicates` | 重复组分页 |
 | POST | `/api/duplicates/recycle` | 回收选中重复媒体 |
@@ -207,13 +208,13 @@ V1.4.4小批量缓存工具把状态、暂停标记和逐项日志写入Runtime 
 
 ```text
 Browser duplicate page
-  -> POST /api/duplicates/scan
+  -> POST /api/duplicates/scan (scope=all or scope=directories + roots)
+  -> server.js validates directory roots under PHOTOS_DIR and selects stable media-ID pages
   -> server.js forks duplicates-worker.js and persists DATA_DIR/duplicate-scan-status.json
-  -> worker reads candidate images from gallery.db
-  -> worker reads PHOTOS_DIR files and computes SHA-256
-  -> media_hashes updated in gallery.db
-  -> worker sends bounded progress/phase/stop IPC (100 files or 500ms; large-file heartbeat)
-  -> browser polls /api/duplicates/status every 1 second while active, then refreshes duplicate groups
+  -> worker reads only provided candidate files and computes SHA-256
+  -> IPC hash/file result -> bounded main-process queue -> short serialized SQLite batch
+  -> after the queue drains, a directory scope writes DATA_DIR/reports/duplicate-scope-scan-<jobId>.json and groups only its candidates
+  -> browser polls /api/duplicates/status every 1 second while active, then loads scoped results
 ```
 
 `/api/duplicates/status` separates current-job counters from `stats` (the database's cumulative hash state). The status snapshot uses at-most-once-per-second atomic JSON persistence; startup converts an orphaned active snapshot to `interrupted`. Stop is cooperative: the worker finishes its current file/database write, reports `cancelled`, and retains committed hash rows.

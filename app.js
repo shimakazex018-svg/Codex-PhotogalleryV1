@@ -24,7 +24,7 @@ const text = {
   searchMoreCharacters: "\u8bf7\u81f3\u5c11\u8f93\u5165 2 \u4e2a\u5b57\u7b26\u518d\u641c\u7d22\u3002",
 };
 
-const APP_VERSION = "v110-20260801-1500";
+const APP_VERSION = "v111-20260801-1600";
 const RELEASE_NOTES_INITIAL_LIMIT = 20;
 const DUPLICATE_RECYCLE_LIMIT = 50000;
 const HOME_COLLECTION_LIMIT = 40;
@@ -61,6 +61,7 @@ const state = {
   duplicateLoading: false,
   duplicateStatus: null,
   duplicateStatusError: "",
+  duplicateScopeResults: [],
   duplicateSelectedIndex: 0,
   perceptualIndexStatus: null,
   mediaOptimizationStatus: null,
@@ -2429,6 +2430,10 @@ async function loadDuplicates(offset = 0) {
 async function loadDuplicateStatus() {
   try {
     state.duplicateStatus = await fetchJson("/api/duplicates/status");
+    if (state.duplicateStatus.scope === "directories") {
+      const scoped = await fetchJson("/api/duplicates/scope-results");
+      state.duplicateScopeResults = Array.isArray(scoped.groups) ? scoped.groups : [];
+    } else state.duplicateScopeResults = [];
     state.duplicateStatusError = "";
   } catch (error) {
     state.duplicateStatusError = "状态连接中断，正在重试…";
@@ -2514,7 +2519,7 @@ function duplicateTaskPanelHtml(status) {
     <div class="duplicate-task-heading"><h2>当前扫描任务</h2><strong>${escapeHtml(duplicatePhaseText[phase] || phase)}</strong></div>
     ${total ? `<div class="duplicate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(2)}"><span style="width:${percent.toFixed(2)}%"></span></div><strong>${percent.toFixed(2)}%</strong>` : active ? `<div class="duplicate-progress indeterminate"><span></span></div><strong>正在统计待扫描文件…</strong>` : `<div class="duplicate-progress"><span style="width:0%"></span></div><strong>等待开始扫描</strong>`}
     <div class="duplicate-task-grid">
-      <span>已读取/计算 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>最终失败文件 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span>
+      <span>已读取/计算 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>哈希成功 <b>${Number(status.successFiles || 0).toLocaleString("zh-CN")}</b></span><span>最终失败文件 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span>
       <span>已提交数据库 <b>${Number(status.committedFiles || 0).toLocaleString("zh-CN")}</b></span><span>待提交队列 <b>${Number(status.queueLength || 0).toLocaleString("zh-CN")} / ${Number(status.queueLimit || 0).toLocaleString("zh-CN")}</b></span>
       <span>数据库锁重试 <b>${Number(status.dbLockRetries || 0).toLocaleString("zh-CN")}</b></span><span>累计等待写锁 <b>${(Number(status.dbLockWaitMs || 0) / 1000).toFixed(1)} 秒</b></span>
       <span>扫描速度 <b>${Number(status.filesPerSecond || 0).toFixed(1)} 文件/秒</b></span><span>读取速度 <b>${Number(status.megabytesPerSecond || 0).toFixed(1)} MB/秒</b></span>
@@ -2552,6 +2557,12 @@ function duplicatePageHtml() {
           <button id="duplicateRecycleAutoButton" type="button">\u4e00\u952e\u5220\u9664\u91cd\u590d\u56fe\u7247</button>
         </div>
       </div>
+      <details class="settings-card duplicate-scope-scan"><summary>指定目录试扫</summary>
+        <p>仅递归扫描媒体根目录内、每行一个的图片目录；不会自动回退为全量扫描。</p>
+        <textarea id="duplicateScopeRoots" rows="5" placeholder="每行一个完整目录路径"></textarea>
+        <div class="duplicates-actions"><button id="duplicateScopeStartButton" type="button" ${scanActive ? "disabled" : ""}>开始试扫</button>${scanActive ? `<button id="duplicateScopeStopButton" type="button">停止试扫</button>` : ""}<button id="duplicateScopeClearButton" type="button">清空输入</button></div>
+        ${status.scope === "directories" ? `<p>扫描模式：指定目录试扫；目录数量：${Number(status.roots?.length || 0)}。实际图片 ${Number(status.actualImageCount || 0)}，数据库匹配 ${Number(status.databaseMatchedCount || 0)}，未建立媒体记录 ${Number(status.unmatchedFileCount || 0)}。</p>${status.reportPath ? `<p>报告：<code title="${escapeHtml(status.reportPath)}">${escapeHtml(status.reportPath)}</code><button type="button" data-duplicate-copy-path="${escapeHtml(status.reportPath)}">复制报告路径</button></p>` : ""}${state.duplicateScopeResults.length ? `<div class="duplicate-scope-results"><strong>试扫重复结果（优先跨目录）</strong>${[...state.duplicateScopeResults].sort((a, b) => (a.kind === "cross-directory" ? -1 : 1) - (b.kind === "cross-directory" ? -1 : 1)).map((group) => `<article><b>${group.kind === "cross-directory" ? "跨目录重复" : "目录内部重复"} · ${Number(group.count || group.items?.length || 0)} 个文件</b><code>${escapeHtml(group.sha256 || "")}</code>${(group.items || []).map((item) => `<p title="${escapeHtml(item.path || "")}">${escapeHtml(item.path || "")} <small>ID ${escapeHtml(item.mediaId || "")} · ${formatBytes(item.fileSize || 0)}${item.width && item.height ? ` · ${item.width}×${item.height}` : ""}</small> <button type="button" data-duplicate-copy-path="${escapeHtml(item.path || "")}">复制路径</button></p>`).join("")}</article>`).join("")}</div>` : ""}` : ""}
+      </details>
       ${duplicateTaskPanelHtml(status)}
       <div class="duplicates-status" aria-label="数据库当前状态">
         <strong>数据库当前状态</strong>
@@ -3232,6 +3243,13 @@ function bindDuplicatePage() {
     await loadDuplicateDeleteMarks();
     renderDuplicateSurface();
   });
+  document.querySelector("#duplicateScopeStartButton")?.addEventListener("click", async () => {
+    const roots = (document.querySelector("#duplicateScopeRoots")?.value || "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    await postJson("/api/duplicates/scan", { scope: "directories", roots }).catch(() => null);
+    await loadDuplicateStatus(); renderDuplicateSurface();
+  });
+  document.querySelector("#duplicateScopeStopButton")?.addEventListener("click", async () => { await postJson("/api/duplicates/stop").catch(() => null); await loadDuplicateStatus(); renderDuplicateSurface(); });
+  document.querySelector("#duplicateScopeClearButton")?.addEventListener("click", () => { const input = document.querySelector("#duplicateScopeRoots"); if (input) input.value = ""; });
   document.querySelector("#duplicateResumeButton")?.addEventListener("click", async () => {
     await postJson("/api/duplicates/resume").catch(() => null);
     await loadDuplicateStatus(); renderDuplicateSurface();

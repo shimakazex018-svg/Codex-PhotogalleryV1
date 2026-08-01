@@ -8,6 +8,7 @@ Run only against a disposable TEMP directory:
 node scripts/test-exact-duplicate-sha256.js
 node scripts/test-duplicate-service-e2e.js
 node scripts/test-duplicate-db-lock.js
+node scripts/test-duplicate-scope-scan.js
 node scripts/test-image-hash-lookup.js
 ```
 
@@ -22,6 +23,8 @@ node scripts/diagnose-duplicate-sha256.js --db <gallery.db> --photos-dir <photos
 `test-duplicate-service-e2e.js` starts the real `server.js` on an isolated port with an isolated `PHOTOS_DIR`, `DATA_DIR`, and `TRASH_DIR`. It calls the normal media scan, duplicate scan/status/group/recycle endpoints, verifies the second start reuses the active duplicate task, confirms ordinary HTTP/settings access remains responsive, restores only the TEMP recycle file, and verifies the group reappears. The normal media refresh must never be used as a SHA full-rescan trigger; only the explicit duplicate scan has that semantics.
 
 `test-duplicate-db-lock.js` creates 1,500 TEMP images, starts the real service and a separate SQLite process which holds a 10-second write transaction. It must observe `waiting-db-lock`, then recover without file failures, commit all rows once and return `quick_check=ok`. It must never be pointed at a formal database or media root.
+
+`test-duplicate-scope-scan.js` uses two Chinese-named TEMP directory roots plus an out-of-scope image. It verifies that `scope=directories` uses the ordinary duplicate worker and writer route, hashes only five requested images, rejects an invalid root without a full-scan fallback, coalesces a concurrent full-scan request, reports cross-directory and within-directory groups, writes a scope report, and survives a 10-second SQLite write lock without counting it as a file failure.
 
 The same disposable service test verifies the live-task response has a `jobId`, zeroed per-run counters and `starting` phase, then confirms a cooperative stop transitions through `stopping` to `cancelled` without removing already committed hashes. For manual isolated acceptance, refresh the settings page while a task runs and confirm `DATA_DIR/duplicate-scan-status.json` survives; never use formal media or `D:\GalleryRuntime` for this test.
 

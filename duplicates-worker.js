@@ -63,7 +63,10 @@ process.on("message", (message) => {
 });
 
 async function run() {
-  const progress = { phase: "enumerating", totalFiles: 0, processedFiles: 0, successFiles: 0, failedFiles: 0, committedFiles: 0,
+  // Database commits belong exclusively to the parent process.  Do not emit a
+  // stale worker-side value here, otherwise progress IPC can overwrite the
+  // parent writer's committed-files counter.
+  const progress = { phase: "enumerating", totalFiles: 0, processedFiles: 0, successFiles: 0, failedFiles: 0,
     processedBytes: 0, currentPath: "", currentDirectory: "", recentErrors: [] };
   send("duplicate-scan-ready");
   let afterMediaId = "";

@@ -1777,6 +1777,37 @@ a {
   right: 22px;
 }
 
+.duplicate-scope-scan textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 10px 0;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.duplicate-scope-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.duplicate-scope-results article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.duplicate-scope-results code,
+.duplicate-scope-results p {
+  display: block;
+  overflow: hidden;
+  margin: 6px 0 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lightbox-zoom {
   position: fixed;
   z-index: 2;

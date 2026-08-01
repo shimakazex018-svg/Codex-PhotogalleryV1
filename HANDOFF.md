@@ -1,5 +1,12 @@
 # HANDOFF.md
 
+## Latest task: scoped exact-duplicate directory trial (2026-08-01)
+
+- `POST /api/duplicates/scan` now supports `scope=all` and `scope=directories`; both reach the same duplicate worker, IPC result queue, 200-row serialized SQLite writer, retry/back-pressure and cooperative-stop code. Only candidate production differs.
+- Directory roots are resolved under `PHOTOS_DIR`, de-duplicated, nested roots removed and symlinks/non-image entries skipped. Invalid roots return an error and never fall back to a full scan. The settings page accepts one root per line and shows current scope metrics, copyable paths and scoped cross-directory/within-directory groups.
+- A completed directory trial writes `DATA_DIR/reports/duplicate-scope-scan-<jobId>.json`. It is a runtime artifact, not Git content. The task status remains at `DATA_DIR/duplicate-scan-status.json`.
+- TEMP `test-duplicate-scope-scan.js` passed with Chinese paths, five in-scope images, one cross-directory group, one within-directory group, out-of-scope exclusion, mutual exclusion, invalid-root rejection and a 10-second SQLite writer lock that recovered after seven retries. `test-duplicate-service-e2e.js`, `test-duplicate-db-lock.js`, syntax and diff checks also pass. Formal deploy and the explicitly authorized two-directory trial remain to be performed; do not start a formal full scan.
+
 ## Latest task: duplicate-scan SQLite lock reliability (2026-08-01)
 
 - The prior formal job `duplicate-scan-20260801043102` remains terminal `failed`; it is not rewritten as `interrupted`. Its `database is locked` events are database contention, not evidence of five bad images.

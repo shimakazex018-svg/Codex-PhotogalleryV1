@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-01 - Add scoped exact-duplicate directory scan
+
+- Added `scope=directories` to the existing duplicate-scan route. Roots are canonicalized, de-duplicated and required to resolve under `PHOTOS_DIR`; symlinks, non-images, invalid paths and nested duplicate enumeration are excluded without a fallback to a full scan.
+- Directory trials use the same worker, IPC, bounded main-process writer queue, 200-row transactions, SQLite lock retry and cooperative stop lifecycle as `scope=all`. The candidate source is the only branch.
+- The duplicate settings page now accepts one directory per line, shows scoped task metrics and scoped cross-directory/within-directory exact-match results, with copyable paths and a JSON report at `DATA_DIR/reports/duplicate-scope-scan-<jobId>.json`.
+- Added an isolated directory-scope regression covering Chinese paths, cross/inner duplicates, out-of-scope exclusion, invalid-root rejection, mutual exclusion and a real 10-second SQLite write lock.
+
 ## 2026-08-01 - Serialize exact-duplicate scan database writes
 
 - The duplicate worker now only reads files and computes SHA-256. It asks the main service for short, stable-ID candidate pages and returns hash/file-error results over IPC; it never opens the formal database for writing.

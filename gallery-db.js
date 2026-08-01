@@ -1324,6 +1324,8 @@ function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
   const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 1000);
   const scanStartedAt = String(options.scanStartedAt || "");
   const afterMediaId = String(options.afterMediaId || "");
+  const sourcePrefixes = [...new Set((options.sourcePrefixes || []).map((value) => String(value || "")).filter(Boolean))];
+  const sourceFilter = sourcePrefixes.length ? ` AND (${sourcePrefixes.map(() => "m.src LIKE ? ESCAPE '\\'").join(" OR ")})` : "";
   return withReadOnlyDatabase(dbFile, (db) =>
     db
       .prepare(
@@ -1333,6 +1335,7 @@ function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
          LEFT JOIN media_hashes h ON h.media_id = m.id
          WHERE m.type = 'image'
             AND m.id > ?
+            ${sourceFilter}
             AND (
               (? != '' AND (h.media_id IS NULL OR h.updated_at < ?))
               OR (? = '' AND (h.media_id IS NULL OR h.sha256 = '' OR h.file_size != COALESCE(m.size, 0) OR h.mtime != COALESCE(m.mtime, 0)))
@@ -1340,7 +1343,7 @@ function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
          ORDER BY m.id
          LIMIT ?`
       )
-      .all(afterMediaId, scanStartedAt, scanStartedAt, scanStartedAt, limit)
+      .all(afterMediaId, ...sourcePrefixes.map((value) => `${value.replace(/[\\%_]/g, "\\$&")}%`), scanStartedAt, scanStartedAt, scanStartedAt, limit)
       .map((row) => ({ ...rowToMedia(row), collectionTitle: row.collection_title || "" }))
   );
 }

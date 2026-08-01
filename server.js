@@ -35,6 +35,7 @@ const highlightFile = path.join(dataDir, "highlight-carousel.json");
 const videoMetadataFile = path.join(dataDir, "video-metadata.json");
 const videoCompatibilityReportFile = path.join(dataDir, "video-compatibility-report.json");
 const duplicateTaskStatusFile = path.join(dataDir, "duplicate-scan-status.json");
+const duplicateReportsDir = path.join(dataDir, "reports");
 const port = Number(process.env.PORT || 48101);
 const host = process.env.HOST || "0.0.0.0";
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
@@ -150,6 +151,39 @@ const duplicateWriteBatchSize = Math.min(Math.max(Number(process.env.DUPLICATE_W
 const duplicateWriteQueueLimit = Math.min(Math.max(Number(process.env.DUPLICATE_WRITE_QUEUE_LIMIT || 5000), 2000), 10000);
 const duplicateLockBackoffMs = [100, 250, 500, 1000, 2000, 3000, 5000];
 let duplicateRecycleRunning = false;
+
+function normalizeDuplicateScopeRoots(value) {
+  const supplied = Array.isArray(value) ? value : String(value || "").split(/\r?\n/);
+  const mediaRoot = fs.realpathSync.native(photosDir);
+  const isInsideMediaRoot = (candidate) => {
+    const relative = path.relative(mediaRoot.toLowerCase(), candidate.toLowerCase());
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  };
+  const roots = [];
+  for (const raw of supplied.map((item) => String(item || "").trim()).filter(Boolean)) {
+    const normalized = path.resolve(raw);
+    if (!fs.existsSync(normalized) || !fs.statSync(normalized).isDirectory()) throw new Error(`目录不存在或不是目录：${raw}`);
+    const real = fs.realpathSync.native(normalized);
+    if (!isInsideMediaRoot(real)) throw new Error(`目录不在媒体根目录内：${raw}`);
+    if (!roots.some((known) => known.toLowerCase() === real.toLowerCase())) roots.push(real);
+  }
+  if (!roots.length) throw new Error("请至少输入一个媒体根目录内的目录。");
+  return roots.filter((root, index) => !roots.some((other, otherIndex) => otherIndex !== index && isInsideDir(other, root)));
+}
+
+function inspectDuplicateScopeRoots(roots) {
+  const files = new Map(); const stack = [...roots];
+  while (stack.length) {
+    const directory = stack.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { stack.push(target); continue; }
+      if (entry.isFile() && isImage(entry.name)) files.set(toUrl(target), { path: target, root: roots.find((root) => !isInsideDir(root, target) ? false : true) || "" });
+    }
+  }
+  return files;
+}
 let mediaCleanupTask = {
   id: "",
   status: "idle",
@@ -2172,6 +2206,24 @@ function finishDuplicateTaskAfterDrain() {
   duplicateTask.status = duplicateTask.stopRequested ? "cancelled" : "completed";
   duplicateTask.phase = duplicateTask.status;
   duplicateTask.finishedAt = new Date().toISOString(); duplicateTask.resumeAvailable = false;
+  if (duplicateTask.scope === "directories") {
+    try {
+      const groupsByHash = new Map();
+      for (const item of duplicateTask.scopeResults || []) if (item.sha256) groupsByHash.set(item.sha256, [...(groupsByHash.get(item.sha256) || []), item]);
+      duplicateTask.scopeDuplicateGroups = [...groupsByHash.entries()].filter(([, items]) => items.length > 1).map(([sha256, items]) => ({ sha256, count: items.length,
+        kind: new Set(items.map((item) => item.root)).size > 1 ? "cross-directory" : "within-directory", items }));
+      duplicateTask.unmatchedFileCount = Math.max(0, duplicateTask.actualImageCount - new Set(duplicateTask.scopedCandidateUrls || []).size);
+      fs.mkdirSync(duplicateReportsDir, { recursive: true });
+      const reportFile = path.join(duplicateReportsDir, `duplicate-scope-scan-${duplicateTask.id}.json`);
+      fs.writeFileSync(reportFile, JSON.stringify({ jobId: duplicateTask.id, mode: "directories", roots: duplicateTask.roots,
+        startedAt: duplicateTask.startedAt, completedAt: duplicateTask.finishedAt, actualImageCount: duplicateTask.actualImageCount,
+        databaseMatchedCount: duplicateTask.databaseMatchedCount, unmatchedFileCount: duplicateTask.unmatchedFileCount,
+        missingDatabaseFileCount: duplicateTask.missingDatabaseFileCount, hashedFiles: duplicateTask.successFiles, failedFiles: duplicateTask.failedFiles,
+        uniqueSha256Count: groupsByHash.size, duplicateGroups: duplicateTask.scopeDuplicateGroups || [], dbLockRetries: duplicateTask.dbLockRetries,
+        dbLockWaitMs: duplicateTask.dbLockWaitMs, recentErrors: duplicateTask.recentErrors }, null, 2), "utf8");
+      duplicateTask.reportPath = reportFile;
+    } catch (error) { duplicateTask.recentErrors.push({ time: new Date().toISOString(), stage: "report", code: error.code || "REPORT_FAILED", message: error.message, isFinal: false }); }
+  }
   updateDuplicateTask({}, true);
 }
 
@@ -2212,6 +2264,9 @@ function duplicateTaskSnapshot() {
     commitFailedBatches: duplicateTask.commitFailedBatches,
     lastSuccessfulCommitAt: duplicateTask.lastSuccessfulCommitAt,
     resumeAvailable: duplicateTask.resumeAvailable,
+    scope: duplicateTask.scope || "all", roots: duplicateTask.roots || [], reportPath: duplicateTask.reportPath || "",
+    actualImageCount: duplicateTask.actualImageCount || 0, databaseMatchedCount: duplicateTask.databaseMatchedCount || 0,
+    unmatchedFileCount: duplicateTask.unmatchedFileCount || 0, missingDatabaseFileCount: duplicateTask.missingDatabaseFileCount || 0,
     processedBytes: duplicateTask.processedBytes,
     percent: duplicateTask.totalFiles ? Number((duplicateTask.processedFiles / duplicateTask.totalFiles * 100).toFixed(4)) : 0,
     filesPerSecond: Number(filesPerSecond.toFixed(2)),
@@ -2311,6 +2366,9 @@ function startDuplicateTask(requestInfo = {}) {
   }
 
   const resumeState = requestInfo.resumeState || null;
+  const scope = requestInfo.scope === "directories" ? "directories" : "all";
+  const roots = scope === "directories" ? normalizeDuplicateScopeRoots(requestInfo.roots) : [];
+  const actualFiles = scope === "directories" ? inspectDuplicateScopeRoots(roots) : new Map();
   const id = resumeState?.id || `duplicate-scan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
   const statsBefore = safeDuplicateStats();
   duplicateTask = resumeState ? {
@@ -2331,6 +2389,8 @@ function startDuplicateTask(requestInfo = {}) {
     stats: fs.existsSync(galleryDbFile) ? galleryDb.getDuplicateHashStats(galleryDbFile) : null,
     scanStartedAt: new Date().toISOString(), lastCommittedMediaId: "", pendingBatchCount: 0, queueLength: 0, queueLimit: duplicateWriteQueueLimit,
     dbLockRetries: 0, dbLockWaitMs: 0, commitFailedBatches: 0, lastSuccessfulCommitAt: "", resumeAvailable: false,
+    scope, roots, sourcePrefixes: roots.map((root) => `${toUrl(root)}/`), actualFileUrls: [...actualFiles.keys()], actualImageCount: actualFiles.size,
+    databaseMatchedCount: 0, unmatchedFileCount: 0, missingDatabaseFileCount: 0, scopeDuplicateGroups: [], reportPath: "", scopeResults: [], scopedCandidateUrls: [], sourceByMediaId: {},
   };
   duplicateWriteQueue = [];
   if (resumeState) {
@@ -2358,19 +2418,33 @@ function startDuplicateTask(requestInfo = {}) {
     if (duplicateTask.id !== id || !message?.type) return;
     const progress = message.payload || {};
     if (["duplicate-scan-progress", "duplicate-scan-phase"].includes(message.type)) updateDuplicateTask(progress);
-    if (message.type === "duplicate-scan-ready" || message.type === "duplicate-scan-request-candidates") {
+    if (message.type === "duplicate-scan-ready") updateDuplicateTask({ phase: "enumerating" });
+    // The worker emits "ready" before it installs its candidate promise.  It
+    // must not receive a page for that notification as well as for the actual
+    // request, otherwise a small scoped scan can hash the first page twice.
+    if (message.type === "duplicate-scan-request-candidates") {
       if (duplicateWriteQueue.length >= duplicateWriteQueueLimit) {
         duplicateTask.phase = "waiting-db-writer"; updateDuplicateTask({}, true); scheduleDuplicateCommit();
         setTimeout(() => { if (duplicateTaskChild === child) child.emit("message", { type: "duplicate-scan-request-candidates", payload: progress }); }, 250);
       } else {
         try {
-          const rows = galleryDb.getImagesNeedingHash(galleryDbFile, 100, { scanStartedAt: duplicateTask.scanStartedAt, afterMediaId: progress.afterMediaId || duplicateTask.lastCommittedMediaId || "" });
-          const totalFiles = duplicateTask.totalFiles || Number(safeDuplicateStats()?.imageCount || 0);
+          const rows = galleryDb.getImagesNeedingHash(galleryDbFile, 100, { scanStartedAt: duplicateTask.scanStartedAt, afterMediaId: progress.afterMediaId || duplicateTask.lastCommittedMediaId || "", sourcePrefixes: duplicateTask.sourcePrefixes || [] });
+          if (duplicateTask.scope === "directories") {
+            duplicateTask.databaseMatchedCount += rows.length;
+            const actual = new Set(duplicateTask.actualFileUrls || []);
+            duplicateTask.missingDatabaseFileCount += rows.filter((row) => !actual.has(row.src)).length;
+            for (const row of rows) { duplicateTask.scopedCandidateUrls.push(row.src); duplicateTask.sourceByMediaId[row.id] = row; }
+          }
+          const totalFiles = duplicateTask.scope === "directories" ? duplicateTask.actualImageCount : (duplicateTask.totalFiles || Number(safeDuplicateStats()?.imageCount || 0));
           child.send({ type: "duplicate-scan-candidates", payload: { items: rows, totalFiles, phase: rows.length ? "hashing" : "grouping" } });
         } catch (error) { failDuplicateTask(error); }
       }
     }
     if (message.type === "duplicate-scan-hash-result") {
+      if (duplicateTask.scope === "directories") {
+        const source = duplicateTask.sourceByMediaId[progress.result.mediaId];
+        duplicateTask.scopeResults.push({ ...progress.result, path: source ? photoUrlToPath(source.src) : "", root: source ? (duplicateTask.roots || []).find((root) => isInsideDir(root, photoUrlToPath(source.src))) || "" : "", status: progress.result.sha256 ? "success" : "failed" });
+      }
       duplicateWriteQueue.push(progress.result); duplicateTask.queueLength = duplicateWriteQueue.length;
       duplicateTask.pendingBatchCount = Math.ceil(duplicateWriteQueue.length / duplicateWriteBatchSize);
       updateDuplicateTask(progress.progress || {});
@@ -3617,13 +3691,20 @@ function handleRequest(request, response) {
     }
     const auth = requireAdminWrite(request, response, "duplicate-scan");
     if (!auth) return;
-    try { sendJson(response, startDuplicateTask({
-      remoteAddress: request.socket.remoteAddress || "",
-      host: request.headers.host || "",
-      referer: request.headers.referer || "",
-      userAgent: request.headers["user-agent"] || "",
-      requestedScope: auth.scope,
-    })); } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
+    readRequestBody(request, (body) => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        sendJson(response, startDuplicateTask({ remoteAddress: request.socket.remoteAddress || "", host: request.headers.host || "",
+          referer: request.headers.referer || "", userAgent: request.headers["user-agent"] || "", requestedScope: auth.scope,
+          scope: payload.scope, roots: payload.roots }));
+      } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
+    });
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/duplicates/scope-results") {
+    if (duplicateTask.scope !== "directories") { sendJson(response, { groups: [], reportPath: "" }); return; }
+    sendJson(response, { groups: duplicateTask.scopeDuplicateGroups || [], reportPath: duplicateTask.reportPath || "" });
     return;
   }
 
