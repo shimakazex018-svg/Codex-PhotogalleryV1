@@ -24,5 +24,6 @@ try {
   assert.equal(hammingDistance64(Buffer.alloc(8), Buffer.alloc(8)), 0);
   const result = galleryDb.replaceSimilarityPairs(dbFile, [{ left: "a", right: "b", distance: 10 }]);
   assert.equal(result.committed, 1); assert.equal(galleryDb.getSimilarityPair(dbFile, "b", "a").phash_distance, 10);
+  assert.equal(galleryDb.getSimilarityPairsPage(dbFile, { category: "possibly_similar" }).pairs.length, 1);
   console.log("image fingerprint architecture: ok");
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -1684,6 +1684,24 @@ function getSimilarityPair(dbFile, leftId, rightId) {
   return withReadOnlyDatabase(dbFile, (db) => db.prepare("SELECT * FROM similarity_pairs WHERE left_media_id=? AND right_media_id=?").get(left, right) || null);
 }
 
+function getSimilarityPairsPage(dbFile, options = {}) {
+  const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 100); const offset = Math.max(Number(options.offset) || 0, 0);
+  const category = String(options.category || "all");
+  const where = category === "highly_similar" ? "WHERE p.phash_distance BETWEEN 0 AND 6" : category === "possibly_similar" ? "WHERE p.phash_distance BETWEEN 7 AND 10" : "";
+  return withReadOnlyDatabase(dbFile, (db) => {
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM similarity_pairs p ${where}`).get().count;
+    const rows = db.prepare(`SELECT p.*, l.src AS left_src,l.title AS left_title,l.size AS left_size,l.width AS left_width,l.height AS left_height,
+      r.src AS right_src,r.title AS right_title,r.size AS right_size,r.width AS right_width,r.height AS right_height
+      FROM similarity_pairs p JOIN media l ON l.id=p.left_media_id JOIN media r ON r.id=p.right_media_id ${where}
+      ORDER BY p.phash_distance ASC,p.updated_at DESC LIMIT ? OFFSET ?`).all(limit, offset);
+    return { total, limit, offset, pairs: rows.map((row) => ({ leftMediaId: row.left_media_id, rightMediaId: row.right_media_id,
+      phashDistance: row.phash_distance, similarity: Math.round((1 - row.phash_distance / 64) * 1000) / 10, reviewedState: row.reviewed_state,
+      left: { src: row.left_src, title: row.left_title, size: row.left_size, width: row.left_width, height: row.left_height },
+      right: { src: row.right_src, title: row.right_title, size: row.right_size, width: row.right_width, height: row.right_height },
+    })) };
+  });
+}
+
 function getSearchIndexStatus(dbFile, configuredMode = "auto") {
   return withDatabase(dbFile, (db) => {
     const index = searchFts.getIndexStatus(db);
@@ -1750,6 +1768,7 @@ module.exports = {
   getSimilarityHashRows,
   replaceSimilarityPairs,
   getSimilarityPair,
+  getSimilarityPairsPage,
   getExactDuplicateGroups,
   getMediaItemsByIds,
   getDuplicateDeletionCandidates,

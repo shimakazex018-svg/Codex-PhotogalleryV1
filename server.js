@@ -3583,6 +3583,13 @@ function handleRequest(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === "/api/similarity-pairs") {
+    if (request.method !== "GET") { sendJsonError(response, 405, "Method not allowed"); return; }
+    try { sendJson(response, galleryDb.getSimilarityPairsPage(galleryDbFile, { limit: requestUrl.searchParams.get("limit"), offset: requestUrl.searchParams.get("offset"), category: requestUrl.searchParams.get("category") })); }
+    catch (error) { sendJsonError(response, 500, error.message); }
+    return;
+  }
+
   if (requestUrl.pathname.startsWith("/api/image-fingerprint-scan/")) {
     if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
     const action = requestUrl.pathname.slice("/api/image-fingerprint-scan/".length);

@@ -64,6 +64,8 @@ const state = {
   duplicateScopeResults: [],
   duplicateSelectedIndex: 0,
   perceptualIndexStatus: null,
+  similarityPairStatus: null,
+  similarityPairs: [],
   mediaOptimizationStatus: null,
   mediaOptimizationLoading: false,
   mediaOptimizationError: "",
@@ -2600,6 +2602,13 @@ function duplicatePageHtml() {
 async function loadPerceptualIndexStatus() {
   try { state.perceptualIndexStatus = await fetchJson("/api/image-fingerprint-scan/status"); }
   catch (error) { state.perceptualIndexStatus = { status: "unavailable", recentError: "无法读取相似图片索引状态。" }; }
+}
+
+async function loadSimilarityPairs() {
+  try {
+    const [status, pairs] = await Promise.all([fetchJson("/api/similarity-pair-scan/status"), fetchJson("/api/similarity-pairs?limit=20")]);
+    state.similarityPairStatus = status; state.similarityPairs = pairs.pairs || [];
+  } catch { state.similarityPairStatus = { state: "unavailable" }; state.similarityPairs = []; }
 }
 
 function perceptualIndexPageHtml() {
