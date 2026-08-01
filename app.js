@@ -2495,6 +2495,12 @@ function duplicateDuration(seconds) {
   return `${hours}:${minutes}:${remainder}`;
 }
 
+function duplicateTimestamp(value) {
+  if (!value) return "未开始";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
+
 function duplicateTaskPanelHtml(status) {
   const total = Number(status.totalFiles || 0);
   const processed = Number(status.processedFiles || 0);
@@ -2506,14 +2512,14 @@ function duplicateTaskPanelHtml(status) {
   const errors = Array.isArray(status.recentErrors) ? status.recentErrors : [];
   return `<section class="duplicate-task-panel settings-card" aria-live="polite">
     <div class="duplicate-task-heading"><h2>当前扫描任务</h2><strong>${escapeHtml(duplicatePhaseText[phase] || phase)}</strong></div>
-    ${total ? `<div class="duplicate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(2)}"><span style="width:${percent.toFixed(2)}%"></span></div><strong>${percent.toFixed(2)}%</strong>` : `<div class="duplicate-progress indeterminate"><span></span></div><strong>正在统计待扫描文件…</strong>`}
+    ${total ? `<div class="duplicate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(2)}"><span style="width:${percent.toFixed(2)}%"></span></div><strong>${percent.toFixed(2)}%</strong>` : active ? `<div class="duplicate-progress indeterminate"><span></span></div><strong>正在统计待扫描文件…</strong>` : `<div class="duplicate-progress"><span style="width:0%"></span></div><strong>等待开始扫描</strong>`}
     <div class="duplicate-task-grid">
       <span>已处理 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>成功 <b>${Number(status.successFiles || 0).toLocaleString("zh-CN")}</b></span>
       <span>失败 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span><span>已写入数据库 <b>${Number(status.committedFiles || 0).toLocaleString("zh-CN")}</b></span>
       <span>扫描速度 <b>${Number(status.filesPerSecond || 0).toFixed(1)} 文件/秒</b></span><span>读取速度 <b>${Number(status.megabytesPerSecond || 0).toFixed(1)} MB/秒</b></span>
       <span>已运行 <b>${duplicateDuration(status.elapsedSeconds)}</b></span><span>预计剩余 <b>${status.estimatedRemainingSeconds == null ? "计算中" : duplicateDuration(status.estimatedRemainingSeconds)}</b></span>
     </div>
-    <div class="duplicate-task-paths"><span>当前目录 <b title="${escapeHtml(status.currentDirectory || "")}">${escapeHtml(status.currentDirectory || "等待任务开始")}</b></span><span>当前文件 <b title="${escapeHtml(path)}">${escapeHtml(path || "等待任务开始")}</b>${path ? `<button type="button" data-duplicate-copy-path="${escapeHtml(path)}">复制路径</button>` : ""}</span><small>最后更新：${Number(status.staleSeconds || 0)} 秒前</small></div>
+    <div class="duplicate-task-paths"><span>开始时间 <b>${escapeHtml(duplicateTimestamp(status.startedAt))}</b></span>${status.finishedAt ? `<span>完成时间 <b>${escapeHtml(duplicateTimestamp(status.finishedAt))}</b></span>` : ""}<span>当前目录 <b title="${escapeHtml(status.currentDirectory || "")}">${escapeHtml(status.currentDirectory || "等待任务开始")}</b></span><span>当前文件 <b title="${escapeHtml(path)}">${escapeHtml(path || "等待任务开始")}</b>${path ? `<button type="button" data-duplicate-copy-path="${escapeHtml(path)}">复制路径</button>` : ""}</span><small>最后更新：${Number(status.staleSeconds || 0)} 秒前</small></div>
     ${status.stopRequested && active ? `<small>已请求停止，正在完成当前文件或数据库提交。</small>` : ""}
     ${stale ? `<small class="error-text">任务仍在运行，但已 ${Number(status.staleSeconds)} 秒未收到进度更新；可能正在读取大文件或磁盘响应较慢。</small>` : ""}
     ${state.duplicateStatusError ? `<small class="error-text">${escapeHtml(state.duplicateStatusError)}</small>` : ""}
