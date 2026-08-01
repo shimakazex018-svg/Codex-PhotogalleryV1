@@ -49,7 +49,7 @@ Browser SPA
 | `scripts/run-daily-gallery-maintenance.ps1` | 03:59:50任务入口；锁防重入、停止48102、离线回收、启动网站、HTTP健康后启动索引扫描并追加维护日志 |
 | `scripts/install-daily-gallery-maintenance.ps1` | 安装每日03:59:50、`IgnoreNew`的当前用户维护任务 |
 | `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
-| `duplicates-worker.js` | 图片 SHA-256 查重后台进程；节流IPC进度、阶段、心跳和协作停止 |
+| `duplicates-worker.js` | 图片 SHA-256 查重后台进程；只计算文件哈希，经IPC请求候选并回传结果、节流进度/心跳和协作停止；不写SQLite |
 | `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
 | `perceptual-index-worker.js` | 单并发、可暂停恢复、受磁盘硬限制的pHash增量任务 |
 | `perceptual-query-worker.js` | 独立进程顺序扫描紧凑8字节哈希，筛选距离≤10的最多50条结果 |

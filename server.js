@@ -136,9 +136,19 @@ let duplicateTask = {
   errorMessage: "",
   result: null,
   stats: null,
+  scanStartedAt: "", lastCommittedMediaId: "", pendingBatchCount: 0,
+  queueLength: 0, queueLimit: 5000, dbLockRetries: 0, dbLockWaitMs: 0,
+  commitFailedBatches: 0, lastSuccessfulCommitAt: "", resumeAvailable: false,
 };
 let duplicateTaskChild = null;
 let duplicateTaskPersistedAt = 0;
+let duplicateWriteQueue = [];
+let duplicateWriteTimer = null;
+let duplicateWriteActive = false;
+let duplicateWorkerFinished = false;
+const duplicateWriteBatchSize = Math.min(Math.max(Number(process.env.DUPLICATE_WRITE_BATCH_SIZE || 200), 100), 500);
+const duplicateWriteQueueLimit = Math.min(Math.max(Number(process.env.DUPLICATE_WRITE_QUEUE_LIMIT || 5000), 2000), 10000);
+const duplicateLockBackoffMs = [100, 250, 500, 1000, 2000, 3000, 5000];
 let duplicateRecycleRunning = false;
 let mediaCleanupTask = {
   id: "",
@@ -2088,6 +2098,83 @@ function startScanTask(options = {}) {
   return scanTaskSnapshot();
 }
 
+function isSqliteLockError(error) {
+  return /SQLITE_BUSY|SQLITE_LOCKED|database(?: table)? is locked/i.test(String(error?.code || "") + " " + String(error?.message || error || ""));
+}
+
+function duplicatePendingFile(id = duplicateTask.id) { return path.join(dataDir, `duplicate-scan-pending-${id}.json`); }
+function saveDuplicatePendingQueue() {
+  if (!duplicateWriteQueue.length) return;
+  const file = duplicatePendingFile(); const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify({ jobId: duplicateTask.id, items: duplicateWriteQueue }, null, 2), "utf8");
+  fs.renameSync(temp, file);
+}
+function scheduleDuplicateCommit(delay = 0) {
+  if (duplicateWriteTimer || duplicateWriteActive || !duplicateWriteQueue.length) return;
+  duplicateWriteTimer = setTimeout(() => { duplicateWriteTimer = null; flushDuplicateWriteQueue().catch((error) => failDuplicateTask(error)); }, delay);
+}
+function waitMs(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function flushDuplicateWriteQueue() {
+  if (duplicateWriteActive || !duplicateWriteQueue.length) return;
+  duplicateWriteActive = true;
+  try {
+    while (duplicateWriteQueue.length) {
+      const batch = duplicateWriteQueue.slice(0, duplicateWriteBatchSize);
+      let committed = false;
+      for (let attempt = 0; attempt <= duplicateLockBackoffMs.length; attempt += 1) {
+        try {
+          duplicateTask.phase = "committing";
+          const result = galleryDb.upsertMediaHashBatch(galleryDbFile, batch);
+          duplicateWriteQueue.splice(0, batch.length);
+          duplicateTask.committedFiles += result.committed;
+          duplicateTask.lastCommittedMediaId = result.lastMediaId;
+          duplicateTask.lastSuccessfulCommitAt = new Date().toISOString();
+          duplicateTask.pendingBatchCount = Math.ceil(duplicateWriteQueue.length / duplicateWriteBatchSize);
+          duplicateTask.queueLength = duplicateWriteQueue.length;
+          duplicateTask.phase = duplicateTask.stopRequested ? "stopping" : "hashing";
+          updateDuplicateTask({}, true);
+          committed = true;
+          break;
+        } catch (error) {
+          if (!isSqliteLockError(error) || attempt >= duplicateLockBackoffMs.length) throw error;
+          const delay = duplicateLockBackoffMs[attempt];
+          duplicateTask.phase = "waiting-db-lock";
+          duplicateTask.dbLockRetries += 1;
+          duplicateTask.dbLockWaitMs += delay;
+          duplicateTask.queueLength = duplicateWriteQueue.length;
+          duplicateTask.recentErrors = [...duplicateTask.recentErrors, { time: new Date().toISOString(), stage: "database", errorCode: "SQLITE_LOCKED", code: "SQLITE_LOCKED", message: error.message, attempt: attempt + 1, isFinal: false }].slice(-20);
+          updateDuplicateTask({}, true);
+          await waitMs(delay);
+        }
+      }
+      if (!committed) break;
+    }
+  } finally {
+    duplicateWriteActive = false;
+  }
+  if (duplicateWorkerFinished && !duplicateWriteQueue.length) finishDuplicateTaskAfterDrain();
+}
+function failDuplicateTask(error) {
+  try { saveDuplicatePendingQueue(); } catch (saveError) { logEvent("duplicate_scan_pending_save_failed", { error: saveError.message }); }
+  duplicateTask.status = "failed"; duplicateTask.phase = "failed"; duplicateTask.finishedAt = new Date().toISOString();
+  duplicateTask.errorMessage = error.message || String(error); duplicateTask.commitFailedBatches += 1;
+  duplicateTask.resumeAvailable = Boolean(duplicateWriteQueue.length || duplicateTask.lastCommittedMediaId);
+  duplicateTask.queueLength = duplicateWriteQueue.length; duplicateTask.pendingBatchCount = Math.ceil(duplicateWriteQueue.length / duplicateWriteBatchSize);
+  updateDuplicateTask({}, true);
+  try { duplicateTaskChild?.send({ type: "duplicate-scan-abort", payload: { error: duplicateTask.errorMessage } }); } catch {}
+  logEvent("duplicate_scan_commit_failed", { id: duplicateTask.id, error: duplicateTask.errorMessage, queued: duplicateWriteQueue.length });
+}
+function finishDuplicateTaskAfterDrain() {
+  if (!["running", "stopping"].includes(duplicateTask.status) || duplicateWriteQueue.length || duplicateWriteActive) return;
+  duplicateTask.phase = duplicateTask.stopRequested ? "cancelled" : "grouping";
+  updateDuplicateTask({}, true);
+  try { duplicateTask.stats = galleryDb.getDuplicateHashStats(galleryDbFile); } catch (error) { failDuplicateTask(error); return; }
+  duplicateTask.status = duplicateTask.stopRequested ? "cancelled" : "completed";
+  duplicateTask.phase = duplicateTask.status;
+  duplicateTask.finishedAt = new Date().toISOString(); duplicateTask.resumeAvailable = false;
+  updateDuplicateTask({}, true);
+}
+
 function duplicateTaskSnapshot() {
   let stats = duplicateTask.stats;
   if (fs.existsSync(galleryDbFile)) {
@@ -2112,6 +2199,7 @@ function duplicateTaskSnapshot() {
     phase: duplicateTask.phase,
     stopRequested: Boolean(duplicateTask.stopRequested),
     startedAt: duplicateTask.startedAt,
+    scanStartedAt: duplicateTask.scanStartedAt || duplicateTask.startedAt,
     updatedAt: duplicateTask.updatedAt,
     finishedAt: duplicateTask.finishedAt,
     totalFiles: duplicateTask.totalFiles,
@@ -2119,6 +2207,15 @@ function duplicateTaskSnapshot() {
     successFiles: duplicateTask.successFiles,
     failedFiles: duplicateTask.failedFiles,
     committedFiles: duplicateTask.committedFiles,
+    lastCommittedMediaId: duplicateTask.lastCommittedMediaId,
+    pendingBatchCount: duplicateTask.pendingBatchCount,
+    queueLength: duplicateTask.queueLength,
+    queueLimit: duplicateTask.queueLimit,
+    dbLockRetries: duplicateTask.dbLockRetries,
+    dbLockWaitMs: duplicateTask.dbLockWaitMs,
+    commitFailedBatches: duplicateTask.commitFailedBatches,
+    lastSuccessfulCommitAt: duplicateTask.lastSuccessfulCommitAt,
+    resumeAvailable: duplicateTask.resumeAvailable,
     processedBytes: duplicateTask.processedBytes,
     percent: duplicateTask.totalFiles ? Number((duplicateTask.processedFiles / duplicateTask.totalFiles * 100).toFixed(4)) : 0,
     filesPerSecond: Number(filesPerSecond.toFixed(2)),
@@ -2154,7 +2251,7 @@ function persistDuplicateTaskStatus(force = false) {
 }
 
 function updateDuplicateTask(progress = {}, forcePersist = false) {
-  const fields = ["phase", "totalFiles", "processedFiles", "successFiles", "failedFiles", "committedFiles", "processedBytes", "currentPath", "currentDirectory"];
+  const fields = ["phase", "totalFiles", "processedFiles", "successFiles", "failedFiles", "committedFiles", "processedBytes", "currentPath", "currentDirectory", "queueLength", "pendingBatchCount", "lastCommittedMediaId", "dbLockRetries", "dbLockWaitMs", "lastSuccessfulCommitAt", "commitFailedBatches"];
   for (const field of fields) {
     if (progress[field] !== undefined && progress[field] !== null) duplicateTask[field] = progress[field];
   }
@@ -2185,6 +2282,10 @@ function restoreDuplicateTaskStatus() {
       recentErrors: Array.isArray(stored.recentErrors) ? stored.recentErrors.slice(-20) : [],
       errorMessage: ["running", "starting", "stopping"].includes(status) ? "服务重启导致任务中断" : (stored.errorMessage || ""),
       result: stored.result || null, stats: stored.stats || null,
+      scanStartedAt: stored.scanStartedAt || stored.startedAt || "", lastCommittedMediaId: stored.lastCommittedMediaId || "",
+      pendingBatchCount: Number(stored.pendingBatchCount || 0), queueLength: Number(stored.queueLength || 0), queueLimit: Number(stored.queueLimit || duplicateWriteQueueLimit),
+      dbLockRetries: Number(stored.dbLockRetries || 0), dbLockWaitMs: Number(stored.dbLockWaitMs || 0), commitFailedBatches: Number(stored.commitFailedBatches || 0),
+      lastSuccessfulCommitAt: stored.lastSuccessfulCommitAt || "", resumeAvailable: Boolean(stored.resumeAvailable || stored.lastCommittedMediaId),
     };
     persistDuplicateTaskStatus(true);
   } catch (error) {
@@ -2213,9 +2314,13 @@ function startDuplicateTask(requestInfo = {}) {
     throw error;
   }
 
-  const id = `duplicate-scan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
+  const resumeState = requestInfo.resumeState || null;
+  const id = resumeState?.id || `duplicate-scan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
   const statsBefore = safeDuplicateStats();
-  duplicateTask = {
+  duplicateTask = resumeState ? {
+    ...resumeState, status: "running", phase: "starting", stopRequested: false, finishedAt: "", updatedAt: new Date().toISOString(),
+    errorMessage: "", resumeAvailable: false, queueLength: 0, pendingBatchCount: 0,
+  } : {
     id,
     status: "running",
     phase: "starting",
@@ -2228,13 +2333,25 @@ function startDuplicateTask(requestInfo = {}) {
     errorMessage: "",
     result: null,
     stats: fs.existsSync(galleryDbFile) ? galleryDb.getDuplicateHashStats(galleryDbFile) : null,
+    scanStartedAt: new Date().toISOString(), lastCommittedMediaId: "", pendingBatchCount: 0, queueLength: 0, queueLimit: duplicateWriteQueueLimit,
+    dbLockRetries: 0, dbLockWaitMs: 0, commitFailedBatches: 0, lastSuccessfulCommitAt: "", resumeAvailable: false,
   };
+  duplicateWriteQueue = [];
+  if (resumeState) {
+    try {
+      const pending = JSON.parse(fs.readFileSync(duplicatePendingFile(id), "utf8"));
+      duplicateWriteQueue = Array.isArray(pending.items) ? pending.items : [];
+    } catch {}
+  }
+  duplicateTask.queueLength = duplicateWriteQueue.length;
+  duplicateTask.pendingBatchCount = Math.ceil(duplicateWriteQueue.length / duplicateWriteBatchSize);
+  duplicateWorkerFinished = false;
   persistDuplicateTaskStatus(true);
   logEvent("duplicate_scan_start", { id, requestInfo, statsBefore });
 
   const child = fork(path.join(rootDir, "duplicates-worker.js"), [], {
     cwd: rootDir,
-    env: { ...process.env, DUPLICATE_SCAN_STARTED_AT: duplicateTask.startedAt },
+    env: { ...process.env, DUPLICATE_SCAN_STARTED_AT: duplicateTask.scanStartedAt },
     windowsHide: true,
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
@@ -2245,12 +2362,27 @@ function startDuplicateTask(requestInfo = {}) {
     if (duplicateTask.id !== id || !message?.type) return;
     const progress = message.payload || {};
     if (["duplicate-scan-progress", "duplicate-scan-phase"].includes(message.type)) updateDuplicateTask(progress);
-    if (message.type === "duplicate-scan-result") {
-      updateDuplicateTask(progress, true);
-      duplicateTask.result = progress;
-      duplicateTask.stats = progress.stats || duplicateTask.stats;
+    if (message.type === "duplicate-scan-ready" || message.type === "duplicate-scan-request-candidates") {
+      if (duplicateWriteQueue.length >= duplicateWriteQueueLimit) {
+        duplicateTask.phase = "waiting-db-writer"; updateDuplicateTask({}, true); scheduleDuplicateCommit();
+        setTimeout(() => { if (duplicateTaskChild === child) child.emit("message", { type: "duplicate-scan-request-candidates", payload: progress }); }, 250);
+      } else {
+        try {
+          const rows = galleryDb.getImagesNeedingHash(galleryDbFile, 100, { scanStartedAt: duplicateTask.scanStartedAt, afterMediaId: progress.afterMediaId || duplicateTask.lastCommittedMediaId || "" });
+          const totalFiles = duplicateTask.totalFiles || Number(safeDuplicateStats()?.imageCount || 0);
+          child.send({ type: "duplicate-scan-candidates", payload: { items: rows, totalFiles, phase: rows.length ? "hashing" : "grouping" } });
+        } catch (error) { failDuplicateTask(error); }
+      }
     }
-    if (message.type === "duplicate-scan-cancelled") updateDuplicateTask(progress, true);
+    if (message.type === "duplicate-scan-hash-result") {
+      duplicateWriteQueue.push(progress.result); duplicateTask.queueLength = duplicateWriteQueue.length;
+      duplicateTask.pendingBatchCount = Math.ceil(duplicateWriteQueue.length / duplicateWriteBatchSize);
+      updateDuplicateTask(progress.progress || {});
+      if (duplicateWriteQueue.length >= duplicateWriteBatchSize) scheduleDuplicateCommit(); else scheduleDuplicateCommit(750);
+    }
+    if (["duplicate-scan-finished-hashing", "duplicate-scan-cancelled"].includes(message.type)) {
+      duplicateWorkerFinished = true; updateDuplicateTask(progress, true); scheduleDuplicateCommit(); if (!duplicateWriteQueue.length) finishDuplicateTaskAfterDrain();
+    }
   });
 
   child.stderr.on("data", (chunk) => {
@@ -2263,7 +2395,6 @@ function startDuplicateTask(requestInfo = {}) {
     duplicateTask.phase = "failed";
     duplicateTask.finishedAt = new Date().toISOString();
     duplicateTask.updatedAt = duplicateTask.finishedAt;
-    duplicateTask.failedFiles += 1;
     duplicateTask.errorMessage = error.message;
     persistDuplicateTaskStatus(true);
     logEvent("duplicate_scan_error", { id, error: error.message, statsAfter: safeDuplicateStats() });
@@ -2272,24 +2403,8 @@ function startDuplicateTask(requestInfo = {}) {
   child.on("close", (code) => {
     if (duplicateTaskChild === child) duplicateTaskChild = null;
     if (duplicateTask.id !== id || !["running", "stopping"].includes(duplicateTask.status)) return;
-    duplicateTask.finishedAt = new Date().toISOString();
-    if (code === 0) {
-      duplicateTask.status = duplicateTask.stopRequested ? "cancelled" : "completed";
-      duplicateTask.phase = duplicateTask.stopRequested ? "cancelled" : "completed";
-      try {
-        duplicateTask.stats = galleryDb.getDuplicateHashStats(galleryDbFile);
-      } catch (error) {
-        duplicateTask.failedFiles += 1;
-        duplicateTask.errorMessage = `Duplicate stats refresh failed: ${error.message}`;
-      }
-    } else {
-      duplicateTask.status = "failed";
-      duplicateTask.phase = "failed";
-      duplicateTask.failedFiles += 1;
-      duplicateTask.errorMessage = stderr.trim() || `Duplicate scan exited with code ${code}`;
-    }
-    duplicateTask.updatedAt = duplicateTask.finishedAt;
-    persistDuplicateTaskStatus(true);
+    if (code !== 0) { failDuplicateTask(new Error(stderr.trim() || `Duplicate scan exited with code ${code}`)); return; }
+    duplicateWorkerFinished = true; scheduleDuplicateCommit(); if (!duplicateWriteQueue.length) finishDuplicateTaskAfterDrain();
     logEvent("duplicate_scan_close", {
       id,
       code,
@@ -2305,6 +2420,13 @@ function startDuplicateTask(requestInfo = {}) {
   return duplicateTaskSnapshot();
 }
 
+function resumeDuplicateTask(requestInfo = {}) {
+  if (!["failed", "interrupted"].includes(duplicateTask.status) || !duplicateTask.resumeAvailable || !duplicateTask.lastCommittedMediaId) {
+    const error = new Error("No resumable duplicate scan checkpoint is available."); error.statusCode = 409; throw error;
+  }
+  return startDuplicateTask({ ...requestInfo, resumeState: { ...duplicateTask } });
+}
+
 function stopDuplicateTask() {
   if (!["running", "starting"].includes(duplicateTask.status)) return duplicateTaskSnapshot();
   const statsBefore = safeDuplicateStats();
@@ -2317,7 +2439,6 @@ function stopDuplicateTask() {
     try {
       duplicateTaskChild.send({ type: "duplicate-scan-stop" });
     } catch (error) {
-      duplicateTask.failedFiles += 1;
       duplicateTask.errorMessage = error.message;
     }
   }
@@ -3512,6 +3633,14 @@ function handleRequest(request, response) {
 
   if (requestUrl.pathname === "/api/duplicates/status") {
     sendJson(response, duplicateTaskSnapshot());
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/duplicates/resume") {
+    if (request.method !== "POST") { sendJsonError(response, 405, "Method not allowed"); return; }
+    const auth = requireAdminWrite(request, response, "duplicate-resume");
+    if (!auth) return;
+    try { sendJson(response, resumeDuplicateTask({ requestedScope: auth.scope })); } catch (error) { sendJsonError(response, error.statusCode || 500, error.message); }
     return;
   }
 

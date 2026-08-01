@@ -78,7 +78,7 @@
 
 ## Medium Priority
 
-- [ ] Select a maintenance window for the first formal SHA-256 full rescan after `6d96452` is deployed.
+- [ ] Select a maintenance window for the first formal SHA-256 full rescan after the serialized-writer fix is deployed.
   - The code and isolated service test are complete, but production must remain unscanned until a user-approved maintenance window because this reads all current image content. The original `0bff21cf...0a6716` sample is no longer at the cited paths, so it cannot serve as the production acceptance sample.
 
 - [ ] 实现HLS异步按需任务与生命周期清理

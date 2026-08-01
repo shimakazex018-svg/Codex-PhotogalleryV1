@@ -1,5 +1,12 @@
 # HANDOFF.md
 
+## Latest task: duplicate-scan SQLite lock reliability (2026-08-01)
+
+- The prior formal job `duplicate-scan-20260801043102` remains terminal `failed`; it is not rewritten as `interrupted`. Its `database is locked` events are database contention, not evidence of five bad images.
+- Local source now makes the worker file/IPC-only and serializes duplicate hash writes in `server.js`: default 200-row batches, 5,000-result cap and 100/250/500ms, 1/2/3/5s retry schedule. `waiting-db-lock` and `waiting-db-writer` are visible states; final file failures are deduplicated by media ID.
+- Checkpoints contain scan start, last committed media ID, queue metrics and last successful commit. Uncommitted terminal batches are retained in `DATA_DIR/duplicate-scan-pending-<jobId>.json`; `POST /api/duplicates/resume` is distinct from a new full scan.
+- TEMP service regression, 1,500-file real SQLite lock regression and syntax/diff checks passed. Formal deployment and API/UI-only verification remain required; do not start the formal full SHA-256 scan.
+
 ## Latest task: live SHA-256 duplicate-scan progress (2026-08-01)
 
 - Source changes are local and validated only in a disposable TEMP runtime. `duplicates-worker.js` now sends throttled IPC snapshots (100 files or 500ms; 3-second heartbeat for a long file), phases and cooperative-stop events. The SHA-256 algorithm, pHash and duplicate rules are unchanged.

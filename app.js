@@ -2483,7 +2483,7 @@ function duplicateItemHtml(item, role) {
 
 const duplicatePhaseText = {
   idle: "未运行", starting: "正在启动", enumerating: "正在统计待扫描文件", hashing: "正在读取文件并计算 SHA-256",
-  committing: "正在写入数据库", grouping: "正在生成重复图片组", completed: "扫描完成", stopping: "正在停止",
+  committing: "正在写入数据库", "waiting-db-lock": "正在等待数据库写锁", "waiting-db-writer": "正在等待写入队列腾出空间", grouping: "正在生成重复图片组", completed: "扫描完成", stopping: "正在停止",
   cancelled: "已停止", failed: "扫描失败", interrupted: "服务重启导致任务中断",
 };
 
@@ -2514,16 +2514,18 @@ function duplicateTaskPanelHtml(status) {
     <div class="duplicate-task-heading"><h2>当前扫描任务</h2><strong>${escapeHtml(duplicatePhaseText[phase] || phase)}</strong></div>
     ${total ? `<div class="duplicate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(2)}"><span style="width:${percent.toFixed(2)}%"></span></div><strong>${percent.toFixed(2)}%</strong>` : active ? `<div class="duplicate-progress indeterminate"><span></span></div><strong>正在统计待扫描文件…</strong>` : `<div class="duplicate-progress"><span style="width:0%"></span></div><strong>等待开始扫描</strong>`}
     <div class="duplicate-task-grid">
-      <span>已处理 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>成功 <b>${Number(status.successFiles || 0).toLocaleString("zh-CN")}</b></span>
-      <span>失败 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span><span>已写入数据库 <b>${Number(status.committedFiles || 0).toLocaleString("zh-CN")}</b></span>
+      <span>已读取/计算 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>最终失败文件 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span>
+      <span>已提交数据库 <b>${Number(status.committedFiles || 0).toLocaleString("zh-CN")}</b></span><span>待提交队列 <b>${Number(status.queueLength || 0).toLocaleString("zh-CN")} / ${Number(status.queueLimit || 0).toLocaleString("zh-CN")}</b></span>
+      <span>数据库锁重试 <b>${Number(status.dbLockRetries || 0).toLocaleString("zh-CN")}</b></span><span>累计等待写锁 <b>${(Number(status.dbLockWaitMs || 0) / 1000).toFixed(1)} 秒</b></span>
       <span>扫描速度 <b>${Number(status.filesPerSecond || 0).toFixed(1)} 文件/秒</b></span><span>读取速度 <b>${Number(status.megabytesPerSecond || 0).toFixed(1)} MB/秒</b></span>
       <span>已运行 <b>${duplicateDuration(status.elapsedSeconds)}</b></span><span>预计剩余 <b>${status.estimatedRemainingSeconds == null ? "计算中" : duplicateDuration(status.estimatedRemainingSeconds)}</b></span>
     </div>
     <div class="duplicate-task-paths"><span>开始时间 <b>${escapeHtml(duplicateTimestamp(status.startedAt))}</b></span>${status.finishedAt ? `<span>完成时间 <b>${escapeHtml(duplicateTimestamp(status.finishedAt))}</b></span>` : ""}<span>当前目录 <b title="${escapeHtml(status.currentDirectory || "")}">${escapeHtml(status.currentDirectory || "等待任务开始")}</b></span><span>当前文件 <b title="${escapeHtml(path)}">${escapeHtml(path || "等待任务开始")}</b>${path ? `<button type="button" data-duplicate-copy-path="${escapeHtml(path)}">复制路径</button>` : ""}</span><small>最后更新：${Number(status.staleSeconds || 0)} 秒前</small></div>
-    ${status.stopRequested && active ? `<small>已请求停止，正在完成当前文件或数据库提交。</small>` : ""}
+    <div class="duplicate-task-paths"><span>最后成功提交 <b>${escapeHtml(duplicateTimestamp(status.lastSuccessfulCommitAt))}</b></span><span>当前阶段 <b>${escapeHtml(duplicatePhaseText[phase] || phase)}</b></span></div>
+    ${status.stopRequested && active ? `<small>正在停止：等待 ${Number(status.queueLength || 0).toLocaleString("zh-CN")} 条结果写入数据库。</small>` : ""}
     ${stale ? `<small class="error-text">任务仍在运行，但已 ${Number(status.staleSeconds)} 秒未收到进度更新；可能正在读取大文件或磁盘响应较慢。</small>` : ""}
     ${state.duplicateStatusError ? `<small class="error-text">${escapeHtml(state.duplicateStatusError)}</small>` : ""}
-    ${errors.length ? `<details class="duplicate-errors"><summary>本次失败 ${Number(status.failedFiles || 0)}，查看详情</summary>${errors.map((entry) => `<div><time>${escapeHtml(entry.time || "")}</time><b title="${escapeHtml(entry.path || "")}">${escapeHtml(entry.path || "")}</b><span>${escapeHtml(entry.code || "ERROR")} · ${escapeHtml(entry.message || "")}</span></div>`).join("")}</details>` : ""}
+    ${errors.length ? `<details class="duplicate-errors"><summary>最终失败文件 ${Number(status.failedFiles || 0)}；数据库锁重试 ${Number(status.dbLockRetries || 0)}，查看事件</summary>${errors.map((entry) => `<div><time>${escapeHtml(entry.time || "")}</time><b title="${escapeHtml(entry.path || "")}">${escapeHtml(entry.path || "数据库")}</b><span>${escapeHtml(entry.stage || "task")} · ${escapeHtml(entry.errorCode || entry.code || "ERROR")} · ${escapeHtml(entry.message || "")}</span></div>`).join("")}</details>` : ""}
   </section>`;
 }
 
@@ -2543,6 +2545,7 @@ function duplicatePageHtml() {
         </div>
         <div class="duplicates-actions">
           <button id="duplicateScanButton" type="button" ${scanActive ? "disabled" : ""}>${status.status === "starting" ? "正在启动…" : "扫描重复图片"}</button>
+          ${!scanActive && status.resumeAvailable ? `<button id="duplicateResumeButton" type="button">继续上次扫描</button>` : ""}
           ${scanActive ? `<button id="duplicateStopButton" type="button" ${status.status === "stopping" ? "disabled" : ""}>${status.status === "stopping" ? "正在停止…" : "停止扫描"}</button>` : ""}
           <button id="duplicateReloadButton" type="button">\u5237\u65b0\u7ed3\u679c</button>
           <button id="duplicateRecycleMarkedButton" type="button">\u5220\u9664\u5df2\u6807\u8bb0</button>
@@ -3228,6 +3231,10 @@ function bindDuplicatePage() {
     await loadDuplicateStatus();
     await loadDuplicateDeleteMarks();
     renderDuplicateSurface();
+  });
+  document.querySelector("#duplicateResumeButton")?.addEventListener("click", async () => {
+    await postJson("/api/duplicates/resume").catch(() => null);
+    await loadDuplicateStatus(); renderDuplicateSurface();
   });
   document.querySelector("#duplicateStopButton")?.addEventListener("click", async () => {
     if (!confirm("停止后会保留已经成功写入数据库的哈希结果。未处理文件可在下次扫描时重新处理。")) return;

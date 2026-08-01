@@ -482,7 +482,7 @@ function withDatabase(dbFile, callback) {
 function withReadOnlyDatabase(dbFile, callback) {
   const db = new DatabaseSync(dbFile, { readOnly: true });
   try {
-    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=5000");
+    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON");
     return callback(db);
   } finally {
     db.close();
@@ -1323,7 +1323,8 @@ function getMediaItemsByPerceptualIds(dbFile, ids = []) {
 function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
   const limit = Math.min(Math.max(Number(limitValue) || 100, 1), 1000);
   const scanStartedAt = String(options.scanStartedAt || "");
-  return withDatabase(dbFile, (db) =>
+  const afterMediaId = String(options.afterMediaId || "");
+  return withReadOnlyDatabase(dbFile, (db) =>
     db
       .prepare(
         `SELECT m.*, c.title AS collection_title
@@ -1331,16 +1332,63 @@ function getImagesNeedingHash(dbFile, limitValue = 100, options = {}) {
          JOIN collections c ON c.id = m.collection_id
          LEFT JOIN media_hashes h ON h.media_id = m.id
          WHERE m.type = 'image'
+            AND m.id > ?
             AND (
               (? != '' AND (h.media_id IS NULL OR h.updated_at < ?))
               OR (? = '' AND (h.media_id IS NULL OR h.sha256 = '' OR h.file_size != COALESCE(m.size, 0) OR h.mtime != COALESCE(m.mtime, 0)))
             )
-         ORDER BY m.collection_id, m.sort_order
+         ORDER BY m.id
          LIMIT ?`
       )
-      .all(scanStartedAt, scanStartedAt, scanStartedAt, limit)
+      .all(afterMediaId, scanStartedAt, scanStartedAt, scanStartedAt, limit)
       .map((row) => ({ ...rowToMedia(row), collectionTitle: row.collection_title || "" }))
   );
+}
+
+// Duplicate scans intentionally use this narrow connection: the schema and WAL
+// mode are initialized by normal service startup, while every hash batch only
+// needs a short transaction.  Do not run journal_mode on every batch.
+function withDuplicateHashWriter(dbFile, callback) {
+  const db = new DatabaseSync(dbFile);
+  try {
+    // The service owns retry/backoff for this queue.  Keep a single attempt
+    // short so status heartbeats and stop requests remain responsive.
+    db.exec("PRAGMA busy_timeout=50; PRAGMA foreign_keys=ON");
+    return callback(db);
+  } finally {
+    db.close();
+  }
+}
+
+function upsertMediaHashBatch(dbFile, items = []) {
+  if (!Array.isArray(items) || !items.length) return { committed: 0, lastMediaId: "" };
+  const now = new Date().toISOString();
+  return withDuplicateHashWriter(dbFile, (db) => {
+    const statement = db.prepare(
+      `INSERT INTO media_hashes (
+        media_id, collection_id, file_size, mtime, sha256, width, height,
+        device, location, metadata, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(media_id) DO UPDATE SET
+        collection_id = excluded.collection_id, file_size = excluded.file_size,
+        mtime = excluded.mtime, sha256 = excluded.sha256, width = excluded.width,
+        height = excluded.height, device = excluded.device, location = excluded.location,
+        metadata = excluded.metadata, updated_at = excluded.updated_at`
+    );
+    db.exec("BEGIN");
+    try {
+      for (const item of items) statement.run(
+        item.mediaId, item.collectionId, item.fileSize || 0, item.mtime || 0,
+        item.sha256 || "", item.width || null, item.height || null,
+        item.device || "", item.location || "", json(item.metadata || {}), now
+      );
+      db.exec("COMMIT");
+      return { committed: items.length, lastMediaId: String(items.at(-1)?.mediaId || "") };
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw error;
+    }
+  });
 }
 
 function upsertMediaHash(dbFile, item) {
@@ -1601,6 +1649,7 @@ module.exports = {
   getMediaItemsByPerceptualIds,
   getImagesNeedingHash,
   upsertMediaHash,
+  upsertMediaHashBatch,
   getExactDuplicateGroups,
   getMediaItemsByIds,
   getDuplicateDeletionCandidates,

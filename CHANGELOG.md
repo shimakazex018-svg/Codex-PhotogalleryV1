@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-01 - Serialize exact-duplicate scan database writes
+
+- The duplicate worker now only reads files and computes SHA-256. It asks the main service for short, stable-ID candidate pages and returns hash/file-error results over IPC; it never opens the formal database for writing.
+- The service owns one bounded duplicate-result writer queue (default 5,000 entries), commits at most 200 rows per short transaction, and retries SQLite lock/busy failures at 100/250/500ms, 1/2/3/5s. Lock contention is shown as `waiting-db-lock`, never as a bad image.
+- Task state now separates final unique file failures from database lock retries, lock wait time, committed rows, queued rows, failed commit batches and last successful commit. A failed queued batch is atomically saved under `DATA_DIR/duplicate-scan-pending-<jobId>.json`; resumable checkpoints retain the original scan start and last committed media ID.
+- Added a TEMP-only 1,500-file service regression with a separate SQLite writer holding a real write lock for 10 seconds. The task entered the lock-wait phase, recovered after seven retries, committed all 1,500 rows and passed `quick_check=ok`.
+
 ## 2026-08-01 - Add live exact-duplicate scan progress
 
 - The SHA-256 duplicate worker now reports bounded IPC progress (every 100 files or 500ms, plus phase/error/stop events and a 3-second large-file heartbeat). Per-run counters are independent from the existing database totals.
