@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-01 - Add live exact-duplicate scan progress
+
+- The SHA-256 duplicate worker now reports bounded IPC progress (every 100 files or 500ms, plus phase/error/stop events and a 3-second large-file heartbeat). Per-run counters are independent from the existing database totals.
+- `/api/duplicates/status` now exposes job ID, lifecycle phase, cooperative-stop state, plan/process/success/failure/commit counters, throughput, elapsed/estimated time, current path, bounded recent errors and stale-heartbeat age while retaining backward-compatible fields.
+- The latest snapshot is atomically persisted to `DATA_DIR/duplicate-scan-status.json` at most once per second. On service startup, a previously active snapshot is explicitly marked `interrupted`; no task is falsely reported as running.
+- The duplicate settings view now has a responsive task panel, 1-second active polling, safe stop confirmation, path truncation/copy, stale-progress notice and separate database-current statistics. No SHA-256 algorithm, pHash, grouping rule, schema or media operation changed.
+- Expanded the disposable HTTP regression to verify the new initial fields, start coalescing and cooperative `stopping` to `cancelled` lifecycle with committed hashes retained.
+
 ## 2026-07-30 - Correct exact SHA-256 duplicate rescan accounting
 
 - Duplicate scans now re-hash every currently indexed image for that explicit run. Empty/error hash rows therefore cannot permanently hide an unchanged file from later exact-duplicate grouping.

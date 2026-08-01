@@ -50,7 +50,7 @@ async function waitFor(pathname, terminal) {
 function startServer() {
   const child = spawn(process.execPath, [path.join(rootDir, "server.js")], {
     cwd: rootDir,
-    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", DATA_DIR: dataDir, PHOTOS_DIR: photosDir, TRASH_DIR: trashDir, REMOTE_ADMIN_ENABLED: "0", DUPLICATE_BATCH_SIZE: "1" },
+    env: { ...process.env, NODE_ENV: "test", PORT: String(port), HOST: "127.0.0.1", DATA_DIR: dataDir, PHOTOS_DIR: photosDir, TRASH_DIR: trashDir, REMOTE_ADMIN_ENABLED: "0", DUPLICATE_BATCH_SIZE: "1", DUPLICATE_TEST_FILE_DELAY_MS: "120" },
     stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
   });
   let stderr = "";
@@ -72,14 +72,30 @@ function startServer() {
     const firstStart = await request("POST", "/api/duplicates/scan");
     assert.equal(firstStart.status, 200);
     assert.equal(firstStart.body.status, "running");
+    assert.equal(firstStart.body.phase, "starting");
+    assert.equal(firstStart.body.processedFiles, 0);
+    assert.equal(firstStart.body.committedFiles, 0);
+    assert.ok(Object.hasOwn(firstStart.body, "jobId"));
+    const persistedStatus = JSON.parse(fs.readFileSync(path.join(dataDir, "duplicate-scan-status.json"), "utf8"));
+    assert.equal(persistedStatus.jobId, firstStart.body.jobId, "task snapshot is persisted outside the browser");
     const concurrentStart = await request("POST", "/api/duplicates/scan");
     assert.equal(concurrentStart.status, 200);
     assert.equal(concurrentStart.body.id, firstStart.body.id, "a second full SHA scan must reuse the active task");
     const progress = await request("GET", "/api/duplicates/status");
     assert.equal(progress.status, 200);
     assert.ok(["running", "completed"].includes(progress.body.status));
+    assert.ok(["starting", "enumerating", "hashing", "grouping", "completed"].includes(progress.body.phase));
     assert.equal((await request("GET", "/api/media-optimization/status")).status, 200, "HTTP remains responsive while the worker hashes files");
     await waitFor("/api/duplicates/status", (state) => state.status === "completed");
+
+    const stopStart = await request("POST", "/api/duplicates/scan");
+    assert.equal(stopStart.body.status, "running");
+    const stopping = await request("POST", "/api/duplicates/stop");
+    assert.equal(stopping.body.status, "stopping");
+    assert.equal(stopping.body.stopRequested, true);
+    const cancelled = await waitFor("/api/duplicates/status", (state) => state.status === "cancelled");
+    assert.equal(cancelled.phase, "cancelled");
+    assert.equal(cancelled.stats.hashedCount, 2, "safe stop preserves committed hashes");
 
     const beforeRecycle = await request("GET", "/api/duplicates/status");
     const stats = beforeRecycle.body.stats;

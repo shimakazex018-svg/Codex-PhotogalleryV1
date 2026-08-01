@@ -60,6 +60,7 @@ const state = {
   duplicateTotal: 0,
   duplicateLoading: false,
   duplicateStatus: null,
+  duplicateStatusError: "",
   duplicateSelectedIndex: 0,
   perceptualIndexStatus: null,
   mediaOptimizationStatus: null,
@@ -2428,8 +2429,9 @@ async function loadDuplicates(offset = 0) {
 async function loadDuplicateStatus() {
   try {
     state.duplicateStatus = await fetchJson("/api/duplicates/status");
+    state.duplicateStatusError = "";
   } catch (error) {
-    state.duplicateStatus = null;
+    state.duplicateStatusError = "状态连接中断，正在重试…";
   }
 }
 
@@ -2479,13 +2481,53 @@ function duplicateItemHtml(item, role) {
   `;
 }
 
+const duplicatePhaseText = {
+  idle: "未运行", starting: "正在启动", enumerating: "正在统计待扫描文件", hashing: "正在读取文件并计算 SHA-256",
+  committing: "正在写入数据库", grouping: "正在生成重复图片组", completed: "扫描完成", stopping: "正在停止",
+  cancelled: "已停止", failed: "扫描失败", interrupted: "服务重启导致任务中断",
+};
+
+function duplicateDuration(seconds) {
+  const value = Math.max(0, Number(seconds || 0));
+  const hours = String(Math.floor(value / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor(value % 3600 / 60)).padStart(2, "0");
+  const remainder = String(Math.floor(value % 60)).padStart(2, "0");
+  return `${hours}:${minutes}:${remainder}`;
+}
+
+function duplicateTaskPanelHtml(status) {
+  const total = Number(status.totalFiles || 0);
+  const processed = Number(status.processedFiles || 0);
+  const active = ["running", "starting", "stopping"].includes(status.status);
+  const phase = status.phase || status.status || "idle";
+  const percent = total ? Math.min(100, Math.max(0, Number(status.percent || processed / total * 100))) : 0;
+  const stale = active && Number(status.staleSeconds || 0) >= 15;
+  const path = status.currentPath || "";
+  const errors = Array.isArray(status.recentErrors) ? status.recentErrors : [];
+  return `<section class="duplicate-task-panel settings-card" aria-live="polite">
+    <div class="duplicate-task-heading"><h2>当前扫描任务</h2><strong>${escapeHtml(duplicatePhaseText[phase] || phase)}</strong></div>
+    ${total ? `<div class="duplicate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(2)}"><span style="width:${percent.toFixed(2)}%"></span></div><strong>${percent.toFixed(2)}%</strong>` : `<div class="duplicate-progress indeterminate"><span></span></div><strong>正在统计待扫描文件…</strong>`}
+    <div class="duplicate-task-grid">
+      <span>已处理 <b>${processed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}</b></span><span>成功 <b>${Number(status.successFiles || 0).toLocaleString("zh-CN")}</b></span>
+      <span>失败 <b>${Number(status.failedFiles || 0).toLocaleString("zh-CN")}</b></span><span>已写入数据库 <b>${Number(status.committedFiles || 0).toLocaleString("zh-CN")}</b></span>
+      <span>扫描速度 <b>${Number(status.filesPerSecond || 0).toFixed(1)} 文件/秒</b></span><span>读取速度 <b>${Number(status.megabytesPerSecond || 0).toFixed(1)} MB/秒</b></span>
+      <span>已运行 <b>${duplicateDuration(status.elapsedSeconds)}</b></span><span>预计剩余 <b>${status.estimatedRemainingSeconds == null ? "计算中" : duplicateDuration(status.estimatedRemainingSeconds)}</b></span>
+    </div>
+    <div class="duplicate-task-paths"><span>当前目录 <b title="${escapeHtml(status.currentDirectory || "")}">${escapeHtml(status.currentDirectory || "等待任务开始")}</b></span><span>当前文件 <b title="${escapeHtml(path)}">${escapeHtml(path || "等待任务开始")}</b>${path ? `<button type="button" data-duplicate-copy-path="${escapeHtml(path)}">复制路径</button>` : ""}</span><small>最后更新：${Number(status.staleSeconds || 0)} 秒前</small></div>
+    ${status.stopRequested && active ? `<small>已请求停止，正在完成当前文件或数据库提交。</small>` : ""}
+    ${stale ? `<small class="error-text">任务仍在运行，但已 ${Number(status.staleSeconds)} 秒未收到进度更新；可能正在读取大文件或磁盘响应较慢。</small>` : ""}
+    ${state.duplicateStatusError ? `<small class="error-text">${escapeHtml(state.duplicateStatusError)}</small>` : ""}
+    ${errors.length ? `<details class="duplicate-errors"><summary>本次失败 ${Number(status.failedFiles || 0)}，查看详情</summary>${errors.map((entry) => `<div><time>${escapeHtml(entry.time || "")}</time><b title="${escapeHtml(entry.path || "")}">${escapeHtml(entry.path || "")}</b><span>${escapeHtml(entry.code || "ERROR")} · ${escapeHtml(entry.message || "")}</span></div>`).join("")}</details>` : ""}
+  </section>`;
+}
+
 function duplicatePageHtml() {
   const group = state.duplicateGroups[state.duplicateSelectedIndex] || null;
   const items = group ? group.items || [] : [];
   const status = state.duplicateStatus || {};
   const stats = status.stats || {};
   const currentNumber = state.duplicateOffset + state.duplicateSelectedIndex + 1;
-  const scanRunning = status.status === "running";
+  const scanActive = ["running", "starting", "stopping"].includes(status.status);
   return `
     <section class="duplicates-page">
       <div class="duplicates-header">
@@ -2494,21 +2536,22 @@ function duplicatePageHtml() {
           <p>\u57fa\u4e8e SHA256 \u7684\u5b8c\u5168\u91cd\u590d\u68c0\u6d4b\u3002\u5220\u9664\u64cd\u4f5c\u4f1a\u628a\u6587\u4ef6\u526a\u5207\u5230\u201c\u56de\u6536\u7ad9\u201d\u6587\u4ef6\u5939\u3002</p>
         </div>
         <div class="duplicates-actions">
-          <button id="duplicateScanButton" type="button">${scanRunning ? "\u505c\u6b62\u626b\u63cf" : "\u626b\u63cf\u91cd\u590d\u56fe\u7247"}</button>
+          <button id="duplicateScanButton" type="button" ${scanActive ? "disabled" : ""}>${status.status === "starting" ? "正在启动…" : "扫描重复图片"}</button>
+          ${scanActive ? `<button id="duplicateStopButton" type="button" ${status.status === "stopping" ? "disabled" : ""}>${status.status === "stopping" ? "正在停止…" : "停止扫描"}</button>` : ""}
           <button id="duplicateReloadButton" type="button">\u5237\u65b0\u7ed3\u679c</button>
           <button id="duplicateRecycleMarkedButton" type="button">\u5220\u9664\u5df2\u6807\u8bb0</button>
           <button id="duplicateRecycleAutoButton" type="button">\u4e00\u952e\u5220\u9664\u91cd\u590d\u56fe\u7247</button>
         </div>
       </div>
-      <div class="duplicates-status">
+      ${duplicateTaskPanelHtml(status)}
+      <div class="duplicates-status" aria-label="数据库当前状态">
+        <strong>数据库当前状态</strong>
         <span>\u6210\u529f\u54c8\u5e0c ${stats.hashedCount || 0} / ${stats.imageCount || 0}</span>
         <span>\u6587\u4ef6\u8bb0\u5f55 ${stats.hashRecordCount || 0}</span>
         <span>\u552f\u4e00 SHA-256 ${stats.uniqueHashCount || 0}</span>
         <span>\u91cd\u590d\u7ec4 ${stats.duplicateGroupCount || 0} / \u91cd\u590d\u6587\u4ef6 ${stats.duplicateItemCount || 0}</span>
         <span>\u5f85\u5904\u7406 ${stats.pendingCount || 0}</span>
         <span>\u54c8\u5e0c\u5931\u8d25 ${stats.failedHashCount || 0}</span>
-        <span>\u626b\u63cf\u72b6\u6001 ${escapeHtml(status.status || "idle")}</span>
-        <span>\u9519\u8bef ${status.errorCount || 0}</span>
         <span>\u5df2\u6807\u8bb0\u5f85\u5220\u9664 ${state.duplicateDeleteMarks.length}</span>
       </div>
       ${state.duplicateLoading ? `<div class="empty-state">${text.refreshing}</div>` : ""}
@@ -2582,11 +2625,15 @@ function bindPerceptualIndexPage() {
 }
 
 async function loadMediaOptimizationStatus(signal = state.pageAbortController?.signal) {
+  const duplicateWasActive = ["running", "starting", "stopping"].includes(state.duplicateStatus?.status);
   state.mediaOptimizationLoading = true;
   state.mediaOptimizationError = "";
   try {
     state.mediaOptimizationStatus = await fetchJson("/api/media-optimization/status", { signal });
     state.duplicateStatus = state.mediaOptimizationStatus.duplicates || state.duplicateStatus;
+    if (duplicateWasActive && ["completed", "cancelled", "failed", "interrupted"].includes(state.duplicateStatus?.status) && mediaOptimizationPanel() === "duplicates") {
+      await loadDuplicates(state.duplicateOffset);
+    }
     state.perceptualIndexStatus = state.mediaOptimizationStatus.perceptual || state.perceptualIndexStatus;
     state.mediaCleanupStatus = state.mediaOptimizationStatus.mediaCleanup || state.mediaCleanupStatus;
     state.videoCompatibilityStatus = state.mediaOptimizationStatus.videoCompatibility || state.videoCompatibilityStatus;
@@ -2616,7 +2663,7 @@ function scheduleMediaOptimizationPolling() {
   state.mediaOptimizationPollTimer = setTimeout(async () => {
     try { await loadMediaOptimizationStatus(); } catch (error) {}
     if (settingsSection() === "media-optimization") renderSettingsPage();
-  }, 1500);
+  }, ["running", "starting", "stopping"].includes(state.duplicateStatus?.status) ? 1000 : 1500);
 }
 
 function mediaOptimizationSummaryCard(id, title, summary, actionLabel) {
@@ -3171,15 +3218,20 @@ async function ensureSettingsPage() {
 
 function bindDuplicatePage() {
   document.querySelector("#duplicateScanButton")?.addEventListener("click", async () => {
-    if ((state.duplicateStatus || {}).status === "running") {
-      await postJson("/api/duplicates/stop").catch(() => null);
-    } else {
-      await postJson("/api/duplicates/scan").catch(() => null);
-    }
+    await postJson("/api/duplicates/scan").catch(() => null);
     await loadDuplicateStatus();
     await loadDuplicateDeleteMarks();
     renderDuplicateSurface();
   });
+  document.querySelector("#duplicateStopButton")?.addEventListener("click", async () => {
+    if (!confirm("停止后会保留已经成功写入数据库的哈希结果。未处理文件可在下次扫描时重新处理。")) return;
+    await postJson("/api/duplicates/stop").catch(() => null);
+    await loadDuplicateStatus();
+    renderDuplicateSurface();
+  });
+  document.querySelectorAll("[data-duplicate-copy-path]").forEach((button) => button.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(button.dataset.duplicateCopyPath || ""); } catch (error) { alert("无法复制路径，请手动复制。"); }
+  }));
   document.querySelector("#duplicateReloadButton")?.addEventListener("click", async () => {
     await loadDuplicateStatus();
     await loadDuplicateDeleteMarks();

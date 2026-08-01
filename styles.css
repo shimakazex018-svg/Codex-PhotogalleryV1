@@ -823,6 +823,26 @@ a {
   background: var(--surface);
 }
 
+.duplicates-status > strong { flex-basis: 100%; color: var(--text); }
+.duplicate-task-panel { display: grid; gap: 12px; }
+.duplicate-task-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.duplicate-task-heading h2 { margin: 0; font-size: 20px; }
+.duplicate-progress { height: 12px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--line) 70%, transparent); }
+.duplicate-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.duplicate-progress.indeterminate span { width: 35%; animation: duplicate-progress-pulse 1.1s ease-in-out infinite alternate; }
+.duplicate-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+.duplicate-task-grid span, .duplicate-task-paths span { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
+.duplicate-task-grid b, .duplicate-task-paths b { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duplicate-task-paths { display: grid; gap: 8px; min-width: 0; }
+.duplicate-task-paths span { min-width: 0; align-items: center; }
+.duplicate-task-paths b { flex: 1; text-align: right; }
+.duplicate-task-paths button { flex: 0 0 auto; }
+.duplicate-errors { display: grid; gap: 8px; }
+.duplicate-errors summary { cursor: pointer; color: var(--accent); }
+.duplicate-errors div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 4px 12px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
+.duplicate-errors b, .duplicate-errors span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes duplicate-progress-pulse { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
 .duplicate-compare {
   border: 1px solid rgba(125, 149, 184, 0.6);
   border-radius: 18px;
@@ -1351,6 +1371,9 @@ a {
   .duplicate-pair {
     grid-template-columns: 1fr;
   }
+
+  .duplicate-task-grid { grid-template-columns: 1fr; }
+  .duplicate-errors div { grid-template-columns: 1fr; }
 
   .duplicate-image-wrap {
     min-height: 240px;

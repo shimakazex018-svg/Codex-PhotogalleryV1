@@ -31,19 +31,46 @@ function mediaSrcToPath(src) {
   }
 }
 
-function sha256File(filePath) {
+function sha256File(filePath, heartbeat) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash("sha256");
     const stream = fs.createReadStream(filePath);
+    const timer = setInterval(() => heartbeat?.(), 3000);
+    const finish = (callback, value) => {
+      clearInterval(timer);
+      callback(value);
+    };
     stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", (error) => finish(reject, error));
+    stream.on("end", () => finish(resolve, hash.digest("hex")));
   });
 }
 
-function writeProgress(payload) {
-  process.stdout.write(`${JSON.stringify({ type: "duplicate-progress", ...payload })}\n`);
+let stopRequested = false;
+let lastProgressAt = 0;
+let lastProgressProcessed = 0;
+const testDelayMs = process.env.NODE_ENV === "test" ? Math.min(Math.max(Number(process.env.DUPLICATE_TEST_FILE_DELAY_MS || 0), 0), 1000) : 0;
+
+function send(type, payload = {}) {
+  if (typeof process.send === "function") process.send({ type, payload });
+  else process.stdout.write(`${JSON.stringify({ type, ...payload })}\n`);
 }
+
+function emitProgress(progress, force = false) {
+  const now = Date.now();
+  if (!force && progress.processedFiles - lastProgressProcessed < 100 && now - lastProgressAt < 500) return;
+  lastProgressAt = now;
+  lastProgressProcessed = progress.processedFiles;
+  send("duplicate-scan-progress", progress);
+}
+
+function delayForTest() {
+  return testDelayMs ? new Promise((resolve) => setTimeout(resolve, testDelayMs)) : Promise.resolve();
+}
+
+process.on("message", (message) => {
+  if (message?.type === "duplicate-scan-stop") stopRequested = true;
+});
 
 function markHashFailure(item, reason) {
   galleryDb.upsertMediaHash(galleryDbFile, {
@@ -69,25 +96,44 @@ async function run() {
   // all current images prevents an earlier failure record from excluding an
   // unchanged file from later duplicate grouping.
   const scanStartedAt = process.env.DUPLICATE_SCAN_STARTED_AT || "";
-  let processed = 0;
-  let errorCount = 0;
-  let lastFile = "";
+  const initialStats = galleryDb.getDuplicateHashStats(galleryDbFile);
+  const progress = {
+    phase: "enumerating",
+    totalFiles: Number(initialStats.imageCount || 0),
+    processedFiles: 0,
+    successFiles: 0,
+    failedFiles: 0,
+    committedFiles: 0,
+    processedBytes: 0,
+    currentPath: "",
+    currentDirectory: "",
+    recentErrors: [],
+  };
+  send("duplicate-scan-phase", progress);
+  progress.phase = "hashing";
+  send("duplicate-scan-phase", progress);
 
   for (;;) {
+    if (stopRequested) break;
     const batch = galleryDb.getImagesNeedingHash(galleryDbFile, batchSize, { scanStartedAt });
     if (!batch.length) break;
 
     for (const item of batch) {
-      lastFile = item.file || item.title || item.src || "";
+      if (stopRequested) break;
+      const filePath = mediaSrcToPath(item.src || "");
+      progress.currentPath = filePath || item.file || item.title || item.src || "";
+      progress.currentDirectory = filePath ? path.dirname(filePath) : "";
       try {
-        const filePath = mediaSrcToPath(item.src || "");
         if (!filePath || !fs.existsSync(filePath)) {
-          errorCount += 1;
+          progress.failedFiles += 1;
           markHashFailure(item, "file not found");
-          processed += 1;
+          progress.committedFiles += 1;
+          progress.processedFiles += 1;
+          progress.recentErrors.push({ time: new Date().toISOString(), path: progress.currentPath, code: "ENOENT", message: "扫描过程中该文件不存在" });
           continue;
         }
-        const sha256 = await sha256File(filePath);
+        try { progress.processedBytes += fs.statSync(filePath).size || 0; } catch {}
+        const sha256 = await sha256File(filePath, () => emitProgress(progress, true));
         galleryDb.upsertMediaHash(galleryDbFile, {
           mediaId: item.id,
           collectionId: item.collectionId,
@@ -102,34 +148,36 @@ async function run() {
             collectionTitle: item.collectionTitle || "",
           },
         });
-        processed += 1;
+        progress.processedFiles += 1;
+        progress.successFiles += 1;
+        progress.committedFiles += 1;
       } catch (error) {
-        errorCount += 1;
+        progress.failedFiles += 1;
+        progress.recentErrors.push({ time: new Date().toISOString(), path: progress.currentPath, code: error.code || "HASH_FAILED", message: error.message || String(error) });
         try {
           markHashFailure(item, error.message);
-          processed += 1;
+          progress.processedFiles += 1;
+          progress.committedFiles += 1;
         } catch (markError) {
-          errorCount += 1;
+          progress.recentErrors.push({ time: new Date().toISOString(), path: progress.currentPath, code: markError.code || "COMMIT_FAILED", message: markError.message || String(markError) });
         }
       }
-
-      if (processed % 25 === 0) {
-        writeProgress({ processed, errorCount, currentFile: lastFile, stats: galleryDb.getDuplicateHashStats(galleryDbFile) });
-      }
+      progress.recentErrors = progress.recentErrors.slice(-20);
+      emitProgress(progress);
+      await delayForTest();
     }
   }
 
-  process.stdout.write(
-    `${JSON.stringify({
-      type: "duplicate-result",
-      result: {
-        processed,
-        errorCount,
-        currentFile: lastFile,
-        stats: galleryDb.getDuplicateHashStats(galleryDbFile),
-      },
-    })}\n`
-  );
+  if (stopRequested) {
+    send("duplicate-scan-cancelled", { ...progress, phase: "stopping" });
+    if (process.connected) process.disconnect();
+    return;
+  }
+  progress.phase = "grouping";
+  send("duplicate-scan-phase", progress);
+  const stats = galleryDb.getDuplicateHashStats(galleryDbFile);
+  send("duplicate-scan-result", { ...progress, phase: "completed", stats });
+  if (process.connected) process.disconnect();
 }
 
 run().catch((error) => {

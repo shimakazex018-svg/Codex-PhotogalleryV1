@@ -49,7 +49,7 @@ Browser SPA
 | `scripts/run-daily-gallery-maintenance.ps1` | 03:59:50任务入口；锁防重入、停止48102、离线回收、启动网站、HTTP健康后启动索引扫描并追加维护日志 |
 | `scripts/install-daily-gallery-maintenance.ps1` | 安装每日03:59:50、`IgnoreNew`的当前用户维护任务 |
 | `maintenance-schedule.js` | 每日触发和下一次本地时间计算的纯逻辑 |
-| `duplicates-worker.js` | 图片 SHA-256 查重后台进程和进度输出 |
+| `duplicates-worker.js` | 图片 SHA-256 查重后台进程；节流IPC进度、阶段、心跳和协作停止 |
 | `perceptual-hash.js` | FFmpeg灰度缩放、32x32二维DCT、64位pHash及汉明距离 |
 | `perceptual-index-worker.js` | 单并发、可暂停恢复、受磁盘硬限制的pHash增量任务 |
 | `perceptual-query-worker.js` | 独立进程顺序扫描紧凑8字节哈希，筛选距离≤10的最多50条结果 |
@@ -208,12 +208,15 @@ V1.4.4小批量缓存工具把状态、暂停标记和逐项日志写入Runtime 
 ```text
 Browser duplicate page
   -> POST /api/duplicates/scan
-  -> server.js spawns duplicates-worker.js
+  -> server.js forks duplicates-worker.js and persists DATA_DIR/duplicate-scan-status.json
   -> worker reads candidate images from gallery.db
   -> worker reads PHOTOS_DIR files and computes SHA-256
   -> media_hashes updated in gallery.db
-  -> browser polls /api/duplicates/status and /api/duplicates
+  -> worker sends bounded progress/phase/stop IPC (100 files or 500ms; large-file heartbeat)
+  -> browser polls /api/duplicates/status every 1 second while active, then refreshes duplicate groups
 ```
+
+`/api/duplicates/status` separates current-job counters from `stats` (the database's cumulative hash state). The status snapshot uses at-most-once-per-second atomic JSON persistence; startup converts an orphaned active snapshot to `interrupted`. Stop is cooperative: the worker finishes its current file/database write, reports `cancelled`, and retains committed hash rows.
 
 回收操作会移动真实文件并删除/更新数据库记录，必须使用隔离数据验证。
 

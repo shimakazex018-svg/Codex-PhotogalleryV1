@@ -1,6 +1,13 @@
 # HANDOFF.md
 
-## Latest task: exact SHA-256 duplicate rescan correction (2026-07-30)
+## Latest task: live SHA-256 duplicate-scan progress (2026-08-01)
+
+- Source changes are local and validated only in a disposable TEMP runtime. `duplicates-worker.js` now sends throttled IPC snapshots (100 files or 500ms; 3-second heartbeat for a long file), phases and cooperative-stop events. The SHA-256 algorithm, pHash and duplicate rules are unchanged.
+- `server.js` exposes/persists job state at `DATA_DIR/duplicate-scan-status.json` with per-run totals, processing/commit counters, path, speed, timing and bounded errors; database statistics remain separate. Startup turns a persisted active task into `interrupted`, and stop reaches `cancelled` after the current safe unit of work.
+- The duplicate settings panel polls once per second while active and separates current-job data from database totals. It includes phase, progress, stale notice, truncated/copyable paths and a collapsed recent-error list.
+- Isolated `test-duplicate-service-e2e.js` and `test-exact-duplicate-sha256.js` passed, along with all required syntax checks and `git diff --check`. No formal service restart, full scan, media/database operation, recycle or deletion occurred. A read-only formal status request found the prior scan already `completed` before implementation work.
+
+## Previous task: exact SHA-256 duplicate rescan correction (2026-07-30)
 
 - Source changes are local and validated in a disposable TEMP runtime only. A manual duplicate scan now refreshes SHA-256 for every indexed image; pHash is unchanged.
 - `media_hashes` remains keyed by `media_id`, not SHA-256. Production read-only inspection found no record for SHA-256 `0bff21cf1ed229aa9fba447ca613f14016fbee1311234b319a50c1b19a0a6716`; the cited two directories currently contain no 340,579-byte sample, so the supplied production assertion could not be reproduced without changing formal media.

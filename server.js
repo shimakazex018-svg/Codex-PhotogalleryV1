@@ -2,7 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { spawn, spawnSync } = require("child_process");
+const { spawn, spawnSync, fork } = require("child_process");
 const readline = require("readline");
 const galleryDb = require("./gallery-db");
 const videoCompatibilityManager = require("./video-compatibility-manager");
@@ -34,6 +34,7 @@ const galleryDbFile = path.join(dataDir, "gallery.db");
 const highlightFile = path.join(dataDir, "highlight-carousel.json");
 const videoMetadataFile = path.join(dataDir, "video-metadata.json");
 const videoCompatibilityReportFile = path.join(dataDir, "video-compatibility-report.json");
+const duplicateTaskStatusFile = path.join(dataDir, "duplicate-scan-status.json");
 const port = Number(process.env.PORT || 48101);
 const host = process.env.HOST || "0.0.0.0";
 const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
@@ -118,16 +119,26 @@ let dailyIndexScanTimer = null;
 let duplicateTask = {
   id: "",
   status: "idle",
+  phase: "idle",
+  stopRequested: false,
   startedAt: "",
+  updatedAt: "",
   finishedAt: "",
-  processed: 0,
-  errorCount: 0,
-  currentFile: "",
+  totalFiles: 0,
+  processedFiles: 0,
+  successFiles: 0,
+  failedFiles: 0,
+  committedFiles: 0,
+  processedBytes: 0,
+  currentPath: "",
+  currentDirectory: "",
+  recentErrors: [],
   errorMessage: "",
   result: null,
   stats: null,
 };
 let duplicateTaskChild = null;
+let duplicateTaskPersistedAt = 0;
 let duplicateRecycleRunning = false;
 let mediaCleanupTask = {
   id: "",
@@ -1965,7 +1976,7 @@ function managerTaskActive(manager) {
 
 function maintenanceBusy(exclude = "") {
   return (!exclude.includes("scan") && scanTask.status === "running")
-    || (!exclude.includes("duplicates") && duplicateTask.status === "running")
+    || (!exclude.includes("duplicates") && ["running", "starting", "stopping"].includes(duplicateTask.status))
     || (!exclude.includes("duplicate-recycle") && duplicateRecycleRunning)
     || (!exclude.includes("media-cleanup") && Boolean(mediaCleanupChild))
     || (!exclude.includes("perceptual-index") && managerTaskActive(perceptualIndex))
@@ -2048,6 +2059,7 @@ function startScanTask(options = {}) {
   });
 
   child.on("error", (error) => {
+    if (scanTaskChild === child) scanTaskChild = null;
     scanTask.status = "failed";
     scanTask.finishedAt = new Date().toISOString();
     scanTask.errorCount = 1;
@@ -2085,18 +2097,99 @@ function duplicateTaskSnapshot() {
       stats = duplicateTask.stats;
     }
   }
+  const startedMs = Date.parse(duplicateTask.startedAt || "");
+  const updatedMs = Date.parse(duplicateTask.updatedAt || duplicateTask.startedAt || "");
+  const finishedMs = Date.parse(duplicateTask.finishedAt || "");
+  const now = Date.now();
+  const elapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor(((Number.isFinite(finishedMs) ? finishedMs : now) - startedMs) / 1000)) : 0;
+  const filesPerSecond = elapsedSeconds > 0 ? duplicateTask.processedFiles / elapsedSeconds : 0;
+  const remaining = Math.max(0, duplicateTask.totalFiles - duplicateTask.processedFiles);
   return {
+    jobId: duplicateTask.id,
     id: duplicateTask.id,
+    state: duplicateTask.status,
     status: duplicateTask.status,
+    phase: duplicateTask.phase,
+    stopRequested: Boolean(duplicateTask.stopRequested),
     startedAt: duplicateTask.startedAt,
+    updatedAt: duplicateTask.updatedAt,
     finishedAt: duplicateTask.finishedAt,
-    processed: duplicateTask.processed,
-    errorCount: duplicateTask.errorCount,
-    currentFile: duplicateTask.currentFile,
+    totalFiles: duplicateTask.totalFiles,
+    processedFiles: duplicateTask.processedFiles,
+    successFiles: duplicateTask.successFiles,
+    failedFiles: duplicateTask.failedFiles,
+    committedFiles: duplicateTask.committedFiles,
+    processedBytes: duplicateTask.processedBytes,
+    percent: duplicateTask.totalFiles ? Number((duplicateTask.processedFiles / duplicateTask.totalFiles * 100).toFixed(4)) : 0,
+    filesPerSecond: Number(filesPerSecond.toFixed(2)),
+    megabytesPerSecond: elapsedSeconds > 0 ? Number((duplicateTask.processedBytes / 1024 / 1024 / elapsedSeconds).toFixed(2)) : 0,
+    elapsedSeconds,
+    estimatedRemainingSeconds: filesPerSecond > 0 ? Math.ceil(remaining / filesPerSecond) : null,
+    currentPath: duplicateTask.currentPath,
+    currentDirectory: duplicateTask.currentDirectory,
+    currentFile: duplicateTask.currentPath,
+    processed: duplicateTask.processedFiles,
+    errorCount: duplicateTask.failedFiles,
     errorMessage: duplicateTask.errorMessage,
+    lastError: duplicateTask.errorMessage || duplicateTask.recentErrors.at(-1)?.message || null,
+    recentErrors: duplicateTask.recentErrors,
+    staleSeconds: Number.isFinite(updatedMs) ? Math.max(0, Math.floor((now - updatedMs) / 1000)) : null,
     result: duplicateTask.result,
     stats,
   };
+}
+
+function persistDuplicateTaskStatus(force = false) {
+  const now = Date.now();
+  if (!force && now - duplicateTaskPersistedAt < 1000) return;
+  duplicateTaskPersistedAt = now;
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    const tempFile = `${duplicateTaskStatusFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(duplicateTaskSnapshot(), null, 2), "utf8");
+    fs.renameSync(tempFile, duplicateTaskStatusFile);
+  } catch (error) {
+    logEvent("duplicate_scan_status_persist_failed", { error: error.message });
+  }
+}
+
+function updateDuplicateTask(progress = {}, forcePersist = false) {
+  const fields = ["phase", "totalFiles", "processedFiles", "successFiles", "failedFiles", "committedFiles", "processedBytes", "currentPath", "currentDirectory"];
+  for (const field of fields) {
+    if (progress[field] !== undefined && progress[field] !== null) duplicateTask[field] = progress[field];
+  }
+  if (Array.isArray(progress.recentErrors)) duplicateTask.recentErrors = progress.recentErrors.slice(-20);
+  duplicateTask.updatedAt = new Date().toISOString();
+  persistDuplicateTaskStatus(forcePersist);
+}
+
+function restoreDuplicateTaskStatus() {
+  try {
+    if (!fs.existsSync(duplicateTaskStatusFile)) return;
+    const stored = JSON.parse(fs.readFileSync(duplicateTaskStatusFile, "utf8"));
+    if (!stored || typeof stored !== "object") return;
+    const status = stored.status || stored.state || "idle";
+    duplicateTask = {
+      ...duplicateTask,
+      id: String(stored.jobId || stored.id || ""),
+      status: ["running", "starting", "stopping"].includes(status) ? "interrupted" : status,
+      phase: ["running", "starting", "stopping"].includes(status) ? "interrupted" : (stored.phase || status),
+      stopRequested: Boolean(stored.stopRequested),
+      startedAt: stored.startedAt || "",
+      updatedAt: new Date().toISOString(),
+      finishedAt: ["running", "starting", "stopping"].includes(status) ? new Date().toISOString() : (stored.finishedAt || ""),
+      totalFiles: Number(stored.totalFiles || 0), processedFiles: Number(stored.processedFiles ?? stored.processed ?? 0),
+      successFiles: Number(stored.successFiles || 0), failedFiles: Number(stored.failedFiles ?? stored.errorCount ?? 0),
+      committedFiles: Number(stored.committedFiles || 0), processedBytes: Number(stored.processedBytes || 0),
+      currentPath: stored.currentPath || stored.currentFile || "", currentDirectory: stored.currentDirectory || "",
+      recentErrors: Array.isArray(stored.recentErrors) ? stored.recentErrors.slice(-20) : [],
+      errorMessage: ["running", "starting", "stopping"].includes(status) ? "服务重启导致任务中断" : (stored.errorMessage || ""),
+      result: stored.result || null, stats: stored.stats || null,
+    };
+    persistDuplicateTaskStatus(true);
+  } catch (error) {
+    logEvent("duplicate_scan_status_restore_failed", { error: error.message });
+  }
 }
 
 function mediaOptimizationStatusSnapshot() {
@@ -2113,65 +2206,51 @@ function mediaOptimizationStatusSnapshot() {
 }
 
 function startDuplicateTask(requestInfo = {}) {
-  if (duplicateTask.status === "running") return duplicateTaskSnapshot();
+  if (["running", "starting", "stopping"].includes(duplicateTask.status)) return duplicateTaskSnapshot();
   if (maintenanceBusy("duplicates")) {
     const error = new Error("Another maintenance task is running.");
     error.statusCode = 409;
     throw error;
   }
 
-  const id = `${Date.now()}`;
+  const id = `duplicate-scan-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
   const statsBefore = safeDuplicateStats();
   duplicateTask = {
     id,
     status: "running",
+    phase: "starting",
+    stopRequested: false,
     startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     finishedAt: "",
-    processed: 0,
-    errorCount: 0,
-    currentFile: "Preparing duplicate scan",
+    totalFiles: 0, processedFiles: 0, successFiles: 0, failedFiles: 0, committedFiles: 0, processedBytes: 0,
+    currentPath: "", currentDirectory: "", recentErrors: [],
     errorMessage: "",
     result: null,
     stats: fs.existsSync(galleryDbFile) ? galleryDb.getDuplicateHashStats(galleryDbFile) : null,
   };
+  persistDuplicateTaskStatus(true);
   logEvent("duplicate_scan_start", { id, requestInfo, statsBefore });
 
-  const child = spawn(process.execPath, [path.join(rootDir, "duplicates-worker.js")], {
+  const child = fork(path.join(rootDir, "duplicates-worker.js"), [], {
     cwd: rootDir,
     env: { ...process.env, DUPLICATE_SCAN_STARTED_AT: duplicateTask.startedAt },
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
   duplicateTaskChild = child;
 
-  let stdout = "";
   let stderr = "";
-
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk.toString();
-    const lines = stdout.split(/\r?\n/);
-    stdout = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const payload = JSON.parse(line);
-        if (payload.type === "duplicate-progress") {
-          duplicateTask.processed = payload.processed || duplicateTask.processed;
-          duplicateTask.errorCount = payload.errorCount || duplicateTask.errorCount;
-          duplicateTask.currentFile = payload.currentFile || duplicateTask.currentFile;
-          duplicateTask.stats = payload.stats || duplicateTask.stats;
-        }
-        if (payload.type === "duplicate-result") {
-          duplicateTask.result = payload.result || null;
-          duplicateTask.processed = payload.result ? payload.result.processed || duplicateTask.processed : duplicateTask.processed;
-          duplicateTask.errorCount = payload.result ? payload.result.errorCount || duplicateTask.errorCount : duplicateTask.errorCount;
-          duplicateTask.currentFile = "Duplicate scan completed";
-          duplicateTask.stats = payload.result ? payload.result.stats || duplicateTask.stats : duplicateTask.stats;
-        }
-      } catch (error) {
-        stderr += `${line}\n`;
-      }
+  child.on("message", (message) => {
+    if (duplicateTask.id !== id || !message?.type) return;
+    const progress = message.payload || {};
+    if (["duplicate-scan-progress", "duplicate-scan-phase"].includes(message.type)) updateDuplicateTask(progress);
+    if (message.type === "duplicate-scan-result") {
+      updateDuplicateTask(progress, true);
+      duplicateTask.result = progress;
+      duplicateTask.stats = progress.stats || duplicateTask.stats;
     }
+    if (message.type === "duplicate-scan-cancelled") updateDuplicateTask(progress, true);
   });
 
   child.stderr.on("data", (chunk) => {
@@ -2179,39 +2258,44 @@ function startDuplicateTask(requestInfo = {}) {
   });
 
   child.on("error", (error) => {
+    if (duplicateTaskChild === child) duplicateTaskChild = null;
     duplicateTask.status = "failed";
+    duplicateTask.phase = "failed";
     duplicateTask.finishedAt = new Date().toISOString();
-    duplicateTask.errorCount += 1;
+    duplicateTask.updatedAt = duplicateTask.finishedAt;
+    duplicateTask.failedFiles += 1;
     duplicateTask.errorMessage = error.message;
-    duplicateTask.currentFile = "Duplicate scan failed";
+    persistDuplicateTaskStatus(true);
     logEvent("duplicate_scan_error", { id, error: error.message, statsAfter: safeDuplicateStats() });
   });
 
   child.on("close", (code) => {
     if (duplicateTaskChild === child) duplicateTaskChild = null;
-    if (duplicateTask.id !== id || duplicateTask.status !== "running") return;
+    if (duplicateTask.id !== id || !["running", "stopping"].includes(duplicateTask.status)) return;
     duplicateTask.finishedAt = new Date().toISOString();
     if (code === 0) {
-      duplicateTask.status = "completed";
-      duplicateTask.currentFile = "Duplicate scan completed";
+      duplicateTask.status = duplicateTask.stopRequested ? "cancelled" : "completed";
+      duplicateTask.phase = duplicateTask.stopRequested ? "cancelled" : "completed";
       try {
         duplicateTask.stats = galleryDb.getDuplicateHashStats(galleryDbFile);
       } catch (error) {
-        duplicateTask.errorCount += 1;
+        duplicateTask.failedFiles += 1;
         duplicateTask.errorMessage = `Duplicate stats refresh failed: ${error.message}`;
       }
     } else {
       duplicateTask.status = "failed";
-      duplicateTask.errorCount += 1;
+      duplicateTask.phase = "failed";
+      duplicateTask.failedFiles += 1;
       duplicateTask.errorMessage = stderr.trim() || `Duplicate scan exited with code ${code}`;
-      duplicateTask.currentFile = "Duplicate scan failed";
     }
+    duplicateTask.updatedAt = duplicateTask.finishedAt;
+    persistDuplicateTaskStatus(true);
     logEvent("duplicate_scan_close", {
       id,
       code,
       status: duplicateTask.status,
-      processed: duplicateTask.processed,
-      errorCount: duplicateTask.errorCount,
+      processed: duplicateTask.processedFiles,
+      errorCount: duplicateTask.failedFiles,
       errorMessage: duplicateTask.errorMessage,
       statsBefore,
       statsAfter: safeDuplicateStats(),
@@ -2222,25 +2306,25 @@ function startDuplicateTask(requestInfo = {}) {
 }
 
 function stopDuplicateTask() {
-  if (duplicateTask.status !== "running") return duplicateTaskSnapshot();
+  if (!["running", "starting"].includes(duplicateTask.status)) return duplicateTaskSnapshot();
   const statsBefore = safeDuplicateStats();
-  duplicateTask.status = "stopped";
-  duplicateTask.finishedAt = new Date().toISOString();
-  duplicateTask.currentFile = "Duplicate scan stopped";
-  duplicateTask.stats = fs.existsSync(galleryDbFile) ? galleryDb.getDuplicateHashStats(galleryDbFile) : duplicateTask.stats;
+  duplicateTask.status = "stopping";
+  duplicateTask.phase = "stopping";
+  duplicateTask.stopRequested = true;
+  duplicateTask.updatedAt = new Date().toISOString();
+  persistDuplicateTaskStatus(true);
   if (duplicateTaskChild) {
     try {
-      duplicateTaskChild.kill();
+      duplicateTaskChild.send({ type: "duplicate-scan-stop" });
     } catch (error) {
-      duplicateTask.errorCount += 1;
+      duplicateTask.failedFiles += 1;
       duplicateTask.errorMessage = error.message;
     }
-    duplicateTaskChild = null;
   }
   logEvent("duplicate_scan_stop", {
     id: duplicateTask.id,
-    processed: duplicateTask.processed,
-    errorCount: duplicateTask.errorCount,
+    processed: duplicateTask.processedFiles,
+    errorCount: duplicateTask.failedFiles,
     statsBefore,
     statsAfter: safeDuplicateStats(),
   });
@@ -3675,6 +3759,7 @@ if (process.env.RUN_SCAN_ONCE === "1") {
   runScanOnce();
 } else {
   ensureFolders();
+  restoreDuplicateTaskStatus();
   restoreLatestMediaCleanupTask();
   scheduleAccessLogMaintenance();
   scheduleHourlyGalleryRefresh();
