@@ -2176,14 +2176,10 @@ function finishDuplicateTaskAfterDrain() {
 }
 
 function duplicateTaskSnapshot() {
-  let stats = duplicateTask.stats;
-  if (fs.existsSync(galleryDbFile)) {
-    try {
-      stats = galleryDb.getDuplicateHashStats(galleryDbFile);
-    } catch (error) {
-      stats = duplicateTask.stats;
-    }
-  }
+  // Status polling must never open a SQLite connection: a blocked external
+  // writer used to make the task panel itself hang.  Stats are refreshed at
+  // task start/completion and remain an explicit cached database snapshot.
+  const stats = duplicateTask.stats;
   const startedMs = Date.parse(duplicateTask.startedAt || "");
   const updatedMs = Date.parse(duplicateTask.updatedAt || duplicateTask.startedAt || "");
   const finishedMs = Date.parse(duplicateTask.finishedAt || "");
