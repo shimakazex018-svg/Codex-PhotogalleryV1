@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a paged, manual similarity review panel with explicit pair-task controls
+  and candidate-only pixel verification.
+
 - Added the isolated foundation for a unified `image-fingerprint-scan`: a
   database-free worker calculates SHA-256 and pHash while the server retains
   bounded, retryable SQLite writes.

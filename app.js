@@ -2652,6 +2652,26 @@ function bindPerceptualIndexPage() {
   document.querySelector("#perceptualPause")?.addEventListener("click", () => run("pause"));
   document.querySelector("#perceptualResume")?.addEventListener("click", () => run("resume"));
   document.querySelector("#perceptualStop")?.addEventListener("click", () => run("stop"));
+  void bindSimilarityReviewPanel();
+}
+
+async function bindSimilarityReviewPanel() {
+  const host = document.querySelector(".perceptual-index-page");
+  if (!host) return;
+  const panel = document.createElement("section"); panel.className = "settings-card similarity-review-panel";
+  panel.innerHTML = "<h2>相似图片人工审核</h2><p>仅显示已保存的 pHash 候选；不会自动删除任何文件。</p><div><button data-similarity-action=\"start\">开始配对</button><button data-similarity-action=\"pause\">暂停</button><button data-similarity-action=\"resume\">继续</button><button data-similarity-action=\"stop\">停止</button></div><div class=\"similarity-review-body\">加载中…</div>";
+  host.append(panel);
+  panel.querySelectorAll("[data-similarity-action]").forEach((button) => button.addEventListener("click", async () => { const action = button.dataset.similarityAction; button.disabled = true; try { await postJson(`/api/similarity-pair-scan/${action}`, {}); renderSettingsPage(); } catch { button.disabled = false; } }));
+  try {
+    const [task, result] = await Promise.all([fetchJson("/api/similarity-pair-scan/status"), fetchJson("/api/similarity-pairs?limit=20")]);
+    const rows = Array.isArray(result.pairs) ? result.pairs : [];
+    panel.querySelector(".similarity-review-body").innerHTML = `<p>配对任务：${escapeHtml(task.state || "idle")}；已比较 ${Number(task.comparedPairs || 0).toLocaleString("zh-CN")} 对。</p><div>${rows.map((pair) => `<article class="duplicate-pair"><div><img loading="lazy" src="${escapeHtml(pair.left.src || "")}" alt=""><small>${escapeHtml(pair.left.title || "")} · ${formatBytes(pair.left.size || 0)}</small></div><div><img loading="lazy" src="${escapeHtml(pair.right.src || "")}" alt=""><small>${escapeHtml(pair.right.title || "")} · ${formatBytes(pair.right.size || 0)}</small></div><p>${pair.phashDistance <= 6 ? "高度相似" : "可能相似"} · ${Number(pair.similarity || 0).toFixed(1)}% · 距离 ${Number(pair.phashDistance || 0)}</p><button data-pixel-pair="${escapeHtml(pair.leftMediaId)}|${escapeHtml(pair.rightMediaId)}" type="button">像素复核</button></article>`).join("") || "<p>暂无候选。</p>"}</div>`;
+    panel.querySelectorAll("[data-pixel-pair]").forEach((button) => button.addEventListener("click", async () => {
+      const [leftMediaId, rightMediaId] = String(button.dataset.pixelPair || "").split("|"); button.disabled = true;
+      try { const value = await postJson("/api/similarity-pairs/pixel-verify", { leftMediaId, rightMediaId }); button.textContent = value.pixelExact ? "像素完全相同" : value.matchType === "highly_similar" ? "高度相似" : "可能相似"; }
+      catch { button.textContent = "复核失败"; } finally { button.disabled = false; }
+    }));
+  } catch { panel.querySelector(".similarity-review-body").textContent = "无法读取相似候选。"; }
 }
 
 async function loadMediaOptimizationStatus(signal = state.pageAbortController?.signal) {
